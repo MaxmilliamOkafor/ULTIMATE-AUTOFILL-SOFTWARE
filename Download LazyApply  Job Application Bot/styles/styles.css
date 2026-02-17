@@ -1,0 +1,206 @@
+#lazyapplyEasyApplyButton {
+  background-color: #333;
+  color: #fff;
+  padding: 8px 15px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin-top: 5px;
+  margin: 5px 5px 5px 10px;
+  border-radius: 2.4rem;
+}
+
+#lazyapplyEasyApplyImage {
+  margin-right: 10px;
+  width: 30px;
+  filter: none !important;
+}
+
+#lazyapplySendEmailButton {
+  background-color: #2851a3;
+  color: white;
+  padding: 10px 20px;
+  font-size: 14px;
+  border: none;
+  border-radius: 15px;
+  cursor: pointer;
+  height: fit-content;
+  outline: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+#lazyapplySendEmailButton:hover {
+  box-shadow: 0 0 15px rgba(0, 123, 255, 1), 0 0 20px rgba(0, 123, 255, 1);
+}
+
+/* #lazyapply-jobQ-Btn{
+    background-color: #2851A3;
+    color: white;
+    padding: 10px 20px;
+    font-size: 14px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+    height: fit-content;
+    outline: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+#lazyapply-jobQ-Btn:hover {
+    box-shadow: 0 0 15px rgba(0, 123, 255, 1), 0 0 20px rgba(0, 123, 255, 1);
+} */
+
+#lazyapply-jobQ-Btn {
+  background-image: linear-gradient(
+    to right,
+    #ff512f 0%,
+    #f09819 51%,
+    #ff512f 100%
+  );
+  margin: 0px 10px 0px 10px;
+  text-align: center;
+  text-transform: uppercase;
+  transition: 0.5s;
+  background-size: 200% auto;
+  color: white;
+  box-shadow: 0 0 20px #eee;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  max-width: 250px;
+  min-height: 40px;
+  font-weight: bold;
+  font-size: 1.1em;
+  cursor: pointer;
+}
+
+#lazyapply-jobQ-Btn span {
+  flex-grow: 1;
+  display: flex; /* Use Flexbox for center alignment */
+  justify-content: center; /* Center horizontally */
+  align-items: center; /* Center vertically */
+  height: 100%;
+}
+
+#lazyapply-jobQ-Btn:hover {
+  background-position: right center; /* change the direction of the change here */
+  color: #fff;
+  text-decoration: none;
+}
+
+.mySettingsIcon {
+  fill: white;
+  min-width: 10px;
+  /* min-height: 20px; */
+  max-width: 20px;
+  /* max-height: 25px; */
+}
+
+.mySettingsIcon-wrapper {
+  width: 10%;
+  height: 100%;
+  border-left: 2px solid rgba(230, 0, 0, 0.3);
+  min-width: 30px;
+  max-width: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+#lazyapply-jobQ-Btn-Added {
+  background-image: linear-gradient(
+    to right,
+    #56ab2f 0%,
+    #a8e063 51%,
+    #56ab2f 100%
+  );
+  margin: 0px 10px 0px 10px;
+  text-align: center;
+  text-transform: uppercase;
+  transition: 0.5s;
+  background-size: 200% auto;
+  color: white;
+  box-shadow: 0 0 20px #eee;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  max-width: 250px;
+  min-height: 40px;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+#lazyapply-jobQ-Btn-Added:hover {
+  background-position: right center;
+  color: #fff;
+  text-decoration: none;
+}
+#lazyapply-referralQ-Btn {
+  background-image: linear-gradient(
+    to right,
+    #ff512f 0%,
+    #f09819 51%,
+    #ff512f 100%
+  );
+  margin: 0px 10px 0px 10px;
+  text-align: center;
+  text-transform: uppercase;
+  transition: 0.5s;
+  background-size: 200% auto;
+  color: white;
+  box-shadow: 0 0 20px #eee;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  max-width: 150px;
+  min-height: 40px;
+  font-weight: bold;
+  font-size: 1em;
+  cursor: pointer;
+}
+#lazyapply-referralQ-Btn-Added:hover {
+  background-position: right center;
+  color: #fff;
+  text-decoration: none;  
+}
+
+#lazyapply-referralQ-Btn-Added {
+  background-image: linear-gradient(
+    to right,
+    #56ab2f 0%,
+    #a8e063 51%,
+    #56ab2f 100%
+  );
+  margin: 0px 10px 0px 10px;
+  text-align: center;
+  text-transform: uppercase;
+  transition: 0.5s;
+  background-size: 200% auto;
+  color: white;
+  box-shadow: 0 0 20px #eee;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  max-width: 130px;
+  min-height: 40px;
+  font-weight: bold;
+  font-size: 0.8em;
+  cursor: pointer;
+}
