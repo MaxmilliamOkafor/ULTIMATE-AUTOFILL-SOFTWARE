@@ -1,0 +1,22 @@
+{
+  "name": "ultimate-autofill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser extension that autofills job application forms across major ATS platforms. Offline-first, never auto-submits.",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "jest --config jest.config.js",
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.260",
+    "@types/jest": "^29.5.12",
+    "esbuild": "^0.20.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.4.0"
+  }
+}
