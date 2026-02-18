@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ultimate Autofill</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{width:360px;min-height:400px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#1a1a2e;background:#f8f9fa}
+    .header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:16px;display:flex;align-items:center;gap:10px}
+    .header h1{font-size:16px;font-weight:600}
+    .header .ver{font-size:11px;opacity:.8}
+    .status-bar{padding:10px 16px;background:#fff;border-bottom:1px solid #e9ecef;display:flex;justify-content:space-between;align-items:center}
+    .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+    .dot.on{background:#28a745}.dot.off{background:#dc3545}
+    .actions{padding:16px;display:flex;flex-direction:column;gap:10px}
+    .btn{display:flex;align-items:center;gap:8px;padding:12px 16px;border:1px solid #dee2e6;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;transition:all .15s}
+    .btn:hover{background:#f1f3f5;border-color:#adb5bd}
+    .btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;font-weight:600}
+    .btn-primary:hover{opacity:.9}
+    .btn-stop{background:#dc3545;color:#fff;border:none;font-weight:600}
+    .btn-stop:hover{opacity:.9}
+    .btn .icon{font-size:18px}
+    .stats{padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .stat{background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:10px;text-align:center}
+    .stat .val{font-size:20px;font-weight:700;color:#667eea}
+    .stat .lbl{font-size:11px;color:#868e96;margin-top:2px}
+    .footer{padding:12px 16px;border-top:1px solid #e9ecef;text-align:center}
+    .footer a{color:#667eea;text-decoration:none;font-size:12px}
+    .footer a:hover{text-decoration:underline}
+    #atsInfo{padding:8px 16px;background:#e8f4fd;border-bottom:1px solid #bee5eb;font-size:12px;color:#0c5460;display:none}
+    .hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <div class="header"><div><h1>Ultimate Autofill</h1><span class="ver">v1.0.0</span></div></div>
+  <div id="atsInfo"></div>
+  <div class="status-bar">
+    <span><span id="dot" class="dot off"></span><span id="statusText">Ready</span></span>
+    <span id="respCount" style="font-size:12px;color:#868e96">0 responses</span>
+  </div>
+  <div class="actions">
+    <button id="btnFill" class="btn btn-primary"><span class="icon">&#9889;</span> Start Autofill</button>
+    <button id="btnStop" class="btn btn-stop hidden"><span class="icon">&#9632;</span> Stop</button>
+    <button id="btnResponses" class="btn"><span class="icon">&#128221;</span> Saved Responses</button>
+    <button id="btnQueue" class="btn"><span class="icon">&#128203;</span> Job Queue</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><div id="fieldsFilled" class="val">0</div><div class="lbl">Fields Filled</div></div>
+    <div class="stat"><div id="queueCount" class="val">0</div><div class="lbl">Jobs Queued</div></div>
+  </div>
+  <div class="footer"><a id="openOptions" href="#">Open Settings</a></div>
+  <script src="../popup.js"></script>
+</body>
+</html>
