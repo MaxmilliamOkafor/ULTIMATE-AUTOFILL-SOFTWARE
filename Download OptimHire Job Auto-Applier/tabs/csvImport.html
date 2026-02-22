@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OptimHire – CSV Job Queue</title>
+  <style>
+    :root {
+      --primary: #6b21a8;
+      --primary-light: #a855f7;
+      --danger:  #dc2626;
+      --success: #16a34a;
+      --bg:      #0f0f0f;
+      --surface: #1a1a2e;
+      --surface2:#16213e;
+      --border:  #2d2d4e;
+      --text:    #e2e8f0;
+      --muted:   #94a3b8;
+      --radius:  8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header { background: var(--surface); padding: 16px 24px; border-bottom: 1px solid var(--border);
+             display: flex; align-items: center; gap: 12px; }
+    header img { width: 32px; height: 32px; }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header span { margin-left: auto; font-size: .8rem; color: var(--muted); }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+    /* Import panel */
+    .import-panel { background: var(--surface); border: 1px solid var(--border);
+                    border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+    .import-panel h2 { font-size: 1rem; margin-bottom: 12px; color: var(--primary-light); }
+    .drop-zone { border: 2px dashed var(--border); border-radius: var(--radius);
+                 padding: 32px; text-align: center; cursor: pointer; transition: all .2s;
+                 color: var(--muted); }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary-light);
+                                             background: rgba(168,85,247,.07); color: var(--text); }
+    .drop-zone input { display: none; }
+    .drop-zone p { margin-top: 8px; font-size: .85rem; }
+
+    .paste-area { margin-top: 14px; }
+    .paste-area label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: 6px; }
+    .paste-area textarea { width: 100%; height: 100px; background: var(--surface2);
+                           border: 1px solid var(--border); border-radius: var(--radius);
+                           color: var(--text); padding: 10px; font-size: .85rem; resize: vertical; }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    button { cursor: pointer; border: none; border-radius: var(--radius);
+             padding: 8px 16px; font-size: .85rem; font-weight: 600; transition: opacity .2s; }
+    button:hover { opacity: .85; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-danger  { background: var(--danger);  color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+    /* Stats bar */
+    .stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    .stat { background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 10px 16px; text-align: center; flex: 1 1 120px; }
+    .stat .value { font-size: 1.5rem; font-weight: 700; color: var(--primary-light); }
+    .stat .label { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+
+    /* Controls */
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+    .controls input[type=text] { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+                                  border-radius: var(--radius); color: var(--text); padding: 8px 12px;
+                                  font-size: .85rem; min-width: 200px; }
+    .controls select { background: var(--surface2); border: 1px solid var(--border);
+                       border-radius: var(--radius); color: var(--text); padding: 8px 12px;
+                       font-size: .85rem; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    thead th { background: var(--surface); padding: 10px 12px; text-align: left;
+               color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+    tbody tr:nth-child(even) { background: rgba(255,255,255,.02); }
+    tbody tr:hover { background: rgba(168,85,247,.06); }
+    td { padding: 9px 12px; border-bottom: 1px solid rgba(45,45,78,.6); vertical-align: middle; }
+    td a { color: var(--primary-light); text-decoration: none; word-break: break-all; }
+    td a:hover { text-decoration: underline; }
+    td input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--primary-light); }
+
+    /* Status badges */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .74rem;
+             font-weight: 600; white-space: nowrap; }
+    .badge-pending   { background: #1e3a5f; color: #60a5fa; }
+    .badge-running   { background: #1a3a1a; color: #4ade80; }
+    .badge-done      { background: #14532d; color: #86efac; }
+    .badge-failed    { background: #450a0a; color: #fca5a5; }
+    .badge-skipped   { background: #2d2000; color: #fcd34d; }
+    .badge-duplicate { background: #1a0a2e; color: #c084fc; }
+
+    /* Pagination */
+    .pagination { display: flex; gap: 8px; justify-content: center; margin-top: 16px;
+                  flex-wrap: wrap; }
+    .pagination button { padding: 6px 12px; }
+    .pagination button.active { background: var(--primary-light); color: #fff; }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 24px; right: 24px; background: var(--primary);
+             color: #fff; padding: 12px 20px; border-radius: var(--radius);
+             font-size: .85rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999; }
+    #toast.show { opacity: 1; }
+
+    /* Import format hint */
+    .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+    code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: .78rem; }
+
+    .empty-state { text-align: center; padding: 48px; color: var(--muted); }
+    .empty-state svg { width: 48px; opacity: .4; margin-bottom: 12px; }
+    .progress-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+    .progress-bar-fill { height: 100%; background: var(--primary-light); transition: width .3s; }
+  </style>
+</head>
+<body>
+<header>
+  <img src="../assets/icon.png" alt="OptimHire" onerror="this.style.display='none'" />
+  <h1>CSV Job Queue Manager</h1>
+  <span id="lastUpdated">—</span>
+</header>
+
+<div class="container">
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat"><div class="value" id="statTotal">0</div><div class="label">Total Jobs</div></div>
+    <div class="stat"><div class="value" id="statPending">0</div><div class="label">Pending</div></div>
+    <div class="stat"><div class="value" id="statDone">0</div><div class="label">Applied</div></div>
+    <div class="stat"><div class="value" id="statFailed">0</div><div class="label">Failed</div></div>
+    <div class="stat"><div class="value" id="statSkipped">0</div><div class="label">Skipped</div></div>
+    <div class="stat"><div class="value" id="statDupe">0</div><div class="label">Duplicates</div></div>
+  </div>
+  <div class="progress-bar"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
+
+  <!-- IMPORT PANEL -->
+  <div class="import-panel" style="margin-top:20px">
+    <h2>Import Job URLs</h2>
+    <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Drop CSV file or click to browse">
+      <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p><strong>Drop a CSV file here</strong> or click to browse</p>
+      <p>Accepts .csv or .txt — one URL per line or comma-separated</p>
+      <input type="file" id="csvFile" accept=".csv,.txt" />
+    </div>
+    <div class="paste-area">
+      <label for="pasteArea">Or paste URLs directly (one per line):</label>
+      <textarea id="pasteArea" placeholder="https://company.com/jobs/123&#10;https://greenhouse.io/jobs/456&#10;https://linkedin.com/jobs/view/789"></textarea>
+    </div>
+    <div class="hint">
+      Accepted formats: plain URLs, CSV with a <code>url</code> or <code>link</code> column,
+      Indeed / LinkedIn / HiringCafe / Workday / SmartRecruiters / Greenhouse / Lever URLs.
+      HiringCafe URLs will automatically click "Apply Directly" and navigate to the company site.
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary" id="btnImport">Import URLs</button>
+      <button class="btn-ghost" id="btnExport">Export Queue as CSV</button>
+      <button class="btn-ghost" id="btnExportApplied">Export Applied Jobs</button>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <input type="text" id="searchInput" placeholder="🔍 Filter by URL or status…" />
+    <select id="filterStatus">
+      <option value="">All statuses</option>
+      <option value="pending">Pending</option>
+      <option value="running">Running</option>
+      <option value="done">Applied</option>
+      <option value="failed">Failed</option>
+      <option value="skipped">Skipped</option>
+      <option value="duplicate">Duplicate</option>
+    </select>
+    <button class="btn-primary" id="btnSelectAll">Select All</button>
+    <button class="btn-ghost" id="btnDeselectAll">Deselect All</button>
+    <button class="btn-danger" id="btnDeleteSelected">Delete Selected</button>
+    <button class="btn-danger" id="btnClearQueue">Clear Entire Queue</button>
+    <button class="btn-success" id="btnStartQueue">▶ Start Queue</button>
+    <button class="btn-ghost" id="btnPauseQueue">⏸ Pause</button>
+    <button class="btn-ghost" id="btnSortNewest">Sort Newest</button>
+  </div>
+
+  <!-- TABLE -->
+  <div class="table-wrap">
+    <table id="jobTable">
+      <thead>
+        <tr>
+          <th style="width:36px"><input type="checkbox" id="masterCheck" title="Select all visible" /></th>
+          <th>#</th>
+          <th>Job URL</th>
+          <th>Platform</th>
+          <th>Added</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="7" class="empty-state">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <p>No jobs imported yet. Import a CSV or paste URLs above.</p>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination" id="pagination"></div>
+</div>
+
+<div id="toast">Notification</div>
+
+<script>
+/* ============================================================
+ * CSV QUEUE MANAGER – Logic
+ * ============================================================ */
+const STORAGE_KEY   = "csvJobQueue";
+const APPLIED_KEY   = "appliedJobs";
+const PAGE_SIZE     = 50;
+
+let queue     = [];   // [{id, url, platform, addedAt, status, note}]
+let filtered  = [];
+let page      = 1;
+let isRunning = false;
+
+/* Helpers */
+const $ = id => document.getElementById(id);
+const toast = msg => {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3000);
+};
+
+function detectPlatform(url) {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    if (h.includes("linkedin"))        return "LinkedIn";
+    if (h.includes("indeed"))          return "Indeed";
+    if (h.includes("hiring.cafe"))     return "HiringCafe";
+    if (h.includes("myworkdayjobs") || h.includes("workday")) return "Workday";
+    if (h.includes("greenhouse"))      return "Greenhouse";
+    if (h.includes("lever"))           return "Lever";
+    if (h.includes("smartrecruiters")) return "SmartRecruiters";
+    if (h.includes("oraclecloud") || h.includes("taleo")) return "Oracle";
+    if (h.includes("icims"))           return "iCIMS";
+    if (h.includes("bamboohr"))        return "BambooHR";
+    if (h.includes("ashbyhq"))         return "Ashby";
+    if (h.includes("breezy"))          return "BreezyHR";
+    if (h.includes("jobvite"))         return "Jobvite";
+    if (h.includes("apply.workable"))  return "Workable";
+    return "Company Site";
+  } catch { return "Unknown"; }
+}
+
+function saveQueue() {
+  chrome.storage.local.set({ [STORAGE_KEY]: queue });
+}
+
+async function loadQueue() {
+  return new Promise(res => {
+    chrome.storage.local.get([STORAGE_KEY, APPLIED_KEY], d => {
+      queue = d[STORAGE_KEY] || [];
+      const applied = d[APPLIED_KEY] || [];
+      // Mark duplicates
+      queue.forEach(j => {
+        if (j.status === "pending" && applied.includes(normalizeUrl(j.url))) {
+          j.status = "duplicate";
+        }
+      });
+      res();
+    });
+  });
+}
+
+function normalizeUrl(url) {
+  try {
+    const u = new URL(url);
+    ["utm_source","utm_medium","utm_campaign","ref","referer","source"].forEach(p => u.searchParams.delete(p));
+    return u.origin + u.pathname;
+  } catch { return url; }
+}
+
+function parseUrls(text) {
+  // Try CSV header detection
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const urls = [];
+  for (const line of lines) {
+    // Split by comma for CSV
+    const parts = line.split(",");
+    for (const part of parts) {
+      const trimmed = part.replace(/["']/g, "").trim();
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        urls.push(trimmed);
+      }
+    }
+  }
+  return [...new Set(urls)];
+}
+
+function addUrlsToQueue(urls) {
+  let added = 0, dupes = 0;
+  const existing = new Set(queue.map(j => normalizeUrl(j.url)));
+  for (const url of urls) {
+    if (!url.startsWith("http")) continue;
+    const norm = normalizeUrl(url);
+    if (existing.has(norm)) { dupes++; continue; }
+    existing.add(norm);
+    queue.push({
+      id: crypto.randomUUID(),
+      url,
+      platform: detectPlatform(url),
+      addedAt: Date.now(),
+      status: "pending",
+      note: ""
+    });
+    added++;
+  }
+  saveQueue();
+  return { added, dupes };
+}
+
+/* ---- Render ---- */
+function updateStats() {
+  const counts = { pending:0, running:0, done:0, failed:0, skipped:0, duplicate:0 };
+  queue.forEach(j => { if (counts[j.status] !== undefined) counts[j.status]++; });
+  $("statTotal").textContent   = queue.length;
+  $("statPending").textContent = counts.pending;
+  $("statDone").textContent    = counts.done;
+  $("statFailed").textContent  = counts.failed;
+  $("statSkipped").textContent = counts.skipped;
+  $("statDupe").textContent    = counts.duplicate;
+  const done = counts.done + counts.failed + counts.skipped + counts.duplicate;
+  const pct = queue.length ? Math.round(done / queue.length * 100) : 0;
+  $("progressFill").style.width = pct + "%";
+  $("lastUpdated").textContent = "Updated " + new Date().toLocaleTimeString();
+}
+
+const BADGE = { pending:"badge-pending", running:"badge-running", done:"badge-done",
+                failed:"badge-failed", skipped:"badge-skipped", duplicate:"badge-duplicate" };
+const LABEL = { pending:"Pending", running:"Running", done:"Applied",
+                failed:"Failed", skipped:"Skipped", duplicate:"Duplicate" };
+
+function renderTable() {
+  const search = $("searchInput").value.toLowerCase();
+  const statusF = $("filterStatus").value;
+  filtered = queue.filter(j => {
+    if (statusF && j.status !== statusF) return false;
+    if (search && !j.url.toLowerCase().includes(search) && !j.status.includes(search)) return false;
+    return true;
+  });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (page > totalPages) page = totalPages;
+  const start = (page - 1) * PAGE_SIZE;
+  const slice = filtered.slice(start, start + PAGE_SIZE);
+  const tbody = $("tableBody");
+  if (!slice.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>No jobs match your filter.</p></td></tr>`;
+  } else {
+    tbody.innerHTML = slice.map((j, i) => `
+      <tr data-id="${j.id}">
+        <td><input type="checkbox" class="row-check" data-id="${j.id}" /></td>
+        <td>${start + i + 1}</td>
+        <td><a href="${j.url}" target="_blank" title="${j.url}">${j.url.length > 70 ? j.url.slice(0,67)+"…" : j.url}</a></td>
+        <td>${j.platform}</td>
+        <td>${j.addedAt ? new Date(j.addedAt).toLocaleDateString() : "—"}</td>
+        <td><span class="badge ${BADGE[j.status] || "badge-pending"}">${LABEL[j.status] || j.status}</span></td>
+        <td style="white-space:nowrap">
+          <button class="btn-ghost" style="padding:4px 8px;font-size:.75rem" onclick="applyOne('${j.id}')">Apply</button>
+          <button class="btn-ghost" style="padding:4px 8px;font-size:.75rem" onclick="retryOne('${j.id}')">Retry</button>
+          <button class="btn-danger" style="padding:4px 8px;font-size:.75rem" onclick="deleteOne('${j.id}')">✕</button>
+        </td>
+      </tr>
+    `).join("");
+  }
+  renderPagination(totalPages);
+  updateStats();
+}
+
+function renderPagination(totalPages) {
+  const el = $("pagination");
+  if (totalPages <= 1) { el.innerHTML = ""; return; }
+  let html = "";
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="${i === page ? "active" : "btn-ghost"}" onclick="goPage(${i})">${i}</button>`;
+  }
+  el.innerHTML = html;
+}
+
+window.goPage = p => { page = p; renderTable(); };
+
+/* ---- Actions ---- */
+window.applyOne = id => {
+  const j = queue.find(q => q.id === id);
+  if (!j) return;
+  j.status = "running";
+  saveQueue();
+  renderTable();
+  chrome.runtime.sendMessage({ type: "OPEN_JOB_URL", url: j.url, jobId: j.id }, () => {
+    toast("Opening job: " + j.url.slice(0, 60));
+  });
+};
+
+window.retryOne = id => {
+  const j = queue.find(q => q.id === id);
+  if (j) { j.status = "pending"; j.note = ""; saveQueue(); renderTable(); toast("Job reset to pending"); }
+};
+
+window.deleteOne = id => {
+  queue = queue.filter(q => q.id !== id);
+  saveQueue();
+  renderTable();
+  toast("Job removed from queue");
+};
+
+function getSelected() {
+  return [...document.querySelectorAll(".row-check:checked")].map(el => el.dataset.id);
+}
+
+$("btnSelectAll").addEventListener("click", () => {
+  document.querySelectorAll(".row-check").forEach(c => c.checked = true);
+  $("masterCheck").checked = true;
+});
+$("btnDeselectAll").addEventListener("click", () => {
+  document.querySelectorAll(".row-check").forEach(c => c.checked = false);
+  $("masterCheck").checked = false;
+});
+$("masterCheck").addEventListener("change", function() {
+  document.querySelectorAll(".row-check").forEach(c => c.checked = this.checked);
+});
+
+$("btnDeleteSelected").addEventListener("click", () => {
+  const ids = getSelected();
+  if (!ids.length) { toast("No jobs selected"); return; }
+  if (!confirm(`Delete ${ids.length} selected job(s)?`)) return;
+  const idSet = new Set(ids);
+  queue = queue.filter(j => !idSet.has(j.id));
+  saveQueue(); renderTable();
+  toast(`${ids.length} job(s) deleted`);
+});
+
+$("btnClearQueue").addEventListener("click", () => {
+  if (!confirm("Clear the entire queue? This cannot be undone.")) return;
+  queue = []; saveQueue(); renderTable();
+  toast("Queue cleared");
+});
+
+$("btnSortNewest").addEventListener("click", () => {
+  queue.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  saveQueue(); renderTable(); toast("Sorted newest first");
+});
+
+$("btnStartQueue").addEventListener("click", () => {
+  if (isRunning) { toast("Queue already running"); return; }
+  isRunning = true;
+  chrome.runtime.sendMessage({ type: "START_CSV_QUEUE" });
+  toast("Queue started – automation will process pending jobs");
+  $("btnStartQueue").textContent = "⏳ Running…";
+  $("btnStartQueue").disabled = true;
+});
+
+$("btnPauseQueue").addEventListener("click", () => {
+  isRunning = false;
+  chrome.runtime.sendMessage({ type: "PAUSE_CSV_QUEUE" });
+  $("btnStartQueue").textContent = "▶ Start Queue";
+  $("btnStartQueue").disabled = false;
+  toast("Queue paused");
+});
+
+/* ---- Import ---- */
+function doImport(text) {
+  const urls = parseUrls(text);
+  if (!urls.length) { toast("No valid URLs found in input"); return; }
+  const { added, dupes } = addUrlsToQueue(urls);
+  renderTable();
+  toast(`✅ Imported ${added} job(s)${dupes ? ` (${dupes} duplicates skipped)` : ""}`);
+}
+
+$("btnImport").addEventListener("click", () => {
+  const text = $("pasteArea").value.trim();
+  if (text) { doImport(text); $("pasteArea").value = ""; return; }
+  $("csvFile").click();
+});
+
+$("csvFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => doImport(ev.target.result);
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
+const dz = $("dropZone");
+dz.addEventListener("click", () => $("csvFile").click());
+dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("dragover"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+dz.addEventListener("drop", e => {
+  e.preventDefault(); dz.classList.remove("dragover");
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => doImport(ev.target.result);
+  reader.readAsText(file);
+});
+
+/* ---- Export ---- */
+$("btnExport").addEventListener("click", () => {
+  const rows = [["url","platform","status","addedAt","note"],
+    ...queue.map(j => [j.url, j.platform, j.status,
+      j.addedAt ? new Date(j.addedAt).toISOString() : "", j.note || ""])];
+  downloadCSV(rows, "optimhire-queue.csv");
+});
+
+$("btnExportApplied").addEventListener("click", () => {
+  chrome.storage.local.get("appliedJobs", d => {
+    const applied = d.appliedJobs || [];
+    const rows = [["url"], ...applied.map(u => [u])];
+    downloadCSV(rows, "optimhire-applied.csv");
+  });
+});
+
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(c => `"${(c||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  toast("CSV downloaded: " + filename);
+}
+
+/* ---- Filter / Search ---- */
+$("searchInput").addEventListener("input", () => { page = 1; renderTable(); });
+$("filterStatus").addEventListener("change", () => { page = 1; renderTable(); });
+
+/* ---- Listen for updates from background ---- */
+chrome.runtime.onMessage.addListener(msg => {
+  if (msg.type === "CSV_JOB_STATUS_UPDATE" && msg.jobId) {
+    const j = queue.find(q => q.id === msg.jobId);
+    if (j) {
+      j.status = msg.status;
+      j.note   = msg.note || "";
+      saveQueue();
+      renderTable();
+    }
+  }
+  if (msg.type === "CSV_QUEUE_STOPPED") {
+    isRunning = false;
+    $("btnStartQueue").textContent = "▶ Start Queue";
+    $("btnStartQueue").disabled = false;
+    toast("Queue finished");
+  }
+});
+
+/* ---- Init ---- */
+loadQueue().then(() => renderTable());
+</script>
+</body>
+</html>

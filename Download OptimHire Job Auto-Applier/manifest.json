@@ -18,7 +18,7 @@
             "128": "icon128.plasmo.3c1ed2d2.png"
         }
     },
-    "version": "2.2.5",
+    "version": "2.2.8",
     "name": "OptimHire Job Auto-Applier",
     "description": "Autofill job applications in 1 click, track every job, and apply faster with your OptimHire Job Auto-Applier.",
     "background": {
@@ -36,7 +36,9 @@
         "cookies",
         "notifications",
         "contextMenus",
-        "scripting"
+        "scripting",
+        "alarms",
+        "unlimitedStorage"
     ],
     "content_scripts": [
         {
@@ -77,6 +79,17 @@
             ],
             "all_frames": false,
             "run_at": "document_end",
+            "css": []
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "assets/optimhire-patch.js"
+            ],
+            "all_frames": false,
+            "run_at": "document_idle",
             "css": []
         }
     ],
