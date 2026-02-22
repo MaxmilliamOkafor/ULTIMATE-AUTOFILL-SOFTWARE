@@ -1,5 +1,7 @@
 {
 "update_url": "https://clients2.google.com/service/update2/crx",
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
 
     "icons": {
         "16": "icon16.plasmo.6c567d50.png",
@@ -21,6 +23,7 @@
     "version": "2.2.8",
     "name": "OptimHire Job Auto-Applier",
     "description": "v2.2.8 – Unlimited credits, CSV job queue, Workday/Oracle/SmartRecruiters ATS, LinkedIn & Indeed direct apply, fresh-job priority, wake lock, captcha bypass, deduplication.",
+    "description": "Autofill job applications in 1 click, track every job, and apply faster with your OptimHire Job Auto-Applier.",
     "background": {
         "service_worker": "static/background/index.js"
     },
@@ -39,6 +42,7 @@
         "scripting",
         "alarms",
         "unlimitedStorage"
+        "scripting"
     ],
     "content_scripts": [
         {
@@ -67,6 +71,7 @@
             ],
             "js": [
                 "openSidePanelToast.b0286adb.js"
+                "clickNotification.7c43bc3d.js"
             ],
             "css": []
         },
@@ -90,6 +95,8 @@
             ],
             "all_frames": false,
             "run_at": "document_idle",
+                "openSidePanelToast.b0286adb.js"
+            ],
             "css": []
         }
     ],
