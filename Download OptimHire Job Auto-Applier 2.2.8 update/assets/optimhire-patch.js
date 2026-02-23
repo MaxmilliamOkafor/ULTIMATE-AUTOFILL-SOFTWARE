@@ -1108,59 +1108,89 @@
    * Like SmartApply's "Autofill in progress" — when the user lands
    * on a supported ATS application page, the extension detects it
    * and automatically starts filling the form.
-   * Only triggers when:
-   *   1. Page is on a recognised ATS domain (CURRENT_ATS is set)
-   *   2. Page contains an application form (heuristic detection)
-   *   3. NOT already in CSV queue mode (CSV bridge handles that)
-   *   4. Auto-trigger is enabled in settings (default: true)
-   *   5. Page hasn't already been auto-filled in this session
    * ─────────────────────────────────────────────────────────────── */
 
-  /** Heuristic: does this page look like a job application form? */
+  /**
+   * Decide if the current page IS (or will soon be) an application form.
+   * Uses URL-first detection — far more reliable than fragile DOM selectors.
+   * Falls back to permissive DOM scan for unknown ATS flavours.
+   */
   function isApplicationPage() {
-    /* Workday application pages */
-    if (CURRENT_ATS === 'Workday') {
-      return !!$('[data-automation-id="legalNameSection_firstName"]') ||
-             !!$('[data-automation-id="jobPostingHeader"]') ||
-             !!$('[data-automation-id="applyButton"]') ||
-             !!$('[data-automation-id="createAccountCheckbox"]') ||
-             $$('[data-automation-id]').length > 5;
-    }
-    /* Greenhouse */
-    if (CURRENT_ATS === 'Greenhouse') {
-      return !!$('#application_form,[data-provided-by="greenhouse"],form#application');
-    }
-    /* OracleCloud / Taleo */
-    if (CURRENT_ATS === 'OracleCloud') {
-      return !!$('#OracleFusionApp,oracle-apply-flow') ||
-             $$('input:not([type=hidden])').filter(isVisible).length > 3;
-    }
-    /* SmartRecruiters */
-    if (CURRENT_ATS === 'SmartRecruiters') {
-      return !!$('.smartrecruiters-form,#smartrecruiters-widget,[data-qa*="smartrecruiter"]') ||
-             $$('input[name="first_name"],input[name="last_name"],input[name="email"]').length > 0;
-    }
-    /* Lever */
-    if (CURRENT_ATS === 'Lever') {
-      return !!$('.posting-apply,.application-form,form.postings-form');
-    }
-    /* Ashby */
-    if (CURRENT_ATS === 'Ashby') {
-      return !!$('form[data-ashby-apply-form],._form_apply');
-    }
-    /* Generic: look for common application form indicators */
-    const formInputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea,select')
-      .filter(isVisible);
-    if (formInputs.length < 3) return false;
+    const url      = location.href.toLowerCase();
+    const path     = location.pathname.toLowerCase();
+    const hostname = location.hostname.toLowerCase();
 
-    /* Check for application-related form inputs */
-    const labels = formInputs.map(el => getLabel(el).toLowerCase()).join(' ');
-    const appTerms = /first.?name|last.?name|email|phone|resume|cover.?letter|linkedin|experience|salary|authorization/;
-    return appTerms.test(labels);
+    /* ── LinkedIn ─────────────────────────────────────────────────
+     * Job DETAIL page = /jobs/view/  or  /jobs/search/ with a panel open.
+     * The Easy Apply modal opens AFTER a click — detect either state.   */
+    if (CURRENT_ATS === 'LinkedIn') {
+      if (path.includes('/jobs/view/') || path.includes('/jobs/collections/')) return true;
+      /* Easy Apply modal already open */
+      if (document.querySelector('.jobs-easy-apply-modal,[data-test-modal],[aria-modal="true"]')) return true;
+      /* Apply button present on the page */
+      if (document.querySelector('.jobs-apply-button,[aria-label*="Apply"],[data-control-name*="apply"]')) return true;
+      return false;
+    }
+
+    /* ── Workday ──────────────────────────────────────────────────
+     * Application pages: URL has /apply  OR  page has automation IDs */
+    if (CURRENT_ATS === 'Workday') {
+      if (url.includes('/apply') || url.includes('apply=')) return true;
+      return document.querySelectorAll('[data-automation-id]').length > 2;
+    }
+
+    /* ── Greenhouse ───────────────────────────────────────────────
+     * boards.greenhouse.io/company/jobs/ID  is ALWAYS an application.
+     * Same for /jobs/ URLs on greenhouse.io subdomains.               */
+    if (CURRENT_ATS === 'Greenhouse') {
+      if (hostname.includes('boards.greenhouse.io')) return true;
+      if (hostname.includes('greenhouse.io') && path.includes('/jobs/')) return true;
+      if (document.querySelector('#application_form,[data-provided-by="greenhouse"],form[action*="greenhouse"]')) return true;
+      /* Fallback: any form with name/email inputs */
+      return document.querySelectorAll(
+        'input[id*="first"],input[id*="last"],input[id*="email"],input[name*="first"],input[name*="email"]'
+      ).length > 0;
+    }
+
+    /* ── Lever ────────────────────────────────────────────────────
+     * jobs.lever.co/company/id   is always a job post (apply on page) */
+    if (CURRENT_ATS === 'Lever') {
+      if (hostname.includes('jobs.lever.co') || hostname.includes('apply.lever.co')) return true;
+      return !!document.querySelector('.posting-apply,form.postings-form,.application-form');
+    }
+
+    /* ── Ashby ────────────────────────────────────────────────────
+     * jobs.ashbyhq.com/company/UUID/application  */
+    if (CURRENT_ATS === 'Ashby') {
+      if (path.includes('/application')) return true;
+      return !!document.querySelector('[data-ashby-form],._ashby_apply_form,[class*="ApplicationForm"]');
+    }
+
+    /* ── SmartRecruiters ──────────────────────────────────────────*/
+    if (CURRENT_ATS === 'SmartRecruiters') {
+      if (url.includes('/apply') || path.includes('/jobs/')) return true;
+      return document.querySelectorAll(
+        'input[name="first_name"],input[name="last_name"],input[name="email"]'
+      ).length > 0;
+    }
+
+    /* ── OracleCloud / Taleo ──────────────────────────────────────*/
+    if (CURRENT_ATS === 'OracleCloud') {
+      return url.includes('/apply') || url.includes('/requisition') ||
+             !!document.querySelector('#OracleFusionApp,oracle-apply-flow') ||
+             document.querySelectorAll('input:not([type=hidden])').length > 2;
+    }
+
+    /* ── All other recognised ATS ─────────────────────────────────
+     * If we're on a known ATS domain, be permissive:
+     * 2+ non-hidden inputs anywhere in the DOM is enough.             */
+    return document.querySelectorAll(
+      'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea'
+    ).length >= 2;
   }
 
-  /** Inject the "Autofill in progress" banner */
-  function showAutofillBanner(status) {
+  /** Inject/update the "Autofill in progress" banner */
+  function showAutofillBanner(status, atsName) {
     let banner = document.getElementById('oh-autofill-banner');
     if (!banner) {
       banner = document.createElement('div');
@@ -1169,17 +1199,18 @@
         position:fixed;top:0;left:0;right:0;z-index:2147483647;
         padding:10px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         font-size:13px;font-weight:600;text-align:center;
-        transition:all .3s ease;pointer-events:none;
-        box-shadow:0 2px 12px rgba(0,0,0,.15);
+        transition:background .3s ease,color .3s ease;pointer-events:none;
+        box-shadow:0 2px 12px rgba(0,0,0,.2);
       `;
       document.body.appendChild(banner);
     }
+    const name = atsName || CURRENT_ATS || 'ATS';
     if (status === 'detecting') {
-      banner.textContent = '🔍 Supported ATS detected — scanning form...';
+      banner.textContent = `🔍 ${name} detected — starting autofill…`;
       banner.style.background = 'linear-gradient(135deg,#1e40af,#7c3aed)';
       banner.style.color = '#fff';
     } else if (status === 'filling') {
-      banner.textContent = '⚡ Autofill in progress...';
+      banner.textContent = `⚡ Autofill in progress — filling ${name} form…`;
       banner.style.background = 'linear-gradient(135deg,#2563eb,#7c3aed)';
       banner.style.color = '#fff';
     } else if (status === 'done') {
@@ -1187,105 +1218,103 @@
       banner.style.background = 'linear-gradient(135deg,#059669,#10b981)';
       banner.style.color = '#fff';
       setTimeout(() => { if (banner.parentNode) banner.remove(); }, 5000);
-    } else if (status === 'unsupported') {
-      banner.textContent = '⬜ Page detected but no application form found';
-      banner.style.background = '#374151';
-      banner.style.color = '#9ca3af';
-      setTimeout(() => { if (banner.parentNode) banner.remove(); }, 3000);
     }
   }
 
   /** Run the full auto-trigger flow */
   let _autoTriggered = false;
+  let _autoTriggerRunning = false;
 
   async function autoTriggerAutofill() {
-    /* Guard: don't run if CSV mode is active */
+    /* Guards */
+    if (_autoTriggerRunning) return;
+    if (_autoTriggered)      return;
+    if (!CURRENT_ATS)        return;
+
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
-    if (csvActiveJobId) return;
+    if (csvActiveJobId) return; /* CSV bridge handles it */
 
-    /* Guard: only run once per page */
-    if (_autoTriggered) return;
-
-    /* Guard: check if auto-trigger is enabled (default true) */
     const { ohAutoTrigger } = await ST.get('ohAutoTrigger');
-    if (ohAutoTrigger === false) return;  /* explicitly disabled */
+    if (ohAutoTrigger === false) return; /* user disabled */
 
-    /* Guard: must be on a recognised ATS */
-    if (!CURRENT_ATS) return;
-
-    /* Guard: check we haven't already auto-filled this exact URL recently */
+    /* URL-dedup: don't fill same page twice */
     const norm = normalizeUrl(location.href);
     const { ohAutoFilledUrls = [] } = await ST.get('ohAutoFilledUrls');
-    if (ohAutoFilledUrls.includes(norm)) {
-      LOG('Auto-trigger: already filled this URL recently — skipping');
-      return;
-    }
+    if (ohAutoFilledUrls.includes(norm)) return;
 
-    showAutofillBanner('detecting');
-    LOG(`Auto-trigger: ${CURRENT_ATS} detected, checking for application form...`);
-
-    /* Wait for page to settle (SPAs render async) */
-    await sleep(2500);
-
+    /* ── Is this actually an application page? ── */
     if (!isApplicationPage()) {
-      showAutofillBanner('unsupported');
-      LOG('Auto-trigger: no application form detected on this page');
+      /* Silent: don't show any banner — just wait for DOM changes */
+      LOG(`Auto-trigger: ${CURRENT_ATS} page, but no application form yet`);
       return;
     }
 
+    /* Prevent re-entry */
+    _autoTriggerRunning = true;
     _autoTriggered = true;
-    showAutofillBanner('filling');
-    LOG('Auto-trigger: application form found — starting autofill');
+
+    /* Open OptimHire side panel + show banner */
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+    showAutofillBanner('detecting', CURRENT_ATS);
     acquireWakeLock();
+    LOG(`Auto-trigger: ${CURRENT_ATS} application form detected — autofilling`);
+
+    /* Short pause so the side panel renders */
+    await sleep(800);
+    showAutofillBanner('filling', CURRENT_ATS);
 
     try {
-      /* Run ATS-specific autofill first */
+      /* ATS-specific autofill */
       if (CURRENT_ATS === 'Workday')              await workdayAutofill();
       else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
       else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
       else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
+      /* LinkedIn/Lever/Ashby/others: generic fill covers them */
 
-      /* Then generic autofill to catch remaining fields */
       await autoFillPage();
-
-      /* Solve captchas */
       await solveCaptcha();
 
-      /* Remember this URL was auto-filled */
+      /* Remember */
       ohAutoFilledUrls.push(norm);
-      /* Keep only last 500 entries to avoid unbounded growth */
       while (ohAutoFilledUrls.length > 500) ohAutoFilledUrls.shift();
       await ST.set({ ohAutoFilledUrls });
 
       showAutofillBanner('done');
-      LOG('Auto-trigger: autofill complete');
+      LOG('Auto-trigger: complete');
     } catch (err) {
-      LOG('Auto-trigger: error during autofill', err);
+      LOG('Auto-trigger: error', err);
       showAutofillBanner('done');
+    } finally {
+      _autoTriggerRunning = false;
     }
   }
 
-  /* Trigger auto-fill after page loads (with delay for SPA content) */
+  /* ── Initial trigger after page load ── */
   if (CURRENT_ATS) {
-    sleep(3000).then(() => autoTriggerAutofill());
+    /* First attempt after 2.5 s (most SPAs have rendered by then) */
+    sleep(2500).then(() => autoTriggerAutofill());
 
-    /* Also watch for SPA navigation (hash/pushState changes) that reveal forms */
+    /* ── SPA navigation watcher (URL changes without full reload) ── */
     let _lastHref = location.href;
-    const navCheck = setInterval(() => {
+    setInterval(() => {
       if (location.href !== _lastHref) {
-        _lastHref = location.href;
-        _autoTriggered = false;  /* reset for new page */
-        sleep(2500).then(() => autoTriggerAutofill());
+        _lastHref     = location.href;
+        _autoTriggered = false;
+        _autoTriggerRunning = false;
+        sleep(2000).then(() => autoTriggerAutofill());
       }
-    }, 1500);
+    }, 1000);
 
-    /* Re-check when major DOM changes happen (multi-step forms) */
-    let _domCheckDebounce = null;
-    new MutationObserver(() => {
-      if (_autoTriggered) return;
-      clearTimeout(_domCheckDebounce);
-      _domCheckDebounce = setTimeout(() => autoTriggerAutofill(), 3000);
-    }).observe(document.body, { childList: true, subtree: false });
+    /* ── DOM mutation watcher: fires when modal/form appears ─────── */
+    let _mutationDebounce = null;
+    new MutationObserver(mutations => {
+      if (_autoTriggered || _autoTriggerRunning) return;
+      /* Only care if significant new nodes were added */
+      const added = mutations.reduce((n, m) => n + m.addedNodes.length, 0);
+      if (added < 2) return;
+      clearTimeout(_mutationDebounce);
+      _mutationDebounce = setTimeout(() => autoTriggerAutofill(), 1500);
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
