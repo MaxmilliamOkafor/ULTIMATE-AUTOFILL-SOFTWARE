@@ -84,6 +84,19 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   let _csvActiveTabId  = null;
   let _csvResolve      = null;  // resolves waitForCsvResult
   let _csvSkipPending  = false;
+  let _reuseTabId      = null;  // for reuseTab mode
+  // Queue automation settings (defaults match UI defaults)
+  let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:false, skipCaptcha:true };
+
+  // Load persisted settings on startup
+  chrome.storage.local.get('csvQueueSettings', d => {
+    if (d.csvQueueSettings) Object.assign(_queueSettings, d.csvQueueSettings);
+  });
+
+  function randDelay(minS, maxS) {
+    const ms = (minS + Math.random() * (maxS - minS)) * 1000;
+    return new Promise(r => setTimeout(r, ms));
+  }
 
   function broadcast(msg) {
     chrome.runtime.sendMessage(msg).catch(() => {});
@@ -122,13 +135,26 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     await updateCsvJobStatus(job.id, "running", "");
     broadcast({ type: "CSV_JOB_STARTED", jobId: job.id, url: job.url });
 
-    // Open the job URL in a new tab
+    // Open the job URL (new tab, or reuse existing tab if reuseTab setting is on)
     let tab;
     try {
-      tab = await chrome.tabs.create({ url: job.url, active: true });
+      if (_queueSettings.reuseTab && _reuseTabId) {
+        // Try to reuse existing tab
+        try {
+          await chrome.tabs.update(_reuseTabId, { url: job.url, active: true });
+          tab = await chrome.tabs.get(_reuseTabId);
+        } catch(_) {
+          // Tab was closed — fall through to open new one
+          _reuseTabId = null;
+        }
+      }
+      if (!tab) {
+        tab = await chrome.tabs.create({ url: job.url, active: true });
+        if (_queueSettings.reuseTab) _reuseTabId = tab.id;
+      }
     } catch(e) {
       await updateCsvJobStatus(job.id, "failed", "Could not open tab: " + e.message);
-      broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: "failed" });
+      broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: "failed", reason: e.message });
       setTimeout(processNextCsvJob, 2000);
       return;
     }
@@ -155,24 +181,28 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     await chrome.storage.local.set({ csvActiveJobId: null, csvActiveTabId: null });
 
     // Process result
+    let finalStatus, finalReason = '';
     if (result === "done") {
       await markApplied(job.url);
       await updateCsvJobStatus(job.id, "done", "");
+      finalStatus = "done";
     } else if (result === "duplicate") {
       await updateCsvJobStatus(job.id, "duplicate", "Already applied");
+      finalStatus = "duplicate";
     } else if (result === "skipped") {
       await updateCsvJobStatus(job.id, "skipped", "Skipped by user");
+      finalStatus = "skipped";
     } else {
-      await updateCsvJobStatus(job.id, "failed", result || "No response");
+      finalReason = result || "No response from page";
+      await updateCsvJobStatus(job.id, "failed", finalReason);
+      finalStatus = "failed";
     }
+    broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: finalStatus, reason: finalReason });
 
-    const finalStatus = (result === "done") ? "done"
-                      : (result === "duplicate") ? "duplicate"
-                      : (result === "skipped") ? "skipped" : "failed";
-    broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: finalStatus });
-
-    // Close the tab
-    try { chrome.tabs.remove(tab.id); } catch(_) {}
+    // Close the tab (unless reuseTab is on)
+    if (!_queueSettings.reuseTab) {
+      try { chrome.tabs.remove(tab.id); } catch(_) {}
+    }
 
     // Pause check
     if (csvQueuePaused) {
@@ -180,8 +210,8 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       return; // Wait for RESUME_CSV_QUEUE
     }
 
-    // Small delay before next job
-    await new Promise(r => setTimeout(r, 3000));
+    // Randomized delay before next job (anti-detection)
+    await randDelay(_queueSettings.delayMin || 2, _queueSettings.delayMax || 7);
     processNextCsvJob();
   }
 
@@ -246,7 +276,19 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
 
     // Async commands
     (async () => {
-      if (msg.type === "START_CSV_QUEUE") {
+      if (msg.type === "UPDATE_QUEUE_SETTINGS") {
+        if (msg.settings && typeof msg.settings === 'object') {
+          Object.assign(_queueSettings, msg.settings);
+          chrome.storage.local.set({ csvQueueSettings: _queueSettings });
+        }
+        sendResponse({ ok: true });
+      }
+      else if (msg.type === "START_CSV_QUEUE") {
+        // Accept settings sent with start command
+        if (msg.settings && typeof msg.settings === 'object') {
+          Object.assign(_queueSettings, msg.settings);
+          chrome.storage.local.set({ csvQueueSettings: _queueSettings });
+        }
         if (!csvQueueRunning) {
           csvQueueRunning = true;
           csvQueuePaused  = false;
@@ -269,6 +311,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         csvQueueRunning = false;
         csvQueuePaused  = false;
         _csvSkipPending = true; // signal current wait to abort
+        if (_reuseTabId) { try { chrome.tabs.remove(_reuseTabId); } catch(_) {} _reuseTabId = null; }
         await chrome.storage.local.set({ csvQueueRunning: false });
         sendResponse({ ok: true });
       }

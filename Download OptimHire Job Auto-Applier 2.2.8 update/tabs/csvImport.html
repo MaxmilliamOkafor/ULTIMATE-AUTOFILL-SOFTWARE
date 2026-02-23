@@ -106,6 +106,66 @@
     .browse-btn{display:inline-block;margin-top:8px;background:var(--surface3);
       border:1px solid var(--border);color:var(--text);border-radius:6px;
       padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer}
+    #appEmail:focus,#appPassword:focus{border-color:var(--primary)}
+
+    /* ── Parse summary banner ── */
+    #parseSummary{background:#1a2a1a;border:1px solid #16a34a;
+      border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;
+      display:none;align-items:center;gap:14px;flex-wrap:wrap}
+    #parseSummary.show{display:flex}
+    #parseSummary .ps-stat{display:flex;align-items:center;gap:5px}
+    #parseSummary .ps-label{color:var(--muted);font-size:12px}
+    #parseSummary .ps-val{font-weight:700}
+    .ps-ok{color:#4ade80} .ps-warn{color:#fbbf24}
+    .ps-err{color:#f87171} .ps-dupe{color:#c084fc}
+
+    /* ── Invalid rows section ── */
+    #invalidSection{display:none;margin-bottom:12px}
+    #invalidSection .inv-header{
+      display:flex;align-items:center;justify-content:space-between;
+      background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);
+      border-radius:8px 8px 0 0;padding:8px 14px;cursor:pointer;
+      font-size:12px;font-weight:600;color:#f87171;user-select:none}
+    #invalidSection .inv-body{
+      border:1px solid rgba(220,38,38,.3);border-top:none;
+      border-radius:0 0 8px 8px;max-height:180px;overflow-y:auto}
+    #invalidSection .inv-row{display:flex;align-items:center;gap:10px;
+      padding:7px 14px;border-bottom:1px solid rgba(46,46,46,.5);font-size:12px}
+    #invalidSection .inv-row:last-child{border-bottom:none}
+    .inv-url{color:var(--muted);flex:1;word-break:break-all;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
+    .inv-reason{color:#f87171;flex-shrink:0;font-size:11px}
+
+    /* ── Settings card ── */
+    #settingsCardBody .settings-row{display:flex;align-items:center;gap:12px;
+      padding:9px 0;border-bottom:1px solid var(--border)}
+    #settingsCardBody .settings-row:last-child{border-bottom:none}
+    #settingsCardBody .s-label{font-size:12px;color:var(--muted);font-weight:600;
+      text-transform:uppercase;letter-spacing:.05em;min-width:140px;flex-shrink:0}
+    #settingsCardBody .s-control{display:flex;align-items:center;gap:8px;flex:1}
+    #settingsCardBody .s-hint{font-size:11px;color:var(--muted)}
+    #settingsCardBody input[type=number]{width:60px;background:var(--surface2);
+      border:1px solid var(--border);border-radius:6px;color:var(--text);
+      padding:5px 8px;font-size:13px;outline:none;text-align:center}
+    #settingsCardBody input[type=number]:focus{border-color:var(--primary)}
+    #settingsCardBody input[type=checkbox]{width:16px;height:16px;
+      accent-color:var(--primary);cursor:pointer;flex-shrink:0}
+    #settingsCardBody label{font-size:13px;color:var(--text);cursor:pointer;
+      display:flex;align-items:center;gap:6px}
+
+    /* ── Error tooltip on status cell ── */
+    .st-has-err{position:relative;cursor:help}
+    .st-has-err::after{
+      content:attr(data-err);position:absolute;bottom:110%;left:50%;
+      transform:translateX(-50%);background:#1f1f1f;color:#f87171;
+      border:1px solid var(--border);border-radius:6px;padding:6px 10px;
+      font-size:11px;white-space:pre-wrap;max-width:260px;z-index:100;
+      pointer-events:none;opacity:0;transition:opacity .15s;
+      text-align:left;line-height:1.5;word-break:break-word}
+    .st-has-err:hover::after{opacity:1}
+    .attempts-badge{display:inline-flex;align-items:center;gap:3px;
+      background:var(--surface3);border-radius:10px;padding:1px 7px;
+      font-size:11px;color:var(--muted);margin-left:4px;vertical-align:middle}
 
     /* ── Controls bar ── */
     .ctrl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -233,6 +293,66 @@
     <div class="stat"><div class="val" id="statDupe" style="color:#c084fc">0</div><div class="lbl">Duplicate</div></div>
   </div>
 
+  <!-- APPLICATIONS ACCOUNT SETTINGS -->
+  <div class="card" id="accountCard">
+    <div class="card-title" id="accountCardToggle" style="cursor:pointer;user-select:none;justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:6px">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        Applications Account
+      </span>
+      <span id="accountToggleArrow" style="font-size:11px;color:var(--muted)">▼ expand</span>
+    </div>
+    <div id="accountCardBody" style="display:none">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+        Used for Workday account creation and other ATS sign-up flows during auto-apply.<br/>
+        Stored locally — never sent to any server.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);font-weight:600;
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+            Account Email
+          </label>
+          <input type="email" id="appEmail" placeholder="yourname@email.com"
+                 style="width:100%;background:var(--surface2);border:1px solid var(--border);
+                        border-radius:8px;color:var(--text);padding:9px 12px;font-size:13px;
+                        outline:none;transition:border-color .2s"/>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);font-weight:600;
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+            Account Password
+          </label>
+          <div style="position:relative">
+            <input type="password" id="appPassword" placeholder="••••••••••••"
+                   style="width:100%;background:var(--surface2);border:1px solid var(--border);
+                          border-radius:8px;color:var(--text);padding:9px 36px 9px 12px;
+                          font-size:13px;outline:none;transition:border-color .2s"/>
+            <button id="btnTogglePw" type="button"
+                    style="position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                           background:none;border:none;color:var(--muted);padding:2px 4px;
+                           font-size:14px;border-radius:4px;cursor:pointer">👁</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn-primary" id="btnSaveAccount" style="padding:8px 18px">
+          💾 Save Account
+        </button>
+        <button class="btn-ghost" id="btnClearAccount" style="padding:8px 14px">
+          Clear
+        </button>
+        <span id="accountSaveStatus" style="font-size:12px;color:#4ade80;display:none">
+          ✓ Saved
+        </span>
+      </div>
+    </div>
+  </div>
+
   <!-- ADD JOBS PANEL -->
   <div class="card">
     <div class="card-title">
@@ -259,7 +379,91 @@
       </svg>
       <p><strong>Drag &amp; drop a CSV file</strong> with job URLs</p>
       <p class="ats-list">Workday · Greenhouse · Lever · SmartRecruiters · iCIMS · LinkedIn · Indeed · HiringCafe · Oracle · BambooHR · Ashby · Jobvite</p>
-      <span class="browse-btn" onclick="document.getElementById('csvFile').click()">Browse Files</span>
+      <span class="browse-btn" id="browseBtn">Browse Files</span>
+    </div>
+  </div>
+
+  <!-- PARSE SUMMARY BANNER -->
+  <div id="parseSummary">
+    <span style="font-size:14px">📋</span>
+    <div class="ps-stat"><span class="ps-label">Rows found:</span><span class="ps-val ps-ok" id="psRows">0</span></div>
+    <div class="ps-stat"><span class="ps-label">Valid URLs added:</span><span class="ps-val ps-ok" id="psValid">0</span></div>
+    <div class="ps-stat"><span class="ps-label">Duplicates removed:</span><span class="ps-val ps-dupe" id="psDupes">0</span></div>
+    <div class="ps-stat"><span class="ps-label">Invalid rows:</span><span class="ps-val ps-err" id="psInvalid">0</span></div>
+    <button class="btn-ghost" id="psDismiss" style="margin-left:auto;padding:3px 10px;font-size:11px">✕</button>
+  </div>
+
+  <!-- INVALID ROWS -->
+  <div id="invalidSection">
+    <div class="inv-header" id="invHeader">
+      <span>⚠ Invalid rows — click to view</span>
+      <span id="invCount"></span>
+    </div>
+    <div class="inv-body" id="invBody" style="display:none"></div>
+  </div>
+
+  <!-- AUTOMATION SETTINGS -->
+  <div class="card" id="settingsCard">
+    <div class="card-title" id="settingsCardToggle" style="cursor:pointer;user-select:none;justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:6px">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Automation Settings
+      </span>
+      <span id="settingsToggleArrow" style="font-size:11px;color:var(--muted)">▼ expand</span>
+    </div>
+    <div id="settingsCardBody" style="display:none">
+      <div class="settings-row">
+        <span class="s-label">Delay between jobs</span>
+        <div class="s-control">
+          <input type="number" id="settingDelayMin" min="1" max="60" value="2"/>
+          <span style="color:var(--muted);font-size:12px">–</span>
+          <input type="number" id="settingDelayMax" min="1" max="120" value="7"/>
+          <span class="s-hint">seconds (randomized)</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="s-label">Concurrency</span>
+        <div class="s-control">
+          <input type="number" id="settingConcurrency" min="1" max="5" value="1"/>
+          <span class="s-hint">tab(s) at a time — keep at 1 to avoid bans</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="s-label">Auto-Submit</span>
+        <div class="s-control">
+          <label>
+            <input type="checkbox" id="settingAutoSubmit"/>
+            Automatically submit after autofill
+          </label>
+          <span class="s-hint" style="color:#fbbf24">⚠ Review forms before enabling</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="s-label">Tab behavior</span>
+        <div class="s-control">
+          <label>
+            <input type="checkbox" id="settingReuseTab"/>
+            Reuse single tab (faster, less memory)
+          </label>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="s-label">Skip on captcha</span>
+        <div class="s-control">
+          <label>
+            <input type="checkbox" id="settingSkipCaptcha" checked/>
+            Skip job if captcha cannot be solved
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn-primary" id="btnSaveSettings" style="padding:7px 16px">💾 Save Settings</button>
+        <span id="settingsSaveStatus" style="font-size:12px;color:#4ade80;display:none;align-self:center">✓ Saved</span>
+      </div>
     </div>
   </div>
 
@@ -352,39 +556,74 @@ function toast(msg, dur=3000){
   setTimeout(()=>el.classList.remove('show'), dur);
 }
 
-/* ── Platform detector ── */
+/* ── Platform registry — easy to extend ── */
+const PLATFORM_REGISTRY = [
+  // [hostname-substring, label, autofill-supported, auto-submit-safe]
+  ['myworkdayjobs',   'Workday',          true,  false],
+  ['workday.com',     'Workday',          true,  false],
+  ['greenhouse.io',   'Greenhouse',       true,  false],
+  ['lever.co',        'Lever',            true,  false],
+  ['smartrecruiters', 'SmartRecruiters',  true,  false],
+  ['workable.com',    'Workable',         true,  false],
+  ['oraclecloud.com', 'OracleCloud',      true,  false],
+  ['taleo.net',       'Taleo',            true,  false],
+  ['icims.com',       'iCIMS',            true,  false],
+  ['bamboohr.com',    'BambooHR',         true,  false],
+  ['ashbyhq.com',     'Ashby',            true,  false],
+  ['breezy.hr',       'BreezyHR',         true,  false],
+  ['jobvite.com',     'Jobvite',          true,  false],
+  ['hiring.cafe',     'HiringCafe',       true,  false],
+  ['teamtailor.com',  'Teamtailor',       true,  false],
+  ['paylocity.com',   'Paylocity',        false, false],
+  ['jazzhr.com',      'JazzHR',           false, false],
+  ['ziprecruiter.com','ZipRecruiter',     false, false],
+  ['manatal.com',     'Manatal',          false, false],
+  ['bullhorn.com',    'Bullhorn',         false, false],
+  ['dice.com',        'Dice',             false, false],
+  ['ultipro.com',     'UKG/UltiPro',      false, false],
+  ['kronos.net',      'UKG Kronos',       false, false],
+  ['indeed.com',      'Indeed',           true,  false],
+  ['linkedin.com',    'LinkedIn',         true,  false],
+];
+
+const TRACKING_PARAMS = [
+  'utm_source','utm_medium','utm_campaign','utm_term','utm_content',
+  'ref','referer','source','fbclid','gclid','gh_src','rl_source',
+  'trk','trkInfo','mc_cid','mc_eid','_hsenc','_hsmi',
+];
+
 function platform(url){
   try{
-    const h=new URL(url).hostname.toLowerCase();
-    if(h.includes('linkedin'))        return 'LinkedIn';
-    if(h.includes('indeed'))          return 'Indeed';
-    if(h.includes('hiring.cafe'))     return 'HiringCafe';
-    if(h.includes('myworkdayjobs')||h.includes('workday')) return 'Workday';
-    if(h.includes('greenhouse'))      return 'Greenhouse';
-    if(h.includes('lever'))           return 'Lever';
-    if(h.includes('smartrecruiters')) return 'SmartRecruiters';
-    if(h.includes('oraclecloud')||h.includes('taleo')) return 'Oracle';
-    if(h.includes('icims'))           return 'iCIMS';
-    if(h.includes('bamboohr'))        return 'BambooHR';
-    if(h.includes('ashbyhq'))         return 'Ashby';
-    if(h.includes('breezy'))          return 'BreezyHR';
-    if(h.includes('jobvite'))         return 'Jobvite';
-    if(h.includes('workable'))        return 'Workable';
-    if(h.includes('teamtailor'))      return 'Teamtailor';
-    if(h.includes('dice'))            return 'Dice';
-    if(h.includes('ziprecruiter'))    return 'ZipRecruiter';
-    if(h.includes('paylocity'))       return 'Paylocity';
-    return 'Company Site';
-  }catch{return 'Unknown'}
+    const h = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    const match = PLATFORM_REGISTRY.find(([sub]) => h.includes(sub));
+    return match ? match[1] : 'Company Site';
+  }catch{ return 'Unknown'; }
+}
+
+function platformInfo(url){
+  try{
+    const h = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    return PLATFORM_REGISTRY.find(([sub]) => h.includes(sub)) || null;
+  }catch{ return null; }
 }
 
 function normalize(url){
   try{
-    const u=new URL(url);
-    ['utm_source','utm_medium','utm_campaign','ref','referer','source','fbclid']
-      .forEach(p=>u.searchParams.delete(p));
-    return u.origin+u.pathname;
-  }catch{return url}
+    const u = new URL(url.trim());
+    TRACKING_PARAMS.forEach(p => u.searchParams.delete(p));
+    // Normalize trailing slash
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    return (u.origin + path).toLowerCase();
+  }catch{ return url.trim().toLowerCase(); }
+}
+
+/* ── URL validator ── */
+function validateUrl(raw){
+  const s = (raw||'').replace(/^["'\s]+|["'\s]+$/g, '');
+  if(!s) return { valid: false, reason: 'Empty row' };
+  if(!/^https?:\/\//i.test(s)) return { valid: false, reason: 'Not http/https: ' + s.slice(0,60) };
+  try{ new URL(s); }catch{ return { valid: false, reason: 'Malformed URL: ' + s.slice(0,60) }; }
+  return { valid: true, url: s };
 }
 
 /* ── Storage helpers ── */
@@ -394,37 +633,69 @@ function loadQueue(){
 function saveQueue(){ chrome.storage.local.set({[KEY_QUEUE]:queue}); }
 function loadApplied(){ return new Promise(res=>chrome.storage.local.get(KEY_APPLIED,d=>res(d[KEY_APPLIED]||[]))); }
 
-/* ── Parse URLs ── */
-function parseUrls(text){
-  const urls=new Set();
-  text.split(/[\r\n,]+/).map(s=>s.replace(/["'\s]/g,''))
-    .filter(s=>s.startsWith('http'))
-    .forEach(u=>urls.add(u));
-  return [...urls];
+/* ── Parse raw text into candidate rows ── */
+function parseRawRows(text){
+  /* Split by newline or comma, handle quoted CSV fields */
+  const rows = [];
+  text.split(/\r?\n/).forEach(line => {
+    // Handle comma-separated on same line (CSV rows)
+    line.split(',').forEach(cell => {
+      const s = cell.replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      if(s) rows.push(s);
+    });
+  });
+  return rows;
 }
 
-/* ── Add URLs to queue ── */
-async function addUrls(urls){
-  const applied=await loadApplied();
-  const appliedSet=new Set(applied.map(normalize));
-  const existing=new Set(queue.map(j=>normalize(j.url)));
-  let added=0, dupes=0;
-  for(const url of urls){
-    if(!url.startsWith('http')) continue;
-    const norm=normalize(url);
-    if(existing.has(norm)){dupes++;continue;}
+/* ── Parse text/CSV: returns { valid:[], invalid:[] } ── */
+function parseUrls(text){
+  const rows = parseRawRows(text);
+  const valid = [], invalid = [];
+  const seen = new Set();
+  for(const row of rows){
+    if(!row) continue;
+    const v = validateUrl(row);
+    if(!v.valid){ invalid.push({ raw: row, reason: v.reason }); continue; }
+    const norm = normalize(v.url);
+    if(seen.has(norm)) continue; // within-batch dedup
+    seen.add(norm);
+    valid.push(v.url);
+  }
+  return { valid, invalid, totalRows: rows.filter(r=>r).length };
+}
+
+/* ── Add URLs to queue (returns parse stats) ── */
+async function addUrls(parsed, source = 'paste'){
+  const { valid, invalid, totalRows } = parsed;
+  const applied = await loadApplied();
+  const appliedSet = new Set(applied.map(normalize));
+  const existing = new Set(queue.map(j => normalize(j.url)));
+  let added = 0, dupes = 0, alreadyApplied = 0;
+  for(const url of valid){
+    const norm = normalize(url);
+    if(existing.has(norm)){ dupes++; continue; }
     existing.add(norm);
+    const wasApplied = appliedSet.has(norm);
+    if(wasApplied) alreadyApplied++;
     queue.push({
-      id:crypto.randomUUID(),url,
-      platform:platform(url),
-      addedAt:Date.now(),
-      status:appliedSet.has(norm)?'duplicate':'pending',
-      note:''
+      id:       crypto.randomUUID(),
+      url,
+      platform: platform(url),
+      source,                     // 'paste' | 'csv'
+      addedAt:  Date.now(),
+      status:   wasApplied ? 'duplicate' : 'pending',
+      attempts: 0,
+      lastError: '',
+      startedAt: null,
+      finishedAt: null,
+      note:     ''
     });
     added++;
   }
   saveQueue(); render();
-  toast(`✅ Added ${added} job(s)${dupes?` · ${dupes} skipped (already in queue)`:''}`);
+
+  // Show parse summary
+  showParseSummary(totalRows, added, dupes + alreadyApplied, invalid);
 }
 
 /* ── Render table ── */
@@ -489,10 +760,13 @@ function render(){
         <td class="url-cell"><a href="${j.url}" target="_blank" title="${j.url}">${short}</a></td>
         <td><span class="badge badge-gray">${j.platform}</span></td>
         <td style="color:var(--muted);font-size:12px">${j.addedAt?new Date(j.addedAt).toLocaleDateString():''}</td>
-        <td><span class="st ${STATUS_CLASS[j.status]||'st-pending'}">${STATUS_LABEL[j.status]||j.status}</span></td>
+        <td${j.lastError?` class="st-has-err" data-err="${escHtml(j.lastError)}"`:''}>
+          <span class="st ${STATUS_CLASS[j.status]||'st-pending'}">${STATUS_LABEL[j.status]||j.status}</span>
+          ${j.attempts>0?`<span class="attempts-badge">↻${j.attempts}</span>`:''}
+        </td>
         <td><div class="row-actions">
-          <button class="btn-ghost" style="padding:4px 8px;font-size:11px" onclick="retryOne('${j.id}')">↻</button>
-          <button class="btn-danger" style="padding:4px 8px;font-size:11px" onclick="deleteOne('${j.id}')">✕</button>
+          <button class="btn-ghost" style="padding:4px 8px;font-size:11px" data-action="retry" data-id="${j.id}">↻</button>
+          <button class="btn-danger" style="padding:4px 8px;font-size:11px" data-action="delete" data-id="${j.id}">✕</button>
         </div></td>
       </tr>`;
     }).join('');
@@ -513,14 +787,18 @@ function renderPages(total){
 }
 window.goPage=p=>{page=p;render();};
 
-/* ── Row actions ── */
-window.retryOne=id=>{
-  const j=queue.find(q=>q.id===id);
-  if(j){j.status='pending';j.note='';saveQueue();render();toast('Reset to pending');}
-};
-window.deleteOne=id=>{
-  queue=queue.filter(q=>q.id!==id); saveQueue(); render(); toast('Job removed');
-};
+/* ── Row actions (event delegation — CSP-safe) ── */
+document.getElementById('tableBody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  if(btn.dataset.action === 'retry'){
+    const j = queue.find(q => q.id === id);
+    if(j){ j.status='pending'; j.note=''; saveQueue(); render(); toast('Reset to pending'); }
+  } else if(btn.dataset.action === 'delete'){
+    queue = queue.filter(q => q.id !== id); saveQueue(); render(); toast('Job removed');
+  }
+});
 
 /* ── Bulk select ── */
 function getSelected(){ return [...document.querySelectorAll('.row-check:checked')].map(el=>el.dataset.id); }
@@ -554,7 +832,11 @@ $('btnSortNewest').addEventListener('click',()=>{
 });
 $('btnResetFailed').addEventListener('click',()=>{
   let count=0;
-  queue.forEach(j=>{if(j.status==='failed'||j.status==='skipped'){j.status='pending';j.note='';count++;}});
+  queue.forEach(j=>{
+    if(j.status==='failed'||j.status==='skipped'){
+      j.status='pending'; j.note=''; j.lastError=''; j.finishedAt=null; count++;
+    }
+  });
   saveQueue(); render(); toast(`Reset ${count} failed/skipped job(s) to pending`);
 });
 
@@ -603,9 +885,9 @@ $('btnStart').addEventListener('click', async ()=>{
   sessionApplied=0;
   setRunningUI(true, false);
   toast(`▶ Starting Auto-Apply for ${pending.length} job(s)…`);
-  // Tell background SW to start processing
+  // Tell background SW to start processing, include current settings
   try{
-    chrome.runtime.sendMessage({type:'START_CSV_QUEUE'}, resp=>{
+    chrome.runtime.sendMessage({type:'START_CSV_QUEUE', settings: _settings}, resp=>{
       if(chrome.runtime.lastError) console.warn('SW inactive:', chrome.runtime.lastError.message);
     });
   }catch(e){ console.warn('sendMessage failed:', e); }
@@ -654,6 +936,8 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   if(msg.type==='CSV_JOB_STARTED'){
     // Background started processing a job
+    const job = queue.find(j=>j.id===msg.jobId);
+    if(job){ job.startedAt = Date.now(); saveQueue(); }
     updateAutoApplyPanel(msg.jobId, 'Filling application form…', 'running');
     render();
   }
@@ -661,10 +945,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   if(msg.type==='CSV_JOB_COMPLETE'){
     const job=queue.find(j=>j.id===msg.jobId);
     if(job){
-      if(msg.status==='done'){ sessionApplied++; }
+      if(msg.status==='done'){ sessionApplied++; job.finishedAt=Date.now(); }
+      if(msg.status==='failed'){ job.attempts=(job.attempts||0)+1; job.lastError=msg.reason||'Unknown error'; job.finishedAt=Date.now(); }
+      if(msg.status==='skipped'){ job.lastError=msg.reason||''; }
       const stText=msg.status==='done'?'Applied ✓':msg.status==='duplicate'?'Duplicate — skipped':'Failed ✗';
       const stClass=msg.status==='done'?'success':msg.status==='duplicate'?'waiting':'failed';
       updateAutoApplyPanel(msg.jobId, stText, stClass);
+      saveQueue();
     }
     render();
   }
@@ -688,13 +975,15 @@ chrome.runtime.onMessage.addListener((msg) => {
 $('btnAdd').addEventListener('click',()=>{
   const t=$('urlInput').value.trim();
   if(!t){toast('Paste at least one URL');return;}
-  addUrls(parseUrls(t)); $('urlInput').value='';
+  addUrls(parseUrls(t), 'paste'); $('urlInput').value='';
 });
 $('urlInput').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter') $('btnAdd').click();});
 
 $('csvFile').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=ev=>addUrls(parseUrls(ev.target.result)); r.readAsText(f);
+  const r=new FileReader();
+  r.onload=ev=>addUrls(parseUrls(ev.target.result), 'csv');
+  r.readAsText(f);
   e.target.value='';
 });
 
@@ -704,7 +993,9 @@ dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
 dz.addEventListener('drop',e=>{
   e.preventDefault(); dz.classList.remove('dragover');
   const f=e.dataTransfer.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=ev=>addUrls(parseUrls(ev.target.result)); r.readAsText(f);
+  const r=new FileReader();
+  r.onload=ev=>addUrls(parseUrls(ev.target.result), 'csv');
+  r.readAsText(f);
 });
 
 /* ── Export ── */
@@ -715,8 +1006,16 @@ function csvDownload(rows, name){
   toast('Downloaded: '+name);
 }
 $('btnExportQueue').addEventListener('click',()=>{
-  csvDownload([['url','platform','status','addedAt','note'],
-    ...queue.map(j=>[j.url,j.platform,j.status,j.addedAt?new Date(j.addedAt).toISOString():'',j.note||''])],
+  csvDownload([
+    ['url','platform','source','status','attempts','lastError','addedAt','startedAt','finishedAt','note'],
+    ...queue.map(j=>[
+      j.url, j.platform, j.source||'paste', j.status,
+      j.attempts||0, j.lastError||'',
+      j.addedAt  ? new Date(j.addedAt).toISOString()  : '',
+      j.startedAt? new Date(j.startedAt).toISOString(): '',
+      j.finishedAt?new Date(j.finishedAt).toISOString():'',
+      j.note||''
+    ])],
     'optimhire-queue.csv');
 });
 $('btnExportApplied').addEventListener('click',()=>{
@@ -726,6 +1025,152 @@ $('btnExportApplied').addEventListener('click',()=>{
 /* ── Filter / search ── */
 $('searchInput').addEventListener('input',()=>{page=1;render();});
 $('filterStatus').addEventListener('change',()=>{page=1;render();});
+
+/* ── Browse button (CSP-safe replacement for inline onclick) ── */
+$('browseBtn').addEventListener('click',()=>$('csvFile').click());
+
+/* ── Parse Summary Banner ── */
+let _invalidRows = [];
+function showParseSummary(totalRows, valid, dupes, invalid){
+  _invalidRows = invalid || [];
+  $('psRows').textContent   = totalRows;
+  $('psValid').textContent  = valid;
+  $('psDupes').textContent  = dupes;
+  $('psInvalid').textContent= _invalidRows.length;
+  $('parseSummary').classList.add('show');
+
+  // Invalid rows section
+  const inv = $('invalidSection');
+  if(_invalidRows.length){
+    $('invCount').textContent = `${_invalidRows.length} row(s)`;
+    inv.style.display = 'block';
+    const body = $('invBody');
+    body.style.display = 'none'; // collapsed by default
+    body.innerHTML = _invalidRows.map(r =>
+      `<div class="inv-row">
+         <span class="inv-url" title="${escHtml(r.raw)}">${escHtml(r.raw.slice(0,70))}</span>
+         <span class="inv-reason">${escHtml(r.reason)}</span>
+       </div>`
+    ).join('');
+  } else {
+    inv.style.display = 'none';
+  }
+  if(valid > 0) toast(`✅ Added ${valid} job(s)${dupes?` · ${dupes} duplicate(s) skipped`:''}${_invalidRows.length?` · ${_invalidRows.length} invalid`:''}`);
+  else toast(`No new jobs added${_invalidRows.length ? ` · ${_invalidRows.length} invalid rows` : ''}`);
+}
+
+function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+$('psDismiss').addEventListener('click', ()=>$('parseSummary').classList.remove('show'));
+$('invHeader').addEventListener('click', ()=>{
+  const body = $('invBody');
+  body.style.display = body.style.display === 'none' ? 'block' : 'none';
+});
+
+/* ── Automation Settings ── */
+const SETTINGS_KEY = 'csvQueueSettings';
+let _settings = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:false, skipCaptcha:true };
+
+function loadSettings(){
+  return new Promise(res => chrome.storage.local.get(SETTINGS_KEY, d => {
+    if(d[SETTINGS_KEY]) Object.assign(_settings, d[SETTINGS_KEY]);
+    $('settingDelayMin').value    = _settings.delayMin;
+    $('settingDelayMax').value    = _settings.delayMax;
+    $('settingConcurrency').value = _settings.concurrency;
+    $('settingAutoSubmit').checked= _settings.autoSubmit;
+    $('settingReuseTab').checked  = _settings.reuseTab;
+    $('settingSkipCaptcha').checked = _settings.skipCaptcha;
+    res();
+  }));
+}
+
+function saveSettings(){
+  _settings = {
+    delayMin:    Math.max(1, +$('settingDelayMin').value  || 2),
+    delayMax:    Math.max(1, +$('settingDelayMax').value  || 7),
+    concurrency: Math.max(1, +$('settingConcurrency').value || 1),
+    autoSubmit:  $('settingAutoSubmit').checked,
+    reuseTab:    $('settingReuseTab').checked,
+    skipCaptcha: $('settingSkipCaptcha').checked,
+  };
+  chrome.storage.local.set({ [SETTINGS_KEY]: _settings });
+}
+
+// Settings panel toggle
+$('settingsCardToggle').addEventListener('click', ()=>{
+  const body = $('settingsCardBody');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  $('settingsToggleArrow').textContent = open ? '▼ expand' : '▲ collapse';
+});
+
+$('btnSaveSettings').addEventListener('click', ()=>{
+  saveSettings();
+  const st = $('settingsSaveStatus');
+  st.style.display = 'inline';
+  setTimeout(() => { st.style.display = 'none'; }, 2000);
+  toast('✓ Automation settings saved');
+  // Send updated settings to background SW
+  chrome.runtime.sendMessage({ type: 'UPDATE_QUEUE_SETTINGS', settings: _settings }).catch(()=>{});
+});
+
+/* ── Applications Account Settings ── */
+(function(){
+  const toggle   = $('accountCardToggle');
+  const body     = $('accountCardBody');
+  const arrow    = $('accountToggleArrow');
+  const emailEl  = $('appEmail');
+  const pwEl     = $('appPassword');
+  const togglePw = $('btnTogglePw');
+  const saveBtn  = $('btnSaveAccount');
+  const clearBtn = $('btnClearAccount');
+  const status   = $('accountSaveStatus');
+
+  // Toggle expand/collapse
+  toggle.addEventListener('click', ()=>{
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    arrow.textContent  = open ? '▼ expand' : '▲ collapse';
+  });
+
+  // Show/hide password
+  togglePw.addEventListener('click', ()=>{
+    pwEl.type = pwEl.type === 'password' ? 'text' : 'password';
+    togglePw.textContent = pwEl.type === 'password' ? '👁' : '🙈';
+  });
+
+  // Load saved values
+  chrome.storage.local.get(['appAccountEmail','appAccountPassword'], data => {
+    if(data.appAccountEmail)    emailEl.value = data.appAccountEmail;
+    if(data.appAccountPassword) pwEl.value    = data.appAccountPassword;
+    // If already filled, auto-expand
+    if(data.appAccountEmail || data.appAccountPassword){
+      body.style.display = 'block';
+      arrow.textContent  = '▲ collapse';
+    }
+  });
+
+  // Save
+  saveBtn.addEventListener('click', ()=>{
+    const email = emailEl.value.trim();
+    const pw    = pwEl.value;
+    if(!email){ toast('Enter an account email'); return; }
+    chrome.storage.local.set({ appAccountEmail: email, appAccountPassword: pw }, ()=>{
+      status.style.display = 'inline';
+      setTimeout(()=>{ status.style.display='none'; }, 2500);
+      toast('✓ Applications account saved');
+    });
+  });
+
+  // Clear
+  clearBtn.addEventListener('click', ()=>{
+    emailEl.value = '';
+    pwEl.value    = '';
+    chrome.storage.local.remove(['appAccountEmail','appAccountPassword'], ()=>{
+      toast('Applications account cleared');
+    });
+  });
+})();
 
 /* ── Real-time storage listener ── */
 chrome.storage.onChanged.addListener((changes,area)=>{
@@ -737,7 +1182,7 @@ chrome.storage.onChanged.addListener((changes,area)=>{
 
 /* ── Init: restore state if background is still running ── */
 async function init(){
-  await loadQueue();
+  await Promise.all([loadQueue(), loadSettings()]);
   // Check if background says queue is running
   chrome.storage.local.get(['csvQueueRunning','csvActiveJobId'], data=>{
     if(data.csvQueueRunning){
