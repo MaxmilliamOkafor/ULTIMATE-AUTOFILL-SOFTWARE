@@ -104,8 +104,12 @@
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
-  const CURRENT_ATS = Object.entries(ATS_DOMAINS)
+  const _rawATS = Object.entries(ATS_DOMAINS)
     .find(([domain]) => HOST.includes(domain))?.[1] || null;
+  // LinkedIn: only activate on /jobs path — not on feeds, profiles, or messaging
+  const CURRENT_ATS = _rawATS === 'LinkedIn'
+    ? (location.pathname.startsWith('/jobs') ? 'LinkedIn' : null)
+    : _rawATS;
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
 
@@ -836,6 +840,8 @@
   /* ── T6: LinkedIn Easy Apply + direct apply ──────────────── */
   function handleLinkedIn() {
     if (!HOST.includes('linkedin.com')) return;
+    // Only activate on the jobs domain — not on feeds, profiles, or messaging
+    if (!location.pathname.startsWith('/jobs')) return;
 
     let _linkedInActing = false;
     const act = async () => {
