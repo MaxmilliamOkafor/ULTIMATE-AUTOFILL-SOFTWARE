@@ -349,6 +349,14 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       else if (msg.type === "REFRESH_CREDITS") {
         await enforceCredits(); sendResponse({ ok: true });
       }
+      /* Open the OptimHire side panel in the sending tab */
+      else if (msg.type === "OPEN_SIDE_PANEL") {
+        const tabId = senderTabId || msg.tabId;
+        if (tabId && chrome.sidePanel?.open) {
+          try { await chrome.sidePanel.open({ tabId }); } catch (_) {}
+        }
+        sendResponse({ ok: true });
+      }
     })().catch(e => { try { sendResponse({ error: e.message }); } catch(_) {} });
 
     return true; // keep channel open for async

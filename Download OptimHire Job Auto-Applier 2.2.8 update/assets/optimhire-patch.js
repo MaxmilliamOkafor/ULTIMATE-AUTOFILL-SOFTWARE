@@ -1221,6 +1221,9 @@
       return;
     }
 
+    /* Open the OptimHire side panel so autofill status is visible */
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+
     showAutofillBanner('detecting');
     LOG(`Auto-trigger: ${CURRENT_ATS} detected, checking for application form...`);
 
