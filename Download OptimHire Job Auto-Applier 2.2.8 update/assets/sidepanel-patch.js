@@ -32,6 +32,20 @@
     if (area === 'local' && changes.csvJobQueue) updateStats();
   });
 
+  /* ── Auto-trigger toggle ── */
+  var toggle = document.getElementById('oh-auto-trigger-toggle');
+  if (toggle) {
+    /* Load saved state (default: enabled) */
+    chrome.storage.local.get('ohAutoTrigger', function (data) {
+      var enabled = data.ohAutoTrigger !== false;
+      toggle.classList.toggle('active', enabled);
+    });
+    toggle.addEventListener('click', function () {
+      var isActive = toggle.classList.toggle('active');
+      chrome.storage.local.set({ ohAutoTrigger: isActive });
+    });
+  }
+
   /* ── MutationObserver fallback to kill referral cards React renders ── */
   if (document.body) {
     new MutationObserver(function () {

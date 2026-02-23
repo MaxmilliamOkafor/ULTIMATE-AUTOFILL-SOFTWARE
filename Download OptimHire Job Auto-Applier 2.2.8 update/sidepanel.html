@@ -35,6 +35,21 @@
     #oh-auto-apply-bar .oh-bar-info{
       font-size:11px;color:#9ca3af;white-space:nowrap;
     }
+    /* Auto-trigger toggle */
+    .oh-toggle-wrap{display:flex;align-items:center;gap:5px;white-space:nowrap}
+    .oh-toggle-wrap label{font-size:10.5px;color:#9ca3af;cursor:pointer;user-select:none}
+    .oh-toggle{
+      position:relative;width:32px;height:18px;background:#374151;
+      border-radius:9px;cursor:pointer;border:none;padding:0;
+      transition:background .2s;
+    }
+    .oh-toggle.active{background:#2563eb}
+    .oh-toggle::after{
+      content:'';position:absolute;top:2px;left:2px;
+      width:14px;height:14px;border-radius:50%;background:#fff;
+      transition:transform .2s;
+    }
+    .oh-toggle.active::after{transform:translateX(14px)}
   </style>
 </head>
 <body>
@@ -49,6 +64,10 @@
       Auto-Apply Mode
     </button>
     <span class="oh-bar-info" id="oh-bar-stats"></span>
+    <div class="oh-toggle-wrap">
+      <button class="oh-toggle active" id="oh-auto-trigger-toggle" title="Auto-fill forms on supported ATS pages"></button>
+      <label for="oh-auto-trigger-toggle">Auto</label>
+    </div>
   </div>
 
   <!-- CSP-safe: all JS in external file -->
