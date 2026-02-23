@@ -49,12 +49,6 @@
       urls: [/bamboohr\.com/i],
       dom: [".BambooHR-ATS-board", '[class*="BambooHR"]'],
       meta: []
-    },
-    {
-      type: "linkedin",
-      urls: [/linkedin\.com\/jobs/i],
-      dom: [".jobs-apply-button", ".jobs-unified-top-card", ".jobs-search-results", ".job-details-jobs-unified-top-card"],
-      meta: []
     }
   ];
   function detectATS(doc) {
@@ -718,19 +712,8 @@
   // src/content/main.ts
   var isRunning = false;
   var observer = null;
-  function isLinkedInNonJobsPage() {
-    var host = location.hostname;
-    if (host === "www.linkedin.com" || host === "linkedin.com") {
-      return !location.pathname.startsWith("/jobs");
-    }
-    return false;
-  }
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "START_AUTOFILL") {
-      if (isLinkedInNonJobsPage()) {
-        sendResponse({ ok: false, error: "Autofill is only available on LinkedIn Jobs pages (linkedin.com/jobs)" });
-        return true;
-      }
       startAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
       return true;
     }
@@ -739,10 +722,6 @@
       sendResponse({ ok: true });
     }
     if (msg.type === "DETECT_ATS") {
-      if (isLinkedInNonJobsPage()) {
-        sendResponse({ type: "generic", confidence: 0, signals: [] });
-        return;
-      }
       const result = detectATS(document);
       sendResponse(result);
     }
@@ -838,8 +817,6 @@
     document.getElementById("ua-control-bar")?.remove();
   }
   document.addEventListener("focusin", async (e) => {
-    if (isLinkedInNonJobsPage())
-      return;
     const el = e.target;
     if (!isTextareaLike(el))
       return;

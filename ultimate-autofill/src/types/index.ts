@@ -57,7 +57,7 @@ export interface FieldMatchResult {
 
 export type ATSType =
   | 'workday' | 'greenhouse' | 'lever' | 'smartrecruiters'
-  | 'icims' | 'taleo' | 'ashby' | 'bamboohr' | 'linkedin' | 'generic';
+  | 'icims' | 'taleo' | 'ashby' | 'bamboohr' | 'generic';
 
 export interface ATSDetectionResult {
   type: ATSType;
