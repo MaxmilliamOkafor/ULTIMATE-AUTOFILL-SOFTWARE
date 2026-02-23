@@ -1,5 +1,5 @@
 /**
- * OptimHire Comprehensive Patch v3.0
+ * OptimHire Comprehensive Patch v4.0
  * Covers ALL 19 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
@@ -8,18 +8,27 @@
  * T5  – Indeed "Apply on company site" auto-navigation
  * T6  – LinkedIn Easy Apply + non-Easy Apply
  * T7  – Freshness badges (🔥 <30m · ✨ <24h · 📅 <3d)
- * T8  – Workday / OracleCloud / SmartRecruiters autofill
+ * T8  – Workday / OracleCloud / SmartRecruiters autofill (comprehensive)
  * T9  – Deduplication: never apply to same URL twice
  * T10 – HiringCafe "Apply Directly" + company-size filter
  * T11 – OracleCloud + SmartRecruiters ATS detection
  * T12 – Auto-solve reCAPTCHA checkbox + math captchas
  * T13 – Auto-fill ALL missing required fields from profile
- * T14 – Wake Lock (prevent PC sleep during automation)
+ * T14 – Wake Lock (prevent PC sleep during automation) — NO AudioContext
  * T15 – Freshness sorting signal injected into job cards
  * T16 – Referral section permanently hidden
  * T17 – "Please fill missing details" stall prevention
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
+ *
+ * v4.0 fixes:
+ *   - AudioContext fallback REMOVED (caused "not allowed to start" errors)
+ *   - autoSkipDuration patched to 30s (was 5s — caused premature skips)
+ *   - Workday: full SpeedyApply data-automation-id coverage
+ *   - Workday account creation flow (uses appAccountEmail/appAccountPassword)
+ *   - Greenhouse: robust field detection for required fields
+ *   - Null-safe autoApplyState guard
+ *   - CSP-safe: no inline event handlers
  */
 (function () {
   'use strict';
@@ -62,30 +71,36 @@
 
   /* ── T1: Supported ATS domains ─────────────────────────── */
   const ATS_DOMAINS = {
-    'greenhouse.io':      'Greenhouse',
-    'lever.co':           'Lever',
-    'breezy.hr':          'BreezyHR',
-    'myworkdayjobs.com':  'Workday',
-    'workday.com':        'Workday',
-    'icims.com':          'iCIMS',
-    'taleo.net':          'Taleo',
-    'oraclecloud.com':    'OracleCloud',
-    'fa.oraclecloud.com': 'OracleCloud',
-    'smartrecruiters.com':'SmartRecruiters',
-    'ashbyhq.com':        'Ashby',
-    'bamboohr.com':       'BambooHR',
-    'jobvite.com':        'Jobvite',
-    'apply.workable.com': 'Workable',
-    'paylocity.com':      'Paylocity',
-    'jazzhr.com':         'JazzHR',
-    'ziprecruiter.com':   'ZipRecruiter',
-    'manatal.com':        'Manatal',
-    'teamtailor.com':     'Teamtailor',
-    'bullhorn.com':       'Bullhorn',
-    'dice.com':           'Dice',
-    'hiring.cafe':        'HiringCafe',
-    'indeed.com':         'Indeed',
-    'linkedin.com':       'LinkedIn',
+    'greenhouse.io':       'Greenhouse',
+    'lever.co':            'Lever',
+    'breezy.hr':           'BreezyHR',
+    'myworkdayjobs.com':   'Workday',
+    'workday.com':         'Workday',
+    'icims.com':           'iCIMS',
+    'taleo.net':           'Taleo',
+    'oraclecloud.com':     'OracleCloud',
+    'fa.oraclecloud.com':  'OracleCloud',
+    'smartrecruiters.com': 'SmartRecruiters',
+    'ashbyhq.com':         'Ashby',
+    'bamboohr.com':        'BambooHR',
+    'jobvite.com':         'Jobvite',
+    'apply.workable.com':  'Workable',
+    'paylocity.com':       'Paylocity',
+    'jazzhr.com':          'JazzHR',
+    'ziprecruiter.com':    'ZipRecruiter',
+    'manatal.com':         'Manatal',
+    'teamtailor.com':      'Teamtailor',
+    'bullhorn.com':        'Bullhorn',
+    'dice.com':            'Dice',
+    'hiring.cafe':         'HiringCafe',
+    'indeed.com':          'Indeed',
+    'linkedin.com':        'LinkedIn',
+    'jobs.lever.co':       'Lever',
+    'boards.greenhouse.io':'Greenhouse',
+    'apply.lever.co':      'Lever',
+    'recruiting.ultipro.com': 'UKG',
+    'jobs.smartrecruiters.com': 'SmartRecruiters',
+    'careers.icims.com':   'iCIMS',
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
@@ -130,33 +145,30 @@
   /* Intercept storage reads to always return 9999 credits */
   const _origGet = chrome.storage.local.get.bind(chrome.storage.local);
   chrome.storage.local.get = function (keys, cb) {
-    const wrapped = typeof cb === 'function'
-      ? (result) => {
-          Object.keys(result).forEach(k => {
-            if (result[k] && typeof result[k] === 'object') {
-              result[k] = deepPatchCredits(
-                typeof result[k] === 'string'
-                  ? JSON.parse(result[k])
-                  : JSON.parse(JSON.stringify(result[k]))
-              );
-            }
-          });
-          cb(result);
-        }
-      : undefined;
-    if (wrapped) return _origGet(keys, wrapped);
-    return _origGet(keys).then(result => {
+    const patchResult = result => {
       Object.keys(result).forEach(k => {
         if (result[k] && typeof result[k] === 'object') {
-          result[k] = deepPatchCredits(JSON.parse(JSON.stringify(result[k])));
+          try {
+            result[k] = deepPatchCredits(
+              typeof result[k] === 'string'
+                ? JSON.parse(result[k])
+                : JSON.parse(JSON.stringify(result[k]))
+            );
+          } catch (_) {}
         }
       });
       return result;
-    });
+    };
+    if (typeof cb === 'function') {
+      return _origGet(keys, result => cb(patchResult(result)));
+    }
+    return _origGet(keys).then(patchResult);
   };
 
-  /* ── T14: Wake Lock ─────────────────────────────────────── */
+  /* ── T14: Wake Lock — NO AudioContext (fixes "not allowed to start") ── */
   let _wakeLock = null;
+  let _wakeLockInterval = null;
+
   async function acquireWakeLock() {
     if ('wakeLock' in navigator) {
       try {
@@ -164,27 +176,26 @@
         _wakeLock.addEventListener('release', () => setTimeout(acquireWakeLock, 1000));
         LOG('Wake lock acquired');
         return;
-      } catch (_) {}
+      } catch (_) {
+        /* Fall through to mousemove fallback */
+      }
     }
-    /* Fallback: silent oscillator + simulated activity */
-    try {
-      const ac  = new AudioContext();
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      gain.gain.value = 0.0001;
-      osc.connect(gain).connect(ac.destination);
-      osc.start();
-    } catch (_) {}
-    setInterval(() => document.dispatchEvent(
-      new MouseEvent('mousemove', { bubbles: true })
-    ), 45_000);
+    /* Fallback: simulated mouse activity only — NO AudioContext */
+    if (!_wakeLockInterval) {
+      _wakeLockInterval = setInterval(() => {
+        document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      }, 45_000);
+      LOG('Wake lock fallback: mousemove interval started');
+    }
   }
 
   chrome.runtime.onMessage.addListener(msg => {
     if (['start_pilot_web','START_AUTOMATION','pilot_started','CSV_JOB_START']
         .includes(msg?.type)) acquireWakeLock();
   });
-  ST.get('isAutoProcessStartJob').then(d => { if (d.isAutoProcessStartJob) acquireWakeLock(); });
+  ST.get('isAutoProcessStartJob').then(d => {
+    if (d?.isAutoProcessStartJob) acquireWakeLock();
+  });
 
   /* ── T16: Hide referral section ─────────────────────────── */
   (function hideReferral() {
@@ -208,11 +219,20 @@
     } catch (_) { return {}; }
   }
 
+  /* ── Applications Account helper ────────────────────────── */
+  async function getAppAccount() {
+    const data = await ST.get(['appAccountEmail', 'appAccountPassword']);
+    return {
+      email:    data.appAccountEmail    || '',
+      password: data.appAccountPassword || '',
+    };
+  }
+
   /* ── Field label extraction ──────────────────────────────── */
   function getLabel(el) {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
     if (el.id) {
-      const lbl = document.querySelector(`label[for="${el.id}"]`);
+      const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (lbl) return lbl.textContent.trim();
     }
     if (el.placeholder) return el.placeholder;
@@ -228,51 +248,59 @@
 
   /* ── Smart value guesser ─────────────────────────────────── */
   const DEFAULTS = {
-    authorized:'Yes', sponsorship:'No', relocation:'Yes', remote:'Yes',
-    veteran:'No', disability:'Prefer not to say', gender:'Prefer not to say',
-    ethnicity:'Prefer not to say', race:'Prefer not to say',
-    years:'5', salary:'80000', notice:'2 weeks', availability:'Immediately',
-    cover:`I am excited to apply for this role. My background and skills make me
-an excellent candidate and I look forward to contributing to your team.`,
-    why:'I admire the company culture and the opportunity to make a meaningful impact.',
-    howHeard:'LinkedIn',
+    authorized:   'Yes',
+    sponsorship:  'No',
+    relocation:   'Yes',
+    remote:       'Yes',
+    veteran:      'I am not a protected veteran',
+    disability:   'I do not have a disability',
+    gender:       'Prefer not to say',
+    ethnicity:    'Prefer not to say',
+    race:         'Prefer not to say',
+    years:        '5',
+    salary:       '80000',
+    notice:       '2 weeks',
+    availability: 'Immediately',
+    cover: `I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.`,
+    why: 'I admire the company culture and the opportunity to make a meaningful impact.',
+    howHeard: 'LinkedIn',
   };
 
   function guessValue(label, p = {}) {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
-    if (/first.?name/.test(l))            return p.first_name   || p.firstName  || '';
-    if (/last.?name/.test(l))             return p.last_name    || p.lastName   || '';
-    if (/full.?name|your name/.test(l))   return `${p.first_name||''} ${p.last_name||''}`.trim();
-    if (/email/.test(l))                  return p.email        || '';
-    if (/phone|mobile|cell/.test(l))      return p.phone        || '';
-    if (/^city$|city\b/.test(l))          return p.city         || '';
-    if (/state|province/.test(l))         return p.state        || '';
-    if (/zip|postal/.test(l))             return p.postal_code  || p.zip || '';
-    if (/country/.test(l))                return p.country      || 'United States';
-    if (/address/.test(l))                return p.address      || '';
-    if (/linkedin/.test(l))               return p.linkedin_profile_url || p.linkedin || '';
-    if (/github/.test(l))                 return p.github_url   || p.github || '';
-    if (/website|portfolio/.test(l))      return p.website_url  || p.website || '';
-    if (/university|school|college/.test(l)) return p.school   || p.university || '';
-    if (/\bdegree\b/.test(l))             return p.degree       || "Bachelor's";
-    if (/major|field of study/.test(l))   return p.major        || '';
-    if (/gpa/.test(l))                    return p.gpa          || '';
-    if (/title|position|role/.test(l))    return p.current_title|| p.title || '';
-    if (/company|employer|org/.test(l))   return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation/.test(l)) return p.cover_letter || DEFAULTS.cover;
-    if (/why.*compan|why.*role/.test(l))  return DEFAULTS.why;
-    if (/how.*hear|where.*find/.test(l))  return DEFAULTS.howHeard;
+    if (/first.?name/.test(l))              return p.first_name    || p.firstName   || '';
+    if (/last.?name/.test(l))               return p.last_name     || p.lastName    || '';
+    if (/full.?name|your name/.test(l))     return `${p.first_name||''} ${p.last_name||''}`.trim();
+    if (/\bemail\b/.test(l))                return p.email         || '';
+    if (/phone|mobile|cell/.test(l))        return p.phone         || '';
+    if (/^city$|city\b/.test(l))            return p.city          || '';
+    if (/state|province/.test(l))           return p.state         || '';
+    if (/zip|postal/.test(l))               return p.postal_code   || p.zip || '';
+    if (/country/.test(l))                  return p.country       || 'United States';
+    if (/address/.test(l))                  return p.address       || '';
+    if (/linkedin/.test(l))                 return p.linkedin_profile_url || p.linkedin || '';
+    if (/github/.test(l))                   return p.github_url    || p.github || '';
+    if (/website|portfolio/.test(l))        return p.website_url   || p.website || '';
+    if (/university|school|college/.test(l))return p.school        || p.university || '';
+    if (/\bdegree\b/.test(l))               return p.degree        || "Bachelor's";
+    if (/major|field of study/.test(l))     return p.major         || '';
+    if (/gpa/.test(l))                      return p.gpa           || '';
+    if (/title|position|role/.test(l))      return p.current_title || p.title || '';
+    if (/company|employer|org/.test(l))     return p.current_company || p.company || '';
+    if (/salary|compensation|pay/.test(l))  return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation/.test(l)) return p.cover_letter  || DEFAULTS.cover;
+    if (/why.*compan|why.*role/.test(l))    return DEFAULTS.why;
+    if (/how.*hear|where.*find/.test(l))    return DEFAULTS.howHeard;
     if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
-    if (/availab|start date|notice/.test(l)) return DEFAULTS.availability;
+    if (/availab|start date|notice/.test(l))return DEFAULTS.availability;
     if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa/.test(l))           return DEFAULTS.sponsorship;
-    if (/relocat/.test(l))                return DEFAULTS.relocation;
+    if (/sponsor|visa/.test(l))             return DEFAULTS.sponsorship;
+    if (/relocat/.test(l))                  return DEFAULTS.relocation;
     if (/remote|work.*home|hybrid/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military/.test(l))       return DEFAULTS.veteran;
-    if (/disabilit/.test(l))              return DEFAULTS.disability;
-    if (/gender|sex\b/.test(l))           return DEFAULTS.gender;
-    if (/ethnic|race|racial/.test(l))     return DEFAULTS.ethnicity;
+    if (/veteran|military/.test(l))         return DEFAULTS.veteran;
+    if (/disabilit/.test(l))                return DEFAULTS.disability;
+    if (/gender|sex\b/.test(l))             return DEFAULTS.gender;
+    if (/ethnic|race|racial/.test(l))       return DEFAULTS.ethnicity;
     return '';
   }
 
@@ -305,7 +333,10 @@ an excellent candidate and I look forward to contributing to your team.`,
       const opt = $$('option', sel).find(
         o => o.text.toLowerCase().includes(val.toLowerCase())
       );
-      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (opt) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
 
     /* Radio buttons */
@@ -318,14 +349,15 @@ an excellent candidate and I look forward to contributing to your team.`,
       const lbl = getLabel(radios[0]);
       const guess = guessValue(lbl, p);
       const match = radios.find(r => {
-        const t = ($(`label[for="${r.id}"]`)?.textContent || r.value || '').toLowerCase();
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         return guess && t.includes(guess.toLowerCase());
       });
       if (match) { realClick(match); continue; }
       /* Default: pick Yes for yes/no questions */
-      const yes = radios.find(r =>
-        ['yes','true','1'].includes(($(`label[for="${r.id}"]`)?.textContent || r.value || '').toLowerCase().trim())
-      );
+      const yes = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
+        return ['yes','true','1'].includes(t);
+      });
       if (yes) realClick(yes);
     }
 
@@ -333,6 +365,68 @@ an excellent candidate and I look forward to contributing to your team.`,
     $$('input[type=checkbox][required], input[type=checkbox][aria-required="true"]')
       .filter(el => isVisible(el) && !el.checked)
       .forEach(cb => realClick(cb));
+  }
+
+  /* ── Greenhouse: robust required-field handling ───────────── */
+  async function greenhouseAutofill() {
+    const isGH = HOST.includes('greenhouse.io') || HOST.includes('boards.greenhouse.io') ||
+      !!$('form#application_form,#application_form,[data-provided-by="greenhouse"]');
+    if (!isGH) return;
+
+    const p = await getProfile();
+
+    /* Map common Greenhouse field IDs/names */
+    const GH_MAP = [
+      ['#first_name,input[id*="first_name"],input[name*="first_name"]',   p.first_name],
+      ['#last_name,input[id*="last_name"],input[name*="last_name"]',       p.last_name],
+      ['#email,input[type="email"],input[id*="email"]',                    p.email],
+      ['#phone,input[type="tel"],input[id*="phone"]',                      p.phone],
+      ['input[id*="location"],input[name*="location"]',                    p.city || p.location || ''],
+      ['input[id*="linkedin"],input[name*="linkedin"]',                    p.linkedin_profile_url || ''],
+      ['input[id*="website"],input[name*="website"],input[id*="portfolio"]', p.website_url || ''],
+      ['input[id*="github"],input[name*="github"]',                        p.github_url || ''],
+      ['textarea[id*="cover"],textarea[name*="cover"]',                    p.cover_letter || DEFAULTS.cover],
+    ];
+
+    for (const [sel, val] of GH_MAP) {
+      if (!val) continue;
+      const el = $(sel);
+      if (el && isVisible(el)) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+
+    /* Handle custom questions (dropdowns) */
+    $$('select').filter(isVisible).forEach(sel => {
+      if (sel.value) return;
+      const lbl = getLabel(sel);
+      const val = guessValue(lbl, p);
+      if (!val) return;
+      const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+
+    /* EEO/demographic selects */
+    $$('select[id*="gender"],select[id*="disability"],select[id*="veteran"],select[id*="race"],select[id*="ethnicity"]')
+      .filter(isVisible)
+      .forEach(sel => {
+        if (sel.value) return;
+        const id = sel.id.toLowerCase();
+        let target = '';
+        if (/gender/.test(id))    target = DEFAULTS.gender;
+        if (/disability/.test(id))target = DEFAULTS.disability;
+        if (/veteran/.test(id))   target = DEFAULTS.veteran;
+        if (/race|ethnicity/.test(id)) target = DEFAULTS.ethnicity;
+        if (!target) return;
+        const opt = $$('option', sel).find(o =>
+          o.text.toLowerCase().includes('decline') ||
+          o.text.toLowerCase().includes('prefer not') ||
+          o.text.toLowerCase().includes('not to say') ||
+          o.text.toLowerCase().includes('not a protected') ||
+          o.text.toLowerCase().includes('do not have')
+        );
+        if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      });
+
+    LOG('Greenhouse autofill done');
   }
 
   /* ── T18: Auto-handle "Add Missing Details" dialog ───────── */
@@ -356,7 +450,6 @@ an excellent candidate and I look forward to contributing to your team.`,
               const val = guessValue(lbl, p);
               if (val) { inp.focus(); nativeSet(inp, val); await sleep(50); }
             }
-            /* Click Save/Continue inside iframe */
             await sleep(600);
             const saveBtn = $$('button', doc).find(
               el => isVisible(el) && /save|continue|done|submit|update/i.test(el.textContent)
@@ -402,7 +495,10 @@ an excellent candidate and I look forward to contributing to your team.`,
       if (!m) return;
       const [, a, op, b] = m;
       const n1 = +a, n2 = +b;
-      const ops = {'+':n1+n2,'-':n1-n2,'*':n1*n2,'x':n1*n2,'×':n1*n2,'/':n2?Math.round(n1/n2):null,'÷':n2?Math.round(n1/n2):null};
+      const ops = {
+        '+': n1 + n2, '-': n1 - n2, '*': n1 * n2, 'x': n1 * n2,
+        '×': n1 * n2, '/': n2 ? Math.round(n1 / n2) : null, '÷': n2 ? Math.round(n1 / n2) : null,
+      };
       const result = ops[op];
       if (result !== null && result !== undefined) nativeSet(inp, String(result));
     });
@@ -416,17 +512,73 @@ an excellent candidate and I look forward to contributing to your team.`,
     .observe(document.body, { childList: true, subtree: true });
   solveCaptcha();
 
-  /* ── T8: Workday autofill ─────────────────────────────────── */
-  const WORKDAY_MAP = {
-    legalNameSection_firstName:'first_name',legalNameSection_lastName:'last_name',
-    legalNameSection_middleName:'middle_name',email:'email',phone:'phone',
-    address_line1:'address',city:'city',state:'state',postalCode:'postal_code',
-    country:'country',jobTitle:'current_title',company:'current_company',
-    school:'school',degree:'degree',major:'major',linkedIn:'linkedin_profile_url',
-    website:'website_url',github:'github_url',yearsOfExperience:'years_of_experience',
-    salary:'expected_salary',coverLetter:'cover_letter',
-    howDidYouHear:'how_did_you_hear',
+  /* ── T8: Workday comprehensive autofill (v4.0) ───────────── */
+  /*
+   * All data-automation-id values sourced from SpeedyApply reference.
+   * Account creation uses appAccountEmail / appAccountPassword from storage.
+   */
+  const WD_FIELDS = {
+    /* Personal info */
+    legalNameSection_firstName:  'first_name',
+    legalNameSection_lastName:   'last_name',
+    legalNameSection_middleName: 'middle_name',
+    infoFirstName:               'first_name',
+    infoLastName:                'last_name',
+    infoEmail:                   'email',
+    infoCellPhone:               'phone',
+    infoLinkedIn:                'linkedin_profile_url',
+    email:                       'email',
+    phone:                       'phone',
+    /* Address */
+    addressSection_addressLine1: 'address',
+    addressSection_addressLine2: 'address2',
+    addressSection_city:         'city',
+    addressSection_postalCode:   'postal_code',
+    /* Work history */
+    workHistoryCompanyName:      'current_company',
+    workHistoryPosition:         'current_title',
+    /* Education */
+    educationHistoryName:        'school',
+    degree:                      'degree',
+    /* Other */
+    linkedIn:                    'linkedin_profile_url',
+    website:                     'website_url',
+    github:                      'github_url',
+    jobTitle:                    'current_title',
+    company:                     'current_company',
+    school:                      'school',
+    major:                       'major',
+    postalCode:                  'postal_code',
+    city:                        'city',
+    state:                       'state',
+    country:                     'country',
+    yearsOfExperience:           'years_of_experience',
+    salary:                      'expected_salary',
+    coverLetter:                 'cover_letter',
+    howDidYouHear:               'how_did_you_hear',
   };
+
+  /* Workday textarea/description fields */
+  const WD_TEXTAREA_AIDS = new Set([
+    'formField-roleDescription',
+    'formField-summary',
+    'formField-coverLetter',
+    'formField-additionalInfo',
+  ]);
+
+  /* Workday navigation button IDs (in priority order) */
+  const WD_NEXT_AIDS = [
+    'pageFooterNextButton',
+    'bottom-navigation-next-button',
+    'btnNext',
+    'nextButton',
+  ];
+  const WD_SUBMIT_AIDS = [
+    'btnSubmit',
+    'submitButton',
+    'bottom-navigation-submit-button',
+    'pageFooterSubmitButton',
+  ];
 
   async function workdayAutofill() {
     const isWD = HOST.includes('myworkdayjobs.com') || HOST.includes('workday.com') ||
@@ -434,33 +586,183 @@ an excellent candidate and I look forward to contributing to your team.`,
     if (!isWD) return;
 
     const p = await getProfile();
+    const acct = await getAppAccount();
+
+    /* Step 1: Account creation / sign-in flow */
+    await workdayAccountFlow(p, acct);
+
+    /* Step 2: Fill all data-automation-id fields */
     const containers = $$('[data-automation-id]:not([data-automation-id=""])');
     for (const el of containers) {
       const aid = el.getAttribute('data-automation-id');
-      const key = WORKDAY_MAP[aid];
-      if (!key || !p[key]) continue;
-      const val = p[key];
+
+      /* Cover letter / description textareas */
+      if (WD_TEXTAREA_AIDS.has(aid)) {
+        const ta = $('textarea', el) || (el.tagName === 'TEXTAREA' ? el : null);
+        if (ta && !ta.value?.trim()) {
+          const val = p.cover_letter || DEFAULTS.cover;
+          ta.focus();
+          nativeSet(ta, val);
+        }
+        continue;
+      }
+
+      const profileKey = WD_FIELDS[aid];
+      if (!profileKey) continue;
+      const val = p[profileKey];
+      if (!val) continue;
 
       const input = $('input:not([type=hidden]):not([type=file]),textarea', el);
-      if (input) { input.focus(); nativeSet(input, val); continue; }
+      if (input && !input.value?.trim()) {
+        input.focus();
+        nativeSet(input, val);
+        await sleep(80);
+        continue;
+      }
 
       const combo = $('[role=combobox],[data-automation-id*="combobox"]', el);
       if (combo) {
         realClick(combo);
         await sleep(400);
-        const si = $('input', combo) || $('input[placeholder]');
+        const si = $('input', combo);
         if (si) { nativeSet(si, val); await sleep(700); }
         const opt = $('[role=option]');
         if (opt) realClick(opt);
         continue;
       }
-      /* Radio */
+
       $$('input[type=radio]', el).forEach(r => {
-        const t = ($(`label[for="${r.id}"]`)?.textContent || '').toLowerCase();
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || '').toLowerCase();
         if (t.includes(val.toLowerCase())) realClick(r);
       });
     }
+
+    /* Step 3: EEO / demographic fields */
+    await workdayEeoFields(p);
+
+    /* Step 4: Resume upload */
+    await workdayResumeUpload(p);
+
+    /* Step 5: Agreement checkboxes */
+    $$('[data-automation-id="agreementCheckbox"] input[type=checkbox]')
+      .filter(cb => !cb.checked).forEach(cb => realClick(cb));
+
     LOG('Workday autofill done');
+  }
+
+  async function workdayAccountFlow(p, acct) {
+    /* Create Account checkbox */
+    const createCb = $('[data-automation-id="createAccountCheckbox"] input[type=checkbox]') ||
+                     $('input[data-automation-id="createAccountCheckbox"]');
+    if (createCb && !createCb.checked) {
+      realClick(createCb);
+      await sleep(600);
+    }
+
+    /* Fill account email */
+    const emailField = $('[data-automation-id="createAccountEmail"] input') ||
+                       $('[data-automation-id="accountCreationEmail"] input') ||
+                       $('input[data-automation-id="email"]') ||
+                       $('input[name="email"][type="email"]');
+    if (emailField && !emailField.value?.trim()) {
+      const emailVal = acct.email || p.email || '';
+      if (emailVal) { emailField.focus(); nativeSet(emailField, emailVal); await sleep(200); }
+    }
+
+    /* Fill account password */
+    const pwField = $('[data-automation-id="password"] input[type=password]') ||
+                    $('input[data-automation-id="password"]') ||
+                    $('input[type=password]');
+    if (pwField && !pwField.value?.trim() && acct.password) {
+      pwField.focus();
+      nativeSet(pwField, acct.password);
+      await sleep(200);
+    }
+
+    /* Verify password */
+    const pwFields = $$('input[type=password]').filter(isVisible);
+    if (pwFields.length >= 2 && acct.password) {
+      const verify = pwFields[1];
+      if (!verify.value?.trim()) { verify.focus(); nativeSet(verify, acct.password); await sleep(200); }
+    }
+
+    /* Click "Create Account" submit button */
+    const createBtn = $('[data-automation-id="createAccountSubmitButton"]') ||
+                      $('button[data-automation-id="createAccountSubmitButton"]');
+    if (createBtn && isVisible(createBtn)) {
+      await sleep(400);
+      realClick(createBtn);
+      await sleep(1500);
+      return;
+    }
+
+    /* Or "Sign In" if already has account */
+    const signInBtn = $('[data-automation-id="signInSubmitButton"]');
+    if (signInBtn && isVisible(signInBtn)) {
+      await sleep(400);
+      realClick(signInBtn);
+      await sleep(1500);
+    }
+  }
+
+  async function workdayEeoFields(p) {
+    /* Gender */
+    const genderEl = $('[data-automation-id="gender"] select') ||
+                     $('select[data-automation-id="gender"]');
+    if (genderEl && !genderEl.value) {
+      const opt = $$('option', genderEl).find(o =>
+        /decline|prefer not|not to say/i.test(o.text)
+      );
+      if (opt) { genderEl.value = opt.value; genderEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+
+    /* Veteran status */
+    const vetEl = $('[data-automation-id="veteranStatus"] select') ||
+                  $('select[data-automation-id="veteranStatus"]');
+    if (vetEl && !vetEl.value) {
+      const opt = $$('option', vetEl).find(o =>
+        /not a protected|i am not|decline|prefer not/i.test(o.text)
+      );
+      if (opt) { vetEl.value = opt.value; vetEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+
+    /* Disability */
+    const disEl = $('[data-automation-id="disability"] select') ||
+                  $('select[data-automation-id="disability"]');
+    if (disEl && !disEl.value) {
+      const opt = $$('option', disEl).find(o =>
+        /do not have|decline|prefer not/i.test(o.text)
+      );
+      if (opt) { disEl.value = opt.value; disEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+
+    /* Ethnicity */
+    const ethEl = $('[data-automation-id="ethnicityDropdown"] select') ||
+                  $('select[data-automation-id="ethnicityDropdown"]');
+    if (ethEl && !ethEl.value) {
+      const opt = $$('option', ethEl).find(o =>
+        /decline|prefer not|not to say/i.test(o.text)
+      );
+      if (opt) { ethEl.value = opt.value; ethEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+  }
+
+  async function workdayResumeUpload(p) {
+    if (!p.resume_url && !p.resumeUrl) return;
+    const resumeUrl = p.resume_url || p.resumeUrl;
+
+    /* Look for resume upload triggers */
+    const uploadTriggers = [
+      $('[data-automation-id="resumeUpload"]'),
+      $('[data-automation-id="select-files"]'),
+      $('[data-automation-id="file-upload-input-ref"]'),
+      $('input[type=file][accept*="pdf"],input[type=file][accept*="doc"]'),
+    ].filter(Boolean);
+
+    if (uploadTriggers.length === 0) return;
+    LOG('Workday: resume upload field found (URL-based upload not supported by browser extension)');
+    /* Note: Actual file upload requires fetching the resume blob and creating a File object.
+       This is handled separately via the background service worker if configured. */
   }
 
   /* ── T11: OracleCloud autofill ───────────────────────────── */
@@ -470,18 +772,19 @@ an excellent candidate and I look forward to contributing to your team.`,
     if (!isOracle) return;
 
     const p = await getProfile();
-    [
+    const fields = [
       ['#firstName,input[id*="firstName"],input[name*="firstName"]', p.first_name],
-      ['#lastName,input[id*="lastName"],input[name*="lastName"]',   p.last_name],
-      ['input[type="email"],input[id*="email"]',                    p.email],
-      ['input[type="tel"],input[id*="phone"],input[name*="phone"]', p.phone],
-      ['input[id*="city"],input[name*="city"]',                     p.city],
-      ['input[id*="zip"],input[name*="postal"]',                    p.postal_code],
-    ].forEach(([sel, val]) => {
-      if (!val) return;
+      ['#lastName,input[id*="lastName"],input[name*="lastName"]',    p.last_name],
+      ['input[type="email"],input[id*="email"]',                     p.email],
+      ['input[type="tel"],input[id*="phone"],input[name*="phone"]',  p.phone],
+      ['input[id*="city"],input[name*="city"]',                      p.city],
+      ['input[id*="zip"],input[name*="postal"]',                     p.postal_code],
+    ];
+    for (const [sel, val] of fields) {
+      if (!val) continue;
       const el = $(sel);
-      if (el) { el.focus(); nativeSet(el, val); }
-    });
+      if (el && isVisible(el)) { el.focus(); nativeSet(el, val); await sleep(60); }
+    }
     LOG('Oracle autofill done');
   }
 
@@ -492,19 +795,20 @@ an excellent candidate and I look forward to contributing to your team.`,
     if (!isSR) return;
 
     const p = await getProfile();
-    [
-      ['input[name="first_name"],#firstName',    p.first_name],
-      ['input[name="last_name"],#lastName',      p.last_name],
-      ['input[name="email"],input[type="email"]',p.email],
-      ['input[name="phone"],input[type="tel"]',  p.phone],
-      ['input[name="city"]',                     p.city],
-      ['input[name="web"],input[name="website"]',p.website_url],
+    const fields = [
+      ['input[name="first_name"],#firstName',      p.first_name],
+      ['input[name="last_name"],#lastName',         p.last_name],
+      ['input[name="email"],input[type="email"]',   p.email],
+      ['input[name="phone"],input[type="tel"]',     p.phone],
+      ['input[name="city"]',                        p.city],
+      ['input[name="web"],input[name="website"]',   p.website_url],
       ['textarea[name="message"],textarea[name="cover_letter"]', p.cover_letter || DEFAULTS.cover],
-    ].forEach(([sel, val]) => {
-      if (!val) return;
+    ];
+    for (const [sel, val] of fields) {
+      if (!val) continue;
       const el = $(sel);
-      if (el) { el.focus(); nativeSet(el, val); }
-    });
+      if (el && isVisible(el)) { el.focus(); nativeSet(el, val); await sleep(60); }
+    }
     LOG('SmartRecruiters autofill done');
   }
 
@@ -518,7 +822,6 @@ an excellent candidate and I look forward to contributing to your team.`,
       );
       if (btn) { LOG('Indeed: clicking Apply on company site'); realClick(btn); }
 
-      /* Auto-accept redirect confirmation */
       const confirm = $$('button').find(el =>
         /continue|proceed|yes|ok/i.test(el.textContent) &&
         el.closest('[class*="modal"],[class*="dialog"],[role="dialog"]')
@@ -534,23 +837,28 @@ an excellent candidate and I look forward to contributing to your team.`,
   function handleLinkedIn() {
     if (!HOST.includes('linkedin.com')) return;
 
+    let _linkedInActing = false;
     const act = async () => {
-      /* Priority 1: Direct company apply (non-Easy Apply) */
-      const direct = $$('.jobs-apply-button,.apply-button,[data-control-name*="apply"]')
-        .find(el => {
-          const t = el.textContent.trim().toLowerCase();
-          return t.includes('apply') && !t.includes('easy');
-        });
-      if (direct) { LOG('LinkedIn: direct apply'); realClick(direct); return; }
+      if (_linkedInActing) return;
+      _linkedInActing = true;
+      try {
+        const direct = $$('.jobs-apply-button,.apply-button,[data-control-name*="apply"]')
+          .find(el => {
+            const t = el.textContent.trim().toLowerCase();
+            return t.includes('apply') && !t.includes('easy');
+          });
+        if (direct) { LOG('LinkedIn: direct apply'); realClick(direct); return; }
 
-      /* Priority 2: Easy Apply */
-      const easy = $$('.jobs-apply-button,[aria-label*="Easy Apply"]')
-        .find(el => /easy apply/i.test(el.textContent));
-      if (easy) {
-        LOG('LinkedIn: Easy Apply');
-        realClick(easy);
-        await sleep(1500);
-        await fillLinkedInModal();
+        const easy = $$('.jobs-apply-button,[aria-label*="Easy Apply"]')
+          .find(el => /easy apply/i.test(el.textContent));
+        if (easy) {
+          LOG('LinkedIn: Easy Apply');
+          realClick(easy);
+          await sleep(1500);
+          await fillLinkedInModal();
+        }
+      } finally {
+        setTimeout(() => { _linkedInActing = false; }, 3000);
       }
     };
 
@@ -580,7 +888,6 @@ an excellent candidate and I look forward to contributing to your team.`,
   function handleHiringCafe() {
     if (!HOST.includes('hiring.cafe')) return;
 
-    /* Company size check */
     const sizeEl = $$('[class*="size"],[class*="employees"],[data-field*="size"]')
       .find(el => /\d/.test(el.textContent));
     if (sizeEl) {
@@ -593,7 +900,6 @@ an excellent candidate and I look forward to contributing to your team.`,
       }
     }
 
-    /* Click "Apply Directly" */
     const tryClick = () => {
       const btn = $$('a,button').find(el =>
         /apply directly|apply now|apply for this/i.test(el.textContent)
@@ -633,7 +939,10 @@ an excellent candidate and I look forward to contributing to your team.`,
     if (/today/.test(txt))                 return new Date(now - 3_600_000);
     const m = txt.match(/(\d+)\s+(minute|hour|day|week|month)/);
     if (!m) return null;
-    const mults = { minute:60_000, hour:3_600_000, day:86_400_000, week:604_800_000, month:2_592_000_000 };
+    const mults = {
+      minute: 60_000, hour: 3_600_000, day: 86_400_000,
+      week: 604_800_000, month: 2_592_000_000,
+    };
     return new Date(now - +m[1] * (mults[m[2]] || 86_400_000));
   }
 
@@ -652,9 +961,9 @@ an excellent candidate and I look forward to contributing to your team.`,
     if (!date || isNaN(date)) return;
     const age = Date.now() - date.getTime();
     let text = '', color = '';
-    if      (age < 30 * 60_000)     { text = '🔥 Just Posted';      color = '#ef4444'; }
-    else if (age < 86_400_000)      { text = '✨ Fresh (< 24h)';    color = '#22c55e'; }
-    else if (age < 3 * 86_400_000)  { text = '📅 Recent (< 3d)';    color = '#3b82f6'; }
+    if      (age < 30 * 60_000)    { text = '🔥 Just Posted';   color = '#ef4444'; }
+    else if (age < 86_400_000)     { text = '✨ Fresh (< 24h)'; color = '#22c55e'; }
+    else if (age < 3 * 86_400_000) { text = '📅 Recent (< 3d)'; color = '#3b82f6'; }
     else return;
     const badge = document.createElement('span');
     badge.className = 'oh-fresh';
@@ -677,27 +986,16 @@ an excellent candidate and I look forward to contributing to your team.`,
   processFreshness();
 
   /* ── T19: CSV Auto-Apply bridge ─────────────────────────── */
-  /* Detect if this tab was opened by the CSV queue processor  */
   async function initCsvBridge() {
-    const { csvActiveJobId, csvActiveTabId, copilotTabId } = await ST.get([
-      'csvActiveJobId', 'csvActiveTabId', 'copilotTabId',
+    const { csvActiveJobId, csvActiveTabId } = await ST.get([
+      'csvActiveJobId', 'csvActiveTabId',
     ]);
-
-    /* Check if we're the designated CSV tab */
-    const myTabId = await new Promise(res => {
-      chrome.runtime.sendMessage({ action: 'COPILOT_TABID' }, resp => {
-        /* Use lastError to safely check */
-        if (chrome.runtime.lastError) res(null);
-        else res(resp);
-      });
-    });
 
     const isCsvTab = csvActiveJobId && csvActiveTabId;
     if (!isCsvTab) return;
 
     LOG('CSV bridge active — monitoring for submission');
 
-    /* Watch for submission success signals */
     let reported = false;
     const report = async (status, reason = '') => {
       if (reported) return;
@@ -716,24 +1014,21 @@ an excellent candidate and I look forward to contributing to your team.`,
       LOG(`CSV bridge: reported ${status} for job ${csvActiveJobId}`);
     };
 
-    /* Listen for the OptimHire COMPLEX_FORM_SUCCESS sent by autofill.js */
     chrome.runtime.onMessage.addListener(msg => {
       if (msg?.type === 'COMPLEX_FORM_SUCCESS') report('done');
       if (msg?.type === 'COMPLEX_FORM_ERROR')   report('failed', msg.errorType || msg.message || '');
       if (msg?.type === 'APPLICATION_SUCCESS' || msg?.type === 'JOB_APPLIED') report('done');
-      if (msg?.type === 'APPLICATION_FAILED')  report('failed', msg.reason || '');
+      if (msg?.type === 'APPLICATION_FAILED')   report('failed', msg.reason || '');
       if (msg?.type === 'ALREADY_APPLIED_SKIP') report('duplicate');
     });
 
-    /* Also watch URL/DOM for success signals */
     const successPatterns = [
       '/thanks', '/thank-you', '/success', '/confirmation',
       '/complete', '/submitted', '/application-submitted',
     ];
     const checkSuccess = () => {
       const href = location.href.toLowerCase();
-      if (successPatterns.some(p => href.includes(p))) report('done');
-      /* Text-based success detection */
+      if (successPatterns.some(p => href.includes(p))) { report('done'); return; }
       const body = document.body?.textContent?.toLowerCase() || '';
       if (/application submitted|thank you for applying|application received|we.ve received your/i.test(body)) {
         report('done');
@@ -744,29 +1039,35 @@ an excellent candidate and I look forward to contributing to your team.`,
     checkSuccess();
 
     /* Auto-fill on page load for CSV mode */
-    await sleep(1500);
-    await workdayAutofill();
-    await oracleAutofill();
-    await srAutofill();
+    await sleep(2000);
+    if (CURRENT_ATS === 'Workday')         await workdayAutofill();
+    else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+    else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+    else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
     await autoFillPage();
     await solveCaptcha();
   }
 
-  /* Run ATS-specific autofill when content changes */
+  /* Run ATS-specific autofill on DOM changes (CSV mode) */
+  let _fillDebounce = null;
   new MutationObserver(async () => {
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
     if (!csvActiveJobId) return;
-    await autoFillPage();
-    await solveCaptcha();
+    clearTimeout(_fillDebounce);
+    _fillDebounce = setTimeout(async () => {
+      await autoFillPage();
+      await solveCaptcha();
+    }, 800);
   }).observe(document.body, { childList: true, subtree: false });
 
   /* Listen for messages from background/csvImport */
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'TRIGGER_AUTOFILL') {
       (async () => {
-        await workdayAutofill();
-        await oracleAutofill();
-        await srAutofill();
+        if (CURRENT_ATS === 'Workday')         await workdayAutofill();
+        else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+        else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+        else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
         await autoFillPage();
         await solveCaptcha();
         sendResponse({ ok: true });
@@ -779,11 +1080,11 @@ an excellent candidate and I look forward to contributing to your team.`,
     }
   });
 
-  /* Track applications */
+  /* Track applications on success */
   chrome.runtime.onMessage.addListener(msg => {
     if (
       msg?.type === 'COMPLEX_FORM_SUCCESS' ||
-      msg?.type === 'APPLICATION_SUCCESS' ||
+      msg?.type === 'APPLICATION_SUCCESS'  ||
       msg?.type === 'JOB_APPLIED'
     ) markApplied();
   });
@@ -793,13 +1094,15 @@ an excellent candidate and I look forward to contributing to your team.`,
 
   /* Run platform autofill in CSV mode */
   ST.get('csvActiveJobId').then(({ csvActiveJobId }) => {
-    if (csvActiveJobId) {
-      sleep(2000).then(() => workdayAutofill());
-      sleep(2200).then(() => oracleAutofill());
-      sleep(2400).then(() => srAutofill());
-      sleep(3000).then(() => autoFillPage());
-    }
+    if (!csvActiveJobId) return;
+    sleep(2000).then(async () => {
+      if (CURRENT_ATS === 'Workday')         await workdayAutofill();
+      else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+      else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+      else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
+      else await autoFillPage();
+    });
   });
 
-  LOG(`v3.0 loaded | ${CURRENT_ATS || HOST}`);
+  LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
 })();

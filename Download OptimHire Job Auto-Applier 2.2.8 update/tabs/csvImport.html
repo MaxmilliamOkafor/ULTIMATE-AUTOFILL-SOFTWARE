@@ -106,6 +106,7 @@
     .browse-btn{display:inline-block;margin-top:8px;background:var(--surface3);
       border:1px solid var(--border);color:var(--text);border-radius:6px;
       padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer}
+    #appEmail:focus,#appPassword:focus{border-color:var(--primary)}
 
     /* ── Controls bar ── */
     .ctrl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -233,6 +234,66 @@
     <div class="stat"><div class="val" id="statDupe" style="color:#c084fc">0</div><div class="lbl">Duplicate</div></div>
   </div>
 
+  <!-- APPLICATIONS ACCOUNT SETTINGS -->
+  <div class="card" id="accountCard">
+    <div class="card-title" id="accountCardToggle" style="cursor:pointer;user-select:none;justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:6px">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        Applications Account
+      </span>
+      <span id="accountToggleArrow" style="font-size:11px;color:var(--muted)">▼ expand</span>
+    </div>
+    <div id="accountCardBody" style="display:none">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+        Used for Workday account creation and other ATS sign-up flows during auto-apply.<br/>
+        Stored locally — never sent to any server.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);font-weight:600;
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+            Account Email
+          </label>
+          <input type="email" id="appEmail" placeholder="yourname@email.com"
+                 style="width:100%;background:var(--surface2);border:1px solid var(--border);
+                        border-radius:8px;color:var(--text);padding:9px 12px;font-size:13px;
+                        outline:none;transition:border-color .2s"/>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);font-weight:600;
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+            Account Password
+          </label>
+          <div style="position:relative">
+            <input type="password" id="appPassword" placeholder="••••••••••••"
+                   style="width:100%;background:var(--surface2);border:1px solid var(--border);
+                          border-radius:8px;color:var(--text);padding:9px 36px 9px 12px;
+                          font-size:13px;outline:none;transition:border-color .2s"/>
+            <button id="btnTogglePw" type="button"
+                    style="position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                           background:none;border:none;color:var(--muted);padding:2px 4px;
+                           font-size:14px;border-radius:4px;cursor:pointer">👁</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn-primary" id="btnSaveAccount" style="padding:8px 18px">
+          💾 Save Account
+        </button>
+        <button class="btn-ghost" id="btnClearAccount" style="padding:8px 14px">
+          Clear
+        </button>
+        <span id="accountSaveStatus" style="font-size:12px;color:#4ade80;display:none">
+          ✓ Saved
+        </span>
+      </div>
+    </div>
+  </div>
+
   <!-- ADD JOBS PANEL -->
   <div class="card">
     <div class="card-title">
@@ -259,7 +320,7 @@
       </svg>
       <p><strong>Drag &amp; drop a CSV file</strong> with job URLs</p>
       <p class="ats-list">Workday · Greenhouse · Lever · SmartRecruiters · iCIMS · LinkedIn · Indeed · HiringCafe · Oracle · BambooHR · Ashby · Jobvite</p>
-      <span class="browse-btn" onclick="document.getElementById('csvFile').click()">Browse Files</span>
+      <span class="browse-btn" id="browseBtn">Browse Files</span>
     </div>
   </div>
 
@@ -491,8 +552,8 @@ function render(){
         <td style="color:var(--muted);font-size:12px">${j.addedAt?new Date(j.addedAt).toLocaleDateString():''}</td>
         <td><span class="st ${STATUS_CLASS[j.status]||'st-pending'}">${STATUS_LABEL[j.status]||j.status}</span></td>
         <td><div class="row-actions">
-          <button class="btn-ghost" style="padding:4px 8px;font-size:11px" onclick="retryOne('${j.id}')">↻</button>
-          <button class="btn-danger" style="padding:4px 8px;font-size:11px" onclick="deleteOne('${j.id}')">✕</button>
+          <button class="btn-ghost" style="padding:4px 8px;font-size:11px" data-action="retry" data-id="${j.id}">↻</button>
+          <button class="btn-danger" style="padding:4px 8px;font-size:11px" data-action="delete" data-id="${j.id}">✕</button>
         </div></td>
       </tr>`;
     }).join('');
@@ -513,14 +574,18 @@ function renderPages(total){
 }
 window.goPage=p=>{page=p;render();};
 
-/* ── Row actions ── */
-window.retryOne=id=>{
-  const j=queue.find(q=>q.id===id);
-  if(j){j.status='pending';j.note='';saveQueue();render();toast('Reset to pending');}
-};
-window.deleteOne=id=>{
-  queue=queue.filter(q=>q.id!==id); saveQueue(); render(); toast('Job removed');
-};
+/* ── Row actions (event delegation — CSP-safe) ── */
+document.getElementById('tableBody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  if(btn.dataset.action === 'retry'){
+    const j = queue.find(q => q.id === id);
+    if(j){ j.status='pending'; j.note=''; saveQueue(); render(); toast('Reset to pending'); }
+  } else if(btn.dataset.action === 'delete'){
+    queue = queue.filter(q => q.id !== id); saveQueue(); render(); toast('Job removed');
+  }
+});
 
 /* ── Bulk select ── */
 function getSelected(){ return [...document.querySelectorAll('.row-check:checked')].map(el=>el.dataset.id); }
@@ -726,6 +791,67 @@ $('btnExportApplied').addEventListener('click',()=>{
 /* ── Filter / search ── */
 $('searchInput').addEventListener('input',()=>{page=1;render();});
 $('filterStatus').addEventListener('change',()=>{page=1;render();});
+
+/* ── Browse button (CSP-safe replacement for inline onclick) ── */
+$('browseBtn').addEventListener('click',()=>$('csvFile').click());
+
+/* ── Applications Account Settings ── */
+(function(){
+  const toggle   = $('accountCardToggle');
+  const body     = $('accountCardBody');
+  const arrow    = $('accountToggleArrow');
+  const emailEl  = $('appEmail');
+  const pwEl     = $('appPassword');
+  const togglePw = $('btnTogglePw');
+  const saveBtn  = $('btnSaveAccount');
+  const clearBtn = $('btnClearAccount');
+  const status   = $('accountSaveStatus');
+
+  // Toggle expand/collapse
+  toggle.addEventListener('click', ()=>{
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    arrow.textContent  = open ? '▼ expand' : '▲ collapse';
+  });
+
+  // Show/hide password
+  togglePw.addEventListener('click', ()=>{
+    pwEl.type = pwEl.type === 'password' ? 'text' : 'password';
+    togglePw.textContent = pwEl.type === 'password' ? '👁' : '🙈';
+  });
+
+  // Load saved values
+  chrome.storage.local.get(['appAccountEmail','appAccountPassword'], data => {
+    if(data.appAccountEmail)    emailEl.value = data.appAccountEmail;
+    if(data.appAccountPassword) pwEl.value    = data.appAccountPassword;
+    // If already filled, auto-expand
+    if(data.appAccountEmail || data.appAccountPassword){
+      body.style.display = 'block';
+      arrow.textContent  = '▲ collapse';
+    }
+  });
+
+  // Save
+  saveBtn.addEventListener('click', ()=>{
+    const email = emailEl.value.trim();
+    const pw    = pwEl.value;
+    if(!email){ toast('Enter an account email'); return; }
+    chrome.storage.local.set({ appAccountEmail: email, appAccountPassword: pw }, ()=>{
+      status.style.display = 'inline';
+      setTimeout(()=>{ status.style.display='none'; }, 2500);
+      toast('✓ Applications account saved');
+    });
+  });
+
+  // Clear
+  clearBtn.addEventListener('click', ()=>{
+    emailEl.value = '';
+    pwEl.value    = '';
+    chrome.storage.local.remove(['appAccountEmail','appAccountPassword'], ()=>{
+      toast('Applications account cleared');
+    });
+  });
+})();
 
 /* ── Real-time storage listener ── */
 chrome.storage.onChanged.addListener((changes,area)=>{
