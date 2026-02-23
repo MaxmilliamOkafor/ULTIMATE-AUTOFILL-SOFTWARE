@@ -56,6 +56,12 @@ const SIGS: Sig[] = [
     dom: ['.BambooHR-ATS-board', '[class*="BambooHR"]'],
     meta: [],
   },
+  {
+    type: 'linkedin',
+    urls: [/linkedin\.com\/jobs/i],
+    dom: ['.jobs-apply-button', '.jobs-unified-top-card', '.jobs-search-results', '.job-details-jobs-unified-top-card'],
+    meta: [],
+  },
 ];
 
 export function detectATS(doc: Document): ATSDetectionResult {
@@ -90,7 +96,7 @@ export function atsName(type: ATSType): string {
   const m: Record<ATSType, string> = {
     workday: 'Workday', greenhouse: 'Greenhouse', lever: 'Lever',
     smartrecruiters: 'SmartRecruiters', icims: 'iCIMS', taleo: 'Taleo',
-    ashby: 'Ashby', bamboohr: 'BambooHR', generic: 'Generic',
+    ashby: 'Ashby', bamboohr: 'BambooHR', linkedin: 'LinkedIn', generic: 'Generic',
   };
   return m[type];
 }
