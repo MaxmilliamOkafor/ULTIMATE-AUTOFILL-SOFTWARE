@@ -13,55 +13,45 @@
     [class*="earnCredit"],[class*="inviteFriend"],[class*="invite-friend"],
     [class*="ReferralScreen"]{display:none!important}
 
-    /* CSV Import button fixed at bottom-right of sidepanel */
-    #oh-csv-btn{
-      position:fixed;bottom:16px;right:16px;z-index:99999;
-      display:flex;align-items:center;gap:6px;
-      background:linear-gradient(135deg,#6b21a8,#9333ea);
-      color:#fff;border:none;border-radius:24px;
-      padding:9px 16px;font-size:13px;font-weight:700;
-      cursor:pointer;box-shadow:0 4px 14px rgba(107,33,168,.5);
-      transition:transform .15s,box-shadow .15s;
+    /* Auto-Apply Mode bar at bottom */
+    #oh-auto-apply-bar{
+      position:fixed;bottom:0;left:0;right:0;z-index:99999;
+      background:#111827;border-top:1px solid #374151;
+      padding:10px 14px;display:flex;align-items:center;gap:10px;
       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     }
-    #oh-csv-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(107,33,168,.6)}
+    #oh-auto-apply-bar .oh-bar-btn{
+      display:flex;align-items:center;gap:6px;
+      background:linear-gradient(135deg,#2563eb,#7c3aed);
+      color:#fff;border:none;border-radius:8px;
+      padding:8px 14px;font-size:12.5px;font-weight:600;
+      cursor:pointer;white-space:nowrap;flex:1;justify-content:center;
+      box-shadow:0 2px 8px rgba(37,99,235,.35);
+      transition:transform .1s,box-shadow .15s;
+    }
+    #oh-auto-apply-bar .oh-bar-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(37,99,235,.45)}
+    #oh-auto-apply-bar .oh-bar-btn:active{transform:scale(.97)}
+    #oh-auto-apply-bar .oh-bar-btn svg{flex-shrink:0}
+    #oh-auto-apply-bar .oh-bar-info{
+      font-size:11px;color:#9ca3af;white-space:nowrap;
+    }
   </style>
 </head>
 <body>
   <div id="__plasmo"></div>
   <script src="/sidepanel.b7741352.js" defer></script>
 
-  <!-- CSV Import floating button -->
-  <button id="oh-csv-btn" title="Open CSV Job Queue Manager">
-    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2.5"
-         stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-    </svg>
-    CSV Import
-  </button>
-  <script>
-    document.getElementById('oh-csv-btn').addEventListener('click',function(){
-      chrome.tabs.create({url:chrome.runtime.getURL('tabs/csvImport.html')});
-    });
-    // MutationObserver fallback to kill any referral card React renders
-    new MutationObserver(function(){
-      document.querySelectorAll('h2,h3,p,span').forEach(function(el){
-        var t=el.textContent||'';
-        if(t.includes('One Referral 3 Benefits')||t.includes('Get 20 Auto-fill Credits for every signup')){
-          var node=el;
-          for(var i=0;i<8;i++){
-            if(!node.parentElement)break;
-            node=node.parentElement;
-            var c=node.className||'';
-            if(typeof c==='string'&&(c.includes('bg-')||c.includes('border'))){
-              node.style.cssText='display:none!important';break;
-            }
-          }
-        }
-      });
-    }).observe(document.body,{childList:true,subtree:true});
-  </script>
+  <!-- Auto-Apply Mode bar at bottom of sidepanel -->
+  <div id="oh-auto-apply-bar">
+    <button class="oh-bar-btn" id="oh-csv-btn" title="Open Auto-Apply Mode — Import CSV, manage queue, start bulk applying">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+           fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Auto-Apply Mode
+    </button>
+    <span class="oh-bar-info" id="oh-bar-stats"></span>
+  </div>
+
+  <!-- CSP-safe: all JS in external file -->
+  <script src="/assets/sidepanel-patch.js" defer></script>
 </body>
 </html>
