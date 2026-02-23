@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "OptimHire Job Auto-Applier",
     "version": "2.2.8",
-    "description": "v2.2.8 - Unlimited credits, CSV job queue, Workday/Oracle/SmartRecruiters ATS, LinkedIn & Indeed direct apply, fresh-job priority, wake lock, captcha bypass, deduplication.",
+    "description": "Autofill job applications in 1 click, track every job, and apply faster with your OptimHire Job Auto-Applier.",
     "icons": {
         "16": "icon16.plasmo.6c567d50.png",
         "32": "icon32.plasmo.76b92899.png",
