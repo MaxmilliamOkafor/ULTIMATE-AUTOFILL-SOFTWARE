@@ -1104,5 +1104,189 @@
     });
   });
 
+  /* ── AUTO-TRIGGER: Detect supported ATS pages and auto-fill ──────
+   * Like SmartApply's "Autofill in progress" — when the user lands
+   * on a supported ATS application page, the extension detects it
+   * and automatically starts filling the form.
+   * Only triggers when:
+   *   1. Page is on a recognised ATS domain (CURRENT_ATS is set)
+   *   2. Page contains an application form (heuristic detection)
+   *   3. NOT already in CSV queue mode (CSV bridge handles that)
+   *   4. Auto-trigger is enabled in settings (default: true)
+   *   5. Page hasn't already been auto-filled in this session
+   * ─────────────────────────────────────────────────────────────── */
+
+  /** Heuristic: does this page look like a job application form? */
+  function isApplicationPage() {
+    /* Workday application pages */
+    if (CURRENT_ATS === 'Workday') {
+      return !!$('[data-automation-id="legalNameSection_firstName"]') ||
+             !!$('[data-automation-id="jobPostingHeader"]') ||
+             !!$('[data-automation-id="applyButton"]') ||
+             !!$('[data-automation-id="createAccountCheckbox"]') ||
+             $$('[data-automation-id]').length > 5;
+    }
+    /* Greenhouse */
+    if (CURRENT_ATS === 'Greenhouse') {
+      return !!$('#application_form,[data-provided-by="greenhouse"],form#application');
+    }
+    /* OracleCloud / Taleo */
+    if (CURRENT_ATS === 'OracleCloud') {
+      return !!$('#OracleFusionApp,oracle-apply-flow') ||
+             $$('input:not([type=hidden])').filter(isVisible).length > 3;
+    }
+    /* SmartRecruiters */
+    if (CURRENT_ATS === 'SmartRecruiters') {
+      return !!$('.smartrecruiters-form,#smartrecruiters-widget,[data-qa*="smartrecruiter"]') ||
+             $$('input[name="first_name"],input[name="last_name"],input[name="email"]').length > 0;
+    }
+    /* Lever */
+    if (CURRENT_ATS === 'Lever') {
+      return !!$('.posting-apply,.application-form,form.postings-form');
+    }
+    /* Ashby */
+    if (CURRENT_ATS === 'Ashby') {
+      return !!$('form[data-ashby-apply-form],._form_apply');
+    }
+    /* Generic: look for common application form indicators */
+    const formInputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea,select')
+      .filter(isVisible);
+    if (formInputs.length < 3) return false;
+
+    /* Check for application-related form inputs */
+    const labels = formInputs.map(el => getLabel(el).toLowerCase()).join(' ');
+    const appTerms = /first.?name|last.?name|email|phone|resume|cover.?letter|linkedin|experience|salary|authorization/;
+    return appTerms.test(labels);
+  }
+
+  /** Inject the "Autofill in progress" banner */
+  function showAutofillBanner(status) {
+    let banner = document.getElementById('oh-autofill-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'oh-autofill-banner';
+      banner.style.cssText = `
+        position:fixed;top:0;left:0;right:0;z-index:2147483647;
+        padding:10px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        font-size:13px;font-weight:600;text-align:center;
+        transition:all .3s ease;pointer-events:none;
+        box-shadow:0 2px 12px rgba(0,0,0,.15);
+      `;
+      document.body.appendChild(banner);
+    }
+    if (status === 'detecting') {
+      banner.textContent = '🔍 Supported ATS detected — scanning form...';
+      banner.style.background = 'linear-gradient(135deg,#1e40af,#7c3aed)';
+      banner.style.color = '#fff';
+    } else if (status === 'filling') {
+      banner.textContent = '⚡ Autofill in progress...';
+      banner.style.background = 'linear-gradient(135deg,#2563eb,#7c3aed)';
+      banner.style.color = '#fff';
+    } else if (status === 'done') {
+      banner.textContent = '✅ Autofill complete — please review and submit';
+      banner.style.background = 'linear-gradient(135deg,#059669,#10b981)';
+      banner.style.color = '#fff';
+      setTimeout(() => { if (banner.parentNode) banner.remove(); }, 5000);
+    } else if (status === 'unsupported') {
+      banner.textContent = '⬜ Page detected but no application form found';
+      banner.style.background = '#374151';
+      banner.style.color = '#9ca3af';
+      setTimeout(() => { if (banner.parentNode) banner.remove(); }, 3000);
+    }
+  }
+
+  /** Run the full auto-trigger flow */
+  let _autoTriggered = false;
+
+  async function autoTriggerAutofill() {
+    /* Guard: don't run if CSV mode is active */
+    const { csvActiveJobId } = await ST.get('csvActiveJobId');
+    if (csvActiveJobId) return;
+
+    /* Guard: only run once per page */
+    if (_autoTriggered) return;
+
+    /* Guard: check if auto-trigger is enabled (default true) */
+    const { ohAutoTrigger } = await ST.get('ohAutoTrigger');
+    if (ohAutoTrigger === false) return;  /* explicitly disabled */
+
+    /* Guard: must be on a recognised ATS */
+    if (!CURRENT_ATS) return;
+
+    /* Guard: check we haven't already auto-filled this exact URL recently */
+    const norm = normalizeUrl(location.href);
+    const { ohAutoFilledUrls = [] } = await ST.get('ohAutoFilledUrls');
+    if (ohAutoFilledUrls.includes(norm)) {
+      LOG('Auto-trigger: already filled this URL recently — skipping');
+      return;
+    }
+
+    showAutofillBanner('detecting');
+    LOG(`Auto-trigger: ${CURRENT_ATS} detected, checking for application form...`);
+
+    /* Wait for page to settle (SPAs render async) */
+    await sleep(2500);
+
+    if (!isApplicationPage()) {
+      showAutofillBanner('unsupported');
+      LOG('Auto-trigger: no application form detected on this page');
+      return;
+    }
+
+    _autoTriggered = true;
+    showAutofillBanner('filling');
+    LOG('Auto-trigger: application form found — starting autofill');
+    acquireWakeLock();
+
+    try {
+      /* Run ATS-specific autofill first */
+      if (CURRENT_ATS === 'Workday')              await workdayAutofill();
+      else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
+      else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+      else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
+
+      /* Then generic autofill to catch remaining fields */
+      await autoFillPage();
+
+      /* Solve captchas */
+      await solveCaptcha();
+
+      /* Remember this URL was auto-filled */
+      ohAutoFilledUrls.push(norm);
+      /* Keep only last 500 entries to avoid unbounded growth */
+      while (ohAutoFilledUrls.length > 500) ohAutoFilledUrls.shift();
+      await ST.set({ ohAutoFilledUrls });
+
+      showAutofillBanner('done');
+      LOG('Auto-trigger: autofill complete');
+    } catch (err) {
+      LOG('Auto-trigger: error during autofill', err);
+      showAutofillBanner('done');
+    }
+  }
+
+  /* Trigger auto-fill after page loads (with delay for SPA content) */
+  if (CURRENT_ATS) {
+    sleep(3000).then(() => autoTriggerAutofill());
+
+    /* Also watch for SPA navigation (hash/pushState changes) that reveal forms */
+    let _lastHref = location.href;
+    const navCheck = setInterval(() => {
+      if (location.href !== _lastHref) {
+        _lastHref = location.href;
+        _autoTriggered = false;  /* reset for new page */
+        sleep(2500).then(() => autoTriggerAutofill());
+      }
+    }, 1500);
+
+    /* Re-check when major DOM changes happen (multi-step forms) */
+    let _domCheckDebounce = null;
+    new MutationObserver(() => {
+      if (_autoTriggered) return;
+      clearTimeout(_domCheckDebounce);
+      _domCheckDebounce = setTimeout(() => autoTriggerAutofill(), 3000);
+    }).observe(document.body, { childList: true, subtree: false });
+  }
+
   LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
 })();
