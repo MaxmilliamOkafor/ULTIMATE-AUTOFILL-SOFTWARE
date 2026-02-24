@@ -81,10 +81,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   let csvQueueRunning = false;
   let csvQueuePaused  = false;
   // Track active job/tab so the message listener can resolve the promise
-  let _csvActiveTabId  = null;
-  let _csvResolve      = null;  // resolves waitForCsvResult
-  let _csvSkipPending  = false;
-  let _reuseTabId      = null;  // for reuseTab mode
+  // Per-job state: Map<jobId, { tabId, resolve, skipPending }>
+  const _activeJobs    = new Map();
+  let _reuseTabId      = null;  // for reuseTab mode (single-tab mode only)
   // Queue automation settings (defaults match UI defaults)
   let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:false, skipCaptcha:true };
 
@@ -113,14 +112,24 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   async function processNextCsvJob() {
     if (!csvQueueRunning || csvQueuePaused) return;
 
-    const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
-    const job = q.find(j => j.status === "pending");
-    if (!job) {
-      // All done
-      csvQueueRunning = false;
-      await chrome.storage.local.set({ csvQueueRunning: false, csvActiveJobId: null, csvActiveTabId: null });
-      broadcast({ type: "CSV_QUEUE_DONE" });
-      return;
+    // Atomic claim: read queue, find pending, mark running all in one write
+    let job = null;
+    {
+      const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+      const candidate = q.find(j => j.status === "pending");
+      if (!candidate) {
+        // Check if any workers are still active; if none, broadcast done
+        if (_activeJobs.size === 0 && csvQueueRunning) {
+          csvQueueRunning = false; // set synchronously to prevent double-broadcast
+          await chrome.storage.local.set({ csvQueueRunning: false, csvActiveJobId: null, csvActiveTabId: null });
+          broadcast({ type: "CSV_QUEUE_DONE" });
+        }
+        return;
+      }
+      // Atomically claim this job
+      candidate.status = "running";
+      await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+      job = candidate;
     }
 
     // Dedup check
@@ -131,8 +140,6 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       return;
     }
 
-    // Mark running
-    await updateCsvJobStatus(job.id, "running", "");
     broadcast({ type: "CSV_JOB_STARTED", jobId: job.id, url: job.url });
 
     // Open the job URL (new tab, or reuse existing tab if reuseTab setting is on)
@@ -162,8 +169,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     // *** CRITICAL FIX ***
     // Register this tab as the copilot tab so autofill.js (COPILOT_TABID check)
     // returns sameTab:true and processes the form automatically.
-    _csvActiveTabId = tab.id;
-    _csvSkipPending = false;
+    _activeJobs.set(job.id, { tabId: tab.id, resolve: null, skipPending: false });
     await chrome.storage.local.set({
       copilotTabId:        tab.id,
       csvActiveJobId:      job.id,
@@ -172,12 +178,30 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       isAutoProcessStartJob: true,
     });
 
+    // ── FIX: Send TRIGGER_AUTOFILL when the tab finishes loading ──────────────
+    // The content script (optimhire-patch.js) may have already executed before
+    // chrome.storage.local.set() completed above (race condition). Sending
+    // TRIGGER_AUTOFILL directly to the tab ensures autofill always runs.
+    const _triggerOnTabLoad = (updTabId, changeInfo) => {
+      if (updTabId === tab.id && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
+        // Wait 1.5 s for the page JS to hydrate before filling
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
+            .catch(() => {}); // tab may have navigated away
+        }, 1500);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
+
     // Wait for autofill.js to report success/error via COMPLEX_FORM_SUCCESS/ERROR
     const result = await waitForCsvResult(tab.id, job.id, 120_000);
 
-    // Cleanup tab reference
-    _csvActiveTabId = null;
-    _csvResolve     = null;
+    // Remove the load listener if the job timed out before the tab finished loading
+    chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
+
+    // Cleanup job state
+    _activeJobs.delete(job.id);
     await chrome.storage.local.set({ csvActiveJobId: null, csvActiveTabId: null });
 
     // Process result
@@ -218,15 +242,18 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   /* Promise-based wait — resolved by the message listener below */
   function waitForCsvResult(tabId, jobId, maxMs) {
     return new Promise(resolve => {
-      _csvResolve = resolve;
+      // Register resolver for this specific job
+      const jobState = _activeJobs.get(jobId);
+      if (jobState) jobState.resolve = resolve;
       const resultKey = `csvJobResult_${jobId}`;
 
       // Poll storage for result key written by optimhire-patch.js content script
       const pollInterval = setInterval(async () => {
-        if (_csvSkipPending) {
+        const js = _activeJobs.get(jobId);
+        if (js?.skipPending) {
           clearInterval(pollInterval);
           clearTimeout(timer);
-          if (_csvResolve === resolve) { _csvResolve = null; resolve("skipped"); }
+          if (js.resolve === resolve) { js.resolve = null; resolve("skipped"); }
           return;
         }
         const data = await chrome.storage.local.get(resultKey);
@@ -235,8 +262,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
           clearTimeout(timer);
           await chrome.storage.local.remove(resultKey);
           const st = data[resultKey].status;
-          if (_csvResolve === resolve) {
-            _csvResolve = null;
+          const js2 = _activeJobs.get(jobId);
+          if (js2?.resolve === resolve) {
+            js2.resolve = null;
             resolve(st === "done" ? "done" : st === "duplicate" ? "duplicate" : "failed");
           }
         }
@@ -245,7 +273,8 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       // Hard timeout
       const timer = setTimeout(() => {
         clearInterval(pollInterval);
-        if (_csvResolve === resolve) { _csvResolve = null; resolve("timeout after 120s"); }
+        const jsT = _activeJobs.get(jobId);
+        if (jsT?.resolve === resolve) { jsT.resolve = null; resolve("timeout after 120s"); }
       }, maxMs);
     });
   }
@@ -254,15 +283,19 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const senderTabId = sender?.tab?.id;
 
-    // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from the active CSV tab ***
-    if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId === _csvActiveTabId) {
-      if (_csvResolve) { const r = _csvResolve; _csvResolve = null; r("done"); }
-      return false; // let original handler also run (it will early-return since autoApplyState is null)
+    // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
+    if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
+      const entry = [..._activeJobs.values()].find(j => j.tabId === senderTabId);
+      if (entry?.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
+      return false;
     }
-    if (msg && msg.type === "COMPLEX_FORM_ERROR" && senderTabId === _csvActiveTabId) {
-      const errType = msg.errorType || "";
-      const result  = errType === "alreadyApplied" ? "duplicate" : "failed:" + errType;
-      if (_csvResolve) { const r = _csvResolve; _csvResolve = null; r(result); }
+    if (msg && msg.type === "COMPLEX_FORM_ERROR" && senderTabId) {
+      const entry = [..._activeJobs.values()].find(j => j.tabId === senderTabId);
+      if (entry?.resolve) {
+        const errType = msg.errorType || "";
+        const result  = errType === "alreadyApplied" ? "duplicate" : "failed:" + errType;
+        const r = entry.resolve; entry.resolve = null; r(result);
+      }
       return false;
     }
 
@@ -292,7 +325,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         if (!csvQueueRunning) {
           csvQueueRunning = true;
           csvQueuePaused  = false;
-          processNextCsvJob();
+          // Launch N concurrent workers (default 1 for backwards compat)
+          const concurrency = Math.max(1, Math.min(_queueSettings.concurrency || 1, 5));
+          for (let _wi = 0; _wi < concurrency; _wi++) processNextCsvJob();
         }
         sendResponse({ ok: true });
       }
@@ -310,13 +345,16 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       else if (msg.type === "STOP_CSV_QUEUE") {
         csvQueueRunning = false;
         csvQueuePaused  = false;
-        _csvSkipPending = true; // signal current wait to abort
+        // Signal all active jobs to stop
+        for (const js of _activeJobs.values()) { js.skipPending = true; }
         if (_reuseTabId) { try { chrome.tabs.remove(_reuseTabId); } catch(_) {} _reuseTabId = null; }
         await chrome.storage.local.set({ csvQueueRunning: false });
         sendResponse({ ok: true });
       }
       else if (msg.type === "SKIP_CSV_JOB") {
-        _csvSkipPending = true; // poll loop will see this and resolve "skipped"
+        // Mark the most recently started active job as skipPending
+        const entries = [..._activeJobs.values()];
+        if (entries.length) entries[entries.length - 1].skipPending = true;
         sendResponse({ ok: true });
       }
       else if (msg.type === "CHECK_ALREADY_APPLIED") {

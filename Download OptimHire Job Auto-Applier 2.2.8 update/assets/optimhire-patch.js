@@ -992,12 +992,15 @@
   processFreshness();
 
   /* ── T19: CSV Auto-Apply bridge ─────────────────────────── */
-  async function initCsvBridge() {
-    const { csvActiveJobId, csvActiveTabId } = await ST.get([
+  async function initCsvBridge(overrideJobId = null) {
+    let { csvActiveJobId, csvActiveTabId } = await ST.get([
       'csvActiveJobId', 'csvActiveTabId',
     ]);
 
-    const isCsvTab = csvActiveJobId && csvActiveTabId;
+    // Allow TRIGGER_AUTOFILL to pass the correct jobId (multi-tab support)
+    if (overrideJobId) csvActiveJobId = overrideJobId;
+
+    const isCsvTab = csvActiveJobId && (csvActiveTabId || overrideJobId);
     if (!isCsvTab) return;
 
     LOG('CSV bridge active — monitoring for submission');
@@ -1070,10 +1073,13 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'TRIGGER_AUTOFILL') {
       (async () => {
-        if (CURRENT_ATS === 'Workday')         await workdayAutofill();
-        else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+        // Initialize the CSV bridge for this tab (passes jobId for multi-tab correctness)
+        await initCsvBridge(msg.jobId || null);
+        // Also run ATS-specific autofill directly as a belt-and-suspenders measure
+        if (CURRENT_ATS === 'Workday')              await workdayAutofill();
+        else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
         else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-        else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
+        else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
         await autoFillPage();
         await solveCaptcha();
         sendResponse({ ok: true });
@@ -1097,6 +1103,24 @@
 
   /* Init CSV bridge (async, non-blocking) */
   initCsvBridge().catch(() => {});
+
+  /* ── Race-condition fallback ─────────────────────────────────────────────
+   * If the background set csvActiveJobId AFTER our content script already ran
+   * (fast page loads), initCsvBridge() above would have found nothing.
+   * Listen for storage changes and re-run when csvActiveJobId appears.
+   * The background also sends TRIGGER_AUTOFILL for the same purpose, but
+   * this storage listener acts as an additional fallback.
+   * ──────────────────────────────────────────────────────────────────────── */
+  let _csvBridgeStarted = false;
+  chrome.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== 'local' || _csvBridgeStarted) return;
+    const newJobId = changes.csvActiveJobId?.newValue;
+    const newTabId = changes.csvActiveTabId?.newValue;
+    if (newJobId && newTabId) {
+      _csvBridgeStarted = true;
+      await initCsvBridge(newJobId).catch(() => {});
+    }
+  });
 
   /* Run platform autofill in CSV mode */
   ST.get('csvActiveJobId').then(({ csvActiveJobId }) => {
