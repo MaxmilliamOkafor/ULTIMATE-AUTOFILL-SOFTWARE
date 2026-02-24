@@ -197,6 +197,15 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       statusMessage: 'Filling application form...',
     }).catch(() => {});
 
+    // Open the sidepanel on the job tab — mirrors what the original website flow does.
+    // Without this the autofill engine has no panel to report progress to and may
+    // behave differently from when using optimhire.com directly.
+    try {
+      chrome.sidePanel.open({ tabId: tab.id }, () => { chrome.runtime.lastError; });
+      chrome.sidePanel.setOptions({ enabled: true, tabId: tab.id, path: 'sidepanel.html' });
+      chrome.sidePanel.open({ tabId: tab.id }, () => { chrome.runtime.lastError; });
+    } catch(_) {}
+
     // ── FIX: Trigger REAL OptimHire autofill pipeline when tab loads ──────────
     // Construct applicationDetails from the user's profile + job URL, then
     // send FILL_COMPLEX_FORM — the exact message the OptimHire website uses.
@@ -205,37 +214,68 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
 
       // Wait for page JS to hydrate
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 2500));
 
       try {
         // 1. Read the user's profile (same data the website sends)
         const storageData = await chrome.storage.local.get([
-          'candidateDetails', 'cachedSeekerInfo',
+          'candidateDetails', 'cachedSeekerInfo', 'seekerDetails',
         ]);
         let profile = {};
         try {
           const cd = storageData.candidateDetails;
           profile = typeof cd === 'string' ? JSON.parse(cd) : (cd || {});
         } catch(_) {}
-        const seeker = storageData.cachedSeekerInfo || profile || {};
+        // Try multiple possible storage keys for seeker data
+        const seeker = storageData.cachedSeekerInfo
+          || storageData.seekerDetails
+          || profile?.seeker
+          || profile
+          || {};
 
-        // 2. Detect ATS from the job URL
+        // 2. Detect ATS from the job URL (domain + URL parameter checks)
         const jobUrl = job.url.toLowerCase();
         const _atsMap = {
-          'greenhouse.io': 'greenhouse', 'lever.co': 'lever',
-          'myworkdayjobs.com': 'workday', 'workday.com': 'workday',
-          'icims.com': 'icims', 'oraclecloud.com': 'oraclecloud',
-          'smartrecruiters.com': 'smartrecruiters', 'ashbyhq.com': 'ashby',
-          'bamboohr.com': 'bamboohr', 'jobvite.com': 'jobvite',
-          'workable.com': 'workable', 'breezy.hr': 'breezyhr',
-          'jazzhr.com': 'jazzhr', 'ziprecruiter.com': 'ziprecruiter',
-          'taleo.net': 'taleo', 'dice.com': 'dice',
-          'indeed.com': 'indeed', 'linkedin.com': 'linkedin',
-          'paylocity.com': 'paylocity', 'manatal.com': 'manatal',
+          'greenhouse.io': 'greenhouse',       'boards.greenhouse.io': 'greenhouse',
+          'lever.co': 'lever',                 'jobs.lever.co': 'lever',
+          'myworkdayjobs.com': 'workday',      'workday.com': 'workday',
+          'icims.com': 'icims',
+          'oraclecloud.com': 'oraclecloud',
+          'smartrecruiters.com': 'smartrecruiters',
+          'ashbyhq.com': 'ashby',              'app.ashbyhq.com': 'ashby',
+          'bamboohr.com': 'bamboohr',
+          'jobvite.com': 'jobvite',
+          'workable.com': 'workable',
+          'breezy.hr': 'breezyhr',
+          'jazzhr.com': 'jazzhr',
+          'ziprecruiter.com': 'ziprecruiter',
+          'taleo.net': 'taleo',
+          'dice.com': 'dice',
+          'indeed.com': 'indeed',
+          'linkedin.com': 'linkedin',
+          'paylocity.com': 'paylocity',
+          'manatal.com': 'manatal',
+          'successfactors.com': 'successfactors',
+          'adp.com': 'adp',
+          'recruiting.ultipro.com': 'ultipro',
+          'hire.withgoogle.com': 'google',
+          'app.dover.com': 'dover',
         };
         let atsName = '';
         for (const [domain, name] of Object.entries(_atsMap)) {
           if (jobUrl.includes(domain)) { atsName = name; break; }
+        }
+        // Detect ATS from URL query params (company pages embedding ATS via iframe)
+        if (!atsName) {
+          if (jobUrl.includes('gh_jid=') || jobUrl.includes('greenhouse'))            atsName = 'greenhouse';
+          else if (jobUrl.includes('lever'))                                           atsName = 'lever';
+          else if (jobUrl.includes('workday') || jobUrl.includes('wd3.') || jobUrl.includes('wd5.'))
+                                                                                      atsName = 'workday';
+          else if (jobUrl.includes('icims'))                                           atsName = 'icims';
+          else if (jobUrl.includes('smartrecruiters'))                                atsName = 'smartrecruiters';
+          else if (jobUrl.includes('ashby'))                                           atsName = 'ashby';
+          else if (jobUrl.includes('bamboohr'))                                        atsName = 'bamboohr';
+          else if (jobUrl.includes('jobvite') || jobUrl.includes('jobs2web'))          atsName = 'jobvite';
         }
 
         // 3. Determine auto-submit setting
@@ -259,31 +299,64 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
           },
         };
 
-        // 5. Construct default complexInstructions
+        // 5. Build complexInstructions with common ATS iframe src patterns.
+        //    This lets smartHandleComplexForm find Greenhouse / Lever / etc. forms
+        //    that are embedded inside company career pages (e.g. brex.com embeds
+        //    boards.greenhouse.io in an iframe).
         const complexInstructions = {
           requiresLogin: false,
           isCaptchaRequired: false,
-          checkFormInIframe: { enabled: true, srcIncludes: [] },
+          checkFormInIframe: {
+            enabled: true,
+            srcIncludes: [
+              'greenhouse.io', 'boards.greenhouse.io',
+              'lever.co', 'jobs.lever.co',
+              'myworkdayjobs.com', 'icims.com',
+              'smartrecruiters.com', 'ashbyhq.com',
+              'bamboohr.com', 'jobvite.com',
+              'workable.com', 'taleo.net',
+            ],
+          },
           applicationStatus: { jobClosed: [] },
         };
 
-        // 6. Clear old form data and send FILL_COMPLEX_FORM (the real pipeline)
-        await chrome.storage.local.remove(['complexFormInProgress', 'complexFormData']);
-        chrome.tabs.sendMessage(tab.id, {
+        // 6. Persist complexFormData in storage BEFORE sending FILL_COMPLEX_FORM.
+        //    This is the key fix for multi-page application flows:
+        //    when smartHandleComplexForm navigates to the next page, y() runs
+        //    again and reads complexFormData to resume from where it left off.
+        //    Seeding it here also ensures page-load race conditions don't lose data.
+        await chrome.storage.local.set({
+          complexFormInProgress: true,
+          complexFormData: {
+            applicationDetails,
+            complexInstructions,
+            autoApplyEnabled,
+            currentDepth: 0,
+            maxDepth: 10,
+          },
+        });
+
+        // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
+        const msgResult = await chrome.tabs.sendMessage(tab.id, {
           type: 'FILL_COMPLEX_FORM',
           applicationDetails,
           complexInstructions,
           autoApplyEnabled,
-        }).catch(() => {});
+        }).catch(() => null);
 
-        // 7. Also send TRIGGER_AUTOFILL as fallback for patch-based fill
-        setTimeout(() => {
-          chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
-            .catch(() => {});
-        }, 3000);
+        // 8. If content script wasn't ready yet, retry once after 3s
+        if (!msgResult) {
+          await new Promise(r => setTimeout(r, 3000));
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'FILL_COMPLEX_FORM',
+            applicationDetails,
+            complexInstructions,
+            autoApplyEnabled,
+          }).catch(() => {});
+        }
 
       } catch(err) {
-        // Fallback: at minimum send TRIGGER_AUTOFILL
+        // Fallback: send TRIGGER_AUTOFILL for patch-based autofill
         chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
           .catch(() => {});
       }
@@ -291,7 +364,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
 
     // Wait for autofill.js to report success/error via COMPLEX_FORM_SUCCESS/ERROR
-    const result = await waitForCsvResult(tab.id, job.id, 120_000);
+    const result = await waitForCsvResult(tab.id, job.id, 90_000); // 90s timeout — skip if no response
 
     // Remove the load listener if the job timed out before the tab finished loading
     chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
@@ -314,8 +387,10 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       finalStatus = "skipped";
     } else {
       finalReason = result || "No response from page";
-      await updateCsvJobStatus(job.id, "failed", finalReason);
-      finalStatus = "failed";
+      // Treat timeout as skipped (unsupported domain / no form found)
+      const isTimeout = !result || result === "timeout";
+      await updateCsvJobStatus(job.id, isTimeout ? "skipped" : "failed", finalReason);
+      finalStatus = isTimeout ? "skipped" : "failed";
     }
     broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: finalStatus, reason: finalReason });
 
@@ -370,7 +445,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       const timer = setTimeout(() => {
         clearInterval(pollInterval);
         const jsT = _activeJobs.get(jobId);
-        if (jsT?.resolve === resolve) { jsT.resolve = null; resolve("timeout after 120s"); }
+        if (jsT?.resolve === resolve) { jsT.resolve = null; resolve("timeout"); }
       }, maxMs);
     });
   }

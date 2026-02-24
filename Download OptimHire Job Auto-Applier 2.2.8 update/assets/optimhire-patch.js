@@ -129,22 +129,26 @@
   }
 
   async function enforceCredits() {
-    const keys = ['candidateDetails','userDetails','planDetails','subscriptionDetails'];
-    const data = await ST.get(keys);
-    const upd = {};
-    keys.forEach(k => {
-      if (!data[k]) return;
-      try {
-        const parsed = typeof data[k] === 'string' ? JSON.parse(data[k]) : data[k];
-        const patched = deepPatchCredits(JSON.parse(JSON.stringify(parsed)));
-        upd[k] = typeof data[k] === 'string' ? JSON.stringify(patched) : patched;
-      } catch (_) {}
-    });
-    if (Object.keys(upd).length) await ST.set(upd);
+    try {
+      const keys = ['candidateDetails','userDetails','planDetails','subscriptionDetails'];
+      const data = await ST.get(keys);
+      const upd = {};
+      keys.forEach(k => {
+        if (!data[k]) return;
+        try {
+          const parsed = typeof data[k] === 'string' ? JSON.parse(data[k]) : data[k];
+          const patched = deepPatchCredits(JSON.parse(JSON.stringify(parsed)));
+          upd[k] = typeof data[k] === 'string' ? JSON.stringify(patched) : patched;
+        } catch (_) {}
+      });
+      if (Object.keys(upd).length) await ST.set(upd);
+    } catch (_) {
+      // Extension context may have been invalidated (e.g. after reload) — ignore
+    }
   }
 
-  enforceCredits();
-  setInterval(enforceCredits, 20_000);
+  enforceCredits().catch(() => {});
+  setInterval(() => enforceCredits().catch(() => {}), 20_000);
 
   /* Intercept storage reads to always return 9999 credits */
   const _origGet = chrome.storage.local.get.bind(chrome.storage.local);
@@ -164,9 +168,15 @@
       return result;
     };
     if (typeof cb === 'function') {
-      return _origGet(keys, result => cb(patchResult(result)));
+      try {
+        return _origGet(keys, result => cb(patchResult(result)));
+      } catch (_) {
+        // Extension context invalidated — return empty result
+        try { cb({}); } catch (__) {}
+        return;
+      }
     }
-    return _origGet(keys).then(patchResult);
+    return _origGet(keys).then(patchResult).catch(() => ({}));
   };
 
   /* ── T14: Wake Lock — NO AudioContext (fixes "not allowed to start") ── */
@@ -1132,7 +1142,7 @@
       else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
       else await autoFillPage();
     });
-  });
+  }).catch(() => {});
 
   /* ── AUTO-TRIGGER: Detect supported ATS pages and auto-fill ──────
    * Like SmartApply's "Autofill in progress" — when the user lands
