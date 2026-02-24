@@ -12,24 +12,9 @@ import { findMatches } from '../savedResponses/matcher';
 let isRunning = false;
 let observer: MutationObserver | null = null;
 
-// ─── LinkedIn URL gate ───
-// Only scan for forms on LinkedIn when on the /jobs path.
-// Feed, profile, messaging, etc. pages should be left alone.
-function isLinkedInNonJobsPage(): boolean {
-  const host = location.hostname;
-  if (host === 'www.linkedin.com' || host === 'linkedin.com') {
-    return !location.pathname.startsWith('/jobs');
-  }
-  return false;
-}
-
 // ─── Message handling from background / popup ───
 chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
   if (msg.type === 'START_AUTOFILL') {
-    if (isLinkedInNonJobsPage()) {
-      sendResponse({ ok: false, error: 'Autofill is only available on LinkedIn Jobs pages (linkedin.com/jobs)' });
-      return true;
-    }
     startAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
@@ -38,10 +23,6 @@ chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) =>
     sendResponse({ ok: true });
   }
   if (msg.type === 'DETECT_ATS') {
-    if (isLinkedInNonJobsPage()) {
-      sendResponse({ type: 'generic', confidence: 0, signals: [] });
-      return;
-    }
     const result = detectATS(document);
     sendResponse(result);
   }
@@ -159,7 +140,6 @@ function removeControlBar() {
 // Attach focus listener to show suggestions on textareas and long text inputs
 
 document.addEventListener('focusin', async (e) => {
-  if (isLinkedInNonJobsPage()) return;
   const el = e.target as HTMLElement;
   if (!isTextareaLike(el)) return;
 
