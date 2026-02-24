@@ -176,20 +176,116 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       csvActiveTabId:      tab.id,
       csvQueueRunning:     true,
       isAutoProcessStartJob: true,
+      // Set autoApplyState so the OptimHire sidepanel shows "Auto-Apply Mode"
+      autoApplyState: {
+        isActive: true,
+        applicationState: 'in_progress',
+        progress: 50,
+        statusMessage: 'Filling application form...',
+        applicationDetails: {
+          source: { apply_now_url: job.url, job_title: job.title || '' },
+          copilot_job_id: job.id,
+        },
+      },
     });
+    // Notify sidepanel of state change
+    chrome.runtime.sendMessage({
+      type: 'AUTO_APPLY_STATE_UPDATE',
+      isActive: true,
+      applicationState: 'in_progress',
+      progress: 50,
+      statusMessage: 'Filling application form...',
+    }).catch(() => {});
 
-    // ── FIX: Send TRIGGER_AUTOFILL when the tab finishes loading ──────────────
-    // The content script (optimhire-patch.js) may have already executed before
-    // chrome.storage.local.set() completed above (race condition). Sending
-    // TRIGGER_AUTOFILL directly to the tab ensures autofill always runs.
-    const _triggerOnTabLoad = (updTabId, changeInfo) => {
-      if (updTabId === tab.id && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
-        // Wait 1.5 s for the page JS to hydrate before filling
+    // ── FIX: Trigger REAL OptimHire autofill pipeline when tab loads ──────────
+    // Construct applicationDetails from the user's profile + job URL, then
+    // send FILL_COMPLEX_FORM — the exact message the OptimHire website uses.
+    const _triggerOnTabLoad = async (updTabId, changeInfo) => {
+      if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
+      chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
+
+      // Wait for page JS to hydrate
+      await new Promise(r => setTimeout(r, 2000));
+
+      try {
+        // 1. Read the user's profile (same data the website sends)
+        const storageData = await chrome.storage.local.get([
+          'candidateDetails', 'cachedSeekerInfo',
+        ]);
+        let profile = {};
+        try {
+          const cd = storageData.candidateDetails;
+          profile = typeof cd === 'string' ? JSON.parse(cd) : (cd || {});
+        } catch(_) {}
+        const seeker = storageData.cachedSeekerInfo || profile || {};
+
+        // 2. Detect ATS from the job URL
+        const jobUrl = job.url.toLowerCase();
+        const _atsMap = {
+          'greenhouse.io': 'greenhouse', 'lever.co': 'lever',
+          'myworkdayjobs.com': 'workday', 'workday.com': 'workday',
+          'icims.com': 'icims', 'oraclecloud.com': 'oraclecloud',
+          'smartrecruiters.com': 'smartrecruiters', 'ashbyhq.com': 'ashby',
+          'bamboohr.com': 'bamboohr', 'jobvite.com': 'jobvite',
+          'workable.com': 'workable', 'breezy.hr': 'breezyhr',
+          'jazzhr.com': 'jazzhr', 'ziprecruiter.com': 'ziprecruiter',
+          'taleo.net': 'taleo', 'dice.com': 'dice',
+          'indeed.com': 'indeed', 'linkedin.com': 'linkedin',
+          'paylocity.com': 'paylocity', 'manatal.com': 'manatal',
+        };
+        let atsName = '';
+        for (const [domain, name] of Object.entries(_atsMap)) {
+          if (jobUrl.includes(domain)) { atsName = name; break; }
+        }
+
+        // 3. Determine auto-submit setting
+        const autoApplyEnabled = !!_queueSettings.autoSubmit;
+
+        // 4. Construct applicationDetails (mirrors API response shape)
+        const applicationDetails = {
+          source: {
+            apply_now_url: job.url,
+            ats_name: atsName,
+            job_title: job.title || '',
+            company_name: job.company || '',
+          },
+          seeker: seeker,
+          copilot_job_id: job.id,
+          additional_info: {
+            additional_info: JSON.stringify({
+              requiresLogin: false,
+              isCaptchaRequired: false,
+            }),
+          },
+        };
+
+        // 5. Construct default complexInstructions
+        const complexInstructions = {
+          requiresLogin: false,
+          isCaptchaRequired: false,
+          checkFormInIframe: { enabled: true, srcIncludes: [] },
+          applicationStatus: { jobClosed: [] },
+        };
+
+        // 6. Clear old form data and send FILL_COMPLEX_FORM (the real pipeline)
+        await chrome.storage.local.remove(['complexFormInProgress', 'complexFormData']);
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'FILL_COMPLEX_FORM',
+          applicationDetails,
+          complexInstructions,
+          autoApplyEnabled,
+        }).catch(() => {});
+
+        // 7. Also send TRIGGER_AUTOFILL as fallback for patch-based fill
         setTimeout(() => {
           chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
-            .catch(() => {}); // tab may have navigated away
-        }, 1500);
+            .catch(() => {});
+        }, 3000);
+
+      } catch(err) {
+        // Fallback: at minimum send TRIGGER_AUTOFILL
+        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
+          .catch(() => {});
       }
     };
     chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
