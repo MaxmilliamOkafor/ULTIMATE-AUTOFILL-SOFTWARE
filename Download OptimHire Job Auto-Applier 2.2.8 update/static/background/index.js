@@ -98,18 +98,39 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   }
 
   function broadcast(msg) {
+    // Send to extension pages (csvImport.html, sidepanel, etc.)
     chrome.runtime.sendMessage(msg).catch(() => {});
+    // Also send to ALL active automation tabs so the floating overlay receives updates
+    for (const js of _activeJobs.values()) {
+      if (js.tabId) chrome.tabs.sendMessage(js.tabId, msg).catch(() => {});
+    }
   }
 
   async function updateCsvJobStatus(id, status, note) {
-    const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
-    const job = q.find(j => j.id === id);
-    if (job) { job.status = status; if (note !== undefined) job.note = note; }
-    await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    try {
+      const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+      const job = q.find(j => j.id === id);
+      if (job) {
+        job.status = status;
+        if (note !== undefined) job.lastError = note;
+        if (status === 'running') job.startedAt = Date.now();
+        if (['done','failed','skipped','duplicate'].includes(status)) job.finishedAt = Date.now();
+        if (status === 'failed') job.attempts = (job.attempts || 0) + 1;
+      }
+      await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    } catch (_) { /* storage may fail during extension update — ignore */ }
   }
 
   /* Core queue loop */
   async function processNextCsvJob() {
+    if (!csvQueueRunning || csvQueuePaused) return;
+    try { await _processNextCsvJobInner(); } catch (err) {
+      console.error('[OH-BGPatch] processNextCsvJob unexpected error:', err);
+      // Don't let the queue stall — continue after a delay
+      if (csvQueueRunning && !csvQueuePaused) setTimeout(processNextCsvJob, 3000);
+    }
+  }
+  async function _processNextCsvJobInner() {
     if (!csvQueueRunning || csvQueuePaused) return;
 
     // Atomic claim: read queue, find pending, mark running all in one write
@@ -337,23 +358,18 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         });
 
         // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
-        const msgResult = await chrome.tabs.sendMessage(tab.id, {
-          type: 'FILL_COMPLEX_FORM',
-          applicationDetails,
-          complexInstructions,
-          autoApplyEnabled,
-        }).catch(() => null);
-
-        // 8. If content script wasn't ready yet, retry once after 3s
-        if (!msgResult) {
-          await new Promise(r => setTimeout(r, 3000));
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'FILL_COMPLEX_FORM',
-            applicationDetails,
-            complexInstructions,
-            autoApplyEnabled,
-          }).catch(() => {});
+        //    Retry up to 3 times with increasing delays if content script isn't ready
+        const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled };
+        let fillSent = false;
+        for (let attempt = 0; attempt < 3 && !fillSent; attempt++) {
+          try {
+            const resp = await chrome.tabs.sendMessage(tab.id, fillMsg);
+            if (resp) fillSent = true;
+          } catch (_) {}
+          if (!fillSent) await new Promise(r => setTimeout(r, 2000 + attempt * 1500));
         }
+        // 8. Also send TRIGGER_AUTOFILL as belt-and-suspenders for the patch autofill
+        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }).catch(() => {});
 
       } catch(err) {
         // Fallback: send TRIGGER_AUTOFILL for patch-based autofill
@@ -417,36 +433,44 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       const jobState = _activeJobs.get(jobId);
       if (jobState) jobState.resolve = resolve;
       const resultKey = `csvJobResult_${jobId}`;
+      let settled = false;
+
+      const settle = (value) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(pollInterval);
+        clearTimeout(timer);
+        chrome.tabs.onRemoved.removeListener(tabCloseListener);
+        const js = _activeJobs.get(jobId);
+        if (js?.resolve === resolve) js.resolve = null;
+        resolve(value);
+      };
+
+      // Detect tab closure — skip immediately if tab was closed
+      const tabCloseListener = (closedTabId) => {
+        if (closedTabId === tabId) settle("skipped");
+      };
+      chrome.tabs.onRemoved.addListener(tabCloseListener);
 
       // Poll storage for result key written by optimhire-patch.js content script
       const pollInterval = setInterval(async () => {
+        if (settled) return;
         const js = _activeJobs.get(jobId);
-        if (js?.skipPending) {
-          clearInterval(pollInterval);
-          clearTimeout(timer);
-          if (js.resolve === resolve) { js.resolve = null; resolve("skipped"); }
-          return;
-        }
-        const data = await chrome.storage.local.get(resultKey);
-        if (data[resultKey]) {
-          clearInterval(pollInterval);
-          clearTimeout(timer);
-          await chrome.storage.local.remove(resultKey);
-          const st = data[resultKey].status;
-          const js2 = _activeJobs.get(jobId);
-          if (js2?.resolve === resolve) {
-            js2.resolve = null;
-            resolve(st === "done" ? "done" : st === "duplicate" ? "duplicate" : "failed");
+        if (js?.skipPending) { settle("skipped"); return; }
+        try {
+          const data = await chrome.storage.local.get(resultKey);
+          if (data[resultKey]) {
+            await chrome.storage.local.remove(resultKey);
+            const st = data[resultKey].status;
+            settle(st === "done" ? "done" : st === "duplicate" ? "duplicate" : "failed");
           }
-        }
+        } catch (_) {}
+        // Also verify the tab still exists
+        try { await chrome.tabs.get(tabId); } catch (_) { settle("skipped"); }
       }, 3000);
 
       // Hard timeout
-      const timer = setTimeout(() => {
-        clearInterval(pollInterval);
-        const jsT = _activeJobs.get(jobId);
-        if (jsT?.resolve === resolve) { jsT.resolve = null; resolve("timeout"); }
-      }, maxMs);
+      const timer = setTimeout(() => settle("timeout"), maxMs);
     });
   }
 

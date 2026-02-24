@@ -1357,5 +1357,449 @@
     }).observe(document.body, { childList: true, subtree: true });
   }
 
+  /* ══════════════════════════════════════════════════════════════
+   * T20: CSV Auto-Apply Floating Overlay
+   * LazyApply-style "Automation In Progress" panel injected via
+   * Shadow DOM on the active automation tab.  Shows job progress,
+   * Pause / Skip / Quit controls, and auto-removes when done.
+   * ═════════════════════════════════════════════════════════════ */
+  (function initCsvOverlay() {
+    const OVERLAY_ID = 'oh-csv-overlay-host';
+    let overlayHost = null;
+    let shadow      = null;
+    let _isPaused   = false;
+    let _isMinimized = false;
+    let _totalJobs  = 0;
+    let _completedJobs = 0;
+    let _currentIndex  = 0;
+    let _activeJobUrl  = '';
+    let _syncInterval  = null;
+
+    /* ── Verify this is the active automation tab ── */
+    async function isAutomationTab() {
+      try {
+        const data = await ST.get(['csvActiveJobId', 'csvQueueRunning', 'csvActiveTabId']);
+        if (!data.csvActiveJobId || !data.csvQueueRunning) return false;
+        // Ask background if this tab matches copilotTabId
+        return new Promise(resolve => {
+          try {
+            chrome.runtime.sendMessage({ action: 'COPILOT_TABID' }, resp => {
+              if (chrome.runtime.lastError) { resolve(false); return; }
+              resolve(!!resp?.sameTab);
+            });
+          } catch (_) { resolve(false); }
+        });
+      } catch (_) { return false; }
+    }
+
+    /* ── Read queue stats from storage ── */
+    async function readQueueStats() {
+      try {
+        const { csvJobQueue: q = [] } = await ST.get('csvJobQueue');
+        const total   = q.length;
+        const pending = q.filter(j => j.status === 'pending').length;
+        const running = q.filter(j => j.status === 'running').length;
+        const done    = q.filter(j => j.status === 'done').length;
+        const failed  = q.filter(j => j.status === 'failed').length;
+        const skipped = q.filter(j => j.status === 'skipped').length;
+        const dupes   = q.filter(j => j.status === 'duplicate').length;
+        const completed = done + failed + skipped + dupes;
+        const runIdx = q.findIndex(j => j.status === 'running');
+        return { total, pending, running, done, failed, skipped, dupes, completed, runIdx, queue: q };
+      } catch (_) { return { total: 0, pending: 0, running: 0, done: 0, failed: 0, skipped: 0, dupes: 0, completed: 0, runIdx: -1, queue: [] }; }
+    }
+
+    /* ── Create overlay DOM inside Shadow DOM ── */
+    function createOverlay() {
+      if (document.getElementById(OVERLAY_ID)) return;
+
+      overlayHost = document.createElement('div');
+      overlayHost.id = OVERLAY_ID;
+      overlayHost.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+      document.body.appendChild(overlayHost);
+
+      shadow = overlayHost.attachShadow({ mode: 'closed' });
+
+      const style = document.createElement('style');
+      style.textContent = `
+        *{box-sizing:border-box;margin:0;padding:0}
+        :host{all:initial;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+        .overlay{
+          width:340px;background:linear-gradient(135deg,#1a1e2e,#141826);
+          border:1px solid rgba(99,102,241,.3);border-radius:14px;
+          box-shadow:0 8px 32px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.05);
+          color:#e2e8f0;font-size:13px;overflow:hidden;
+          transition:width .3s ease,height .3s ease;
+          user-select:none;
+        }
+        .overlay.minimized .ov-body{display:none}
+        .overlay.minimized{width:auto;border-radius:12px}
+
+        /* Header / drag handle */
+        .ov-header{
+          display:flex;align-items:center;justify-content:space-between;
+          padding:12px 14px;cursor:move;
+          background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.15));
+          border-bottom:1px solid rgba(99,102,241,.2);
+        }
+        .ov-header-left{display:flex;align-items:center;gap:8px}
+        .ov-pulse{
+          width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0;
+          animation:ovPulse 1.5s ease-in-out infinite;
+        }
+        .ov-pulse.paused{background:#fbbf24;animation:none}
+        .ov-pulse.done{background:#22c55e;animation:none}
+        @keyframes ovPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+        .ov-title{font-size:12px;font-weight:700;letter-spacing:.03em;color:#c7d2fe}
+        .ov-header-btns{display:flex;gap:4px}
+        .ov-header-btns button{
+          background:none;border:none;color:#94a3b8;cursor:pointer;
+          width:24px;height:24px;display:flex;align-items:center;justify-content:center;
+          border-radius:6px;font-size:14px;transition:all .15s;
+        }
+        .ov-header-btns button:hover{background:rgba(255,255,255,.1);color:#e2e8f0}
+
+        /* Mini badge when minimized */
+        .ov-mini-badge{
+          display:none;padding:2px 10px;font-size:12px;font-weight:700;
+          color:#c7d2fe;white-space:nowrap;
+        }
+        .overlay.minimized .ov-mini-badge{display:inline}
+
+        /* Body */
+        .ov-body{padding:14px}
+
+        /* Job counter */
+        .ov-counter{
+          font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;
+          background:linear-gradient(135deg,#818cf8,#a78bfa);
+          -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+          background-clip:text;
+        }
+        .ov-subtitle{font-size:11px;color:#64748b;text-align:center;margin-bottom:12px}
+
+        /* Progress bar */
+        .ov-progress-track{
+          height:6px;background:rgba(255,255,255,.08);border-radius:3px;
+          margin-bottom:10px;overflow:hidden;
+        }
+        .ov-progress-fill{
+          height:100%;border-radius:3px;transition:width .5s ease;
+          background:linear-gradient(90deg,#6366f1,#8b5cf6);
+        }
+
+        /* Current job */
+        .ov-job{
+          background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);
+          border-radius:8px;padding:8px 10px;margin-bottom:10px;
+        }
+        .ov-job-label{font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+        .ov-job-url{
+          font-size:12px;color:#93c5fd;word-break:break-all;
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+        }
+
+        /* Status line */
+        .ov-status{font-size:12px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+        .ov-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+        .ov-status-dot.running{background:#4ade80}
+        .ov-status-dot.success{background:#22c55e}
+        .ov-status-dot.failed{background:#f87171}
+        .ov-status-dot.paused{background:#fbbf24}
+
+        /* Stats row */
+        .ov-stats{display:flex;gap:6px;margin-bottom:12px}
+        .ov-stat{
+          flex:1;text-align:center;padding:6px 4px;
+          background:rgba(255,255,255,.03);border-radius:6px;
+          border:1px solid rgba(255,255,255,.05);
+        }
+        .ov-stat-val{font-size:14px;font-weight:700}
+        .ov-stat-val.s-done{color:#4ade80}
+        .ov-stat-val.s-fail{color:#f87171}
+        .ov-stat-val.s-skip{color:#fbbf24}
+        .ov-stat-lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:1px}
+
+        /* Buttons */
+        .ov-controls{display:flex;gap:6px}
+        .ov-btn{
+          flex:1;padding:8px 0;border:none;border-radius:8px;
+          font-size:12px;font-weight:600;cursor:pointer;
+          transition:all .15s;display:flex;align-items:center;justify-content:center;gap:4px;
+        }
+        .ov-btn:active{transform:scale(.96)}
+        .ov-btn-pause{background:rgba(99,102,241,.2);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)}
+        .ov-btn-pause:hover{background:rgba(99,102,241,.35)}
+        .ov-btn-skip{background:rgba(251,191,36,.15);color:#fde68a;border:1px solid rgba(251,191,36,.25)}
+        .ov-btn-skip:hover{background:rgba(251,191,36,.3)}
+        .ov-btn-quit{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
+        .ov-btn-quit:hover{background:rgba(239,68,68,.3)}
+
+        /* Done state */
+        .ov-done-msg{
+          text-align:center;padding:8px 0;font-size:14px;font-weight:700;
+          color:#4ade80;display:none;
+        }
+        .overlay.all-done .ov-done-msg{display:block}
+        .overlay.all-done .ov-controls{display:none}
+        .overlay.all-done .ov-status{display:none}
+      `;
+
+      const container = document.createElement('div');
+      container.className = 'overlay';
+      container.innerHTML = `
+        <div class="ov-header">
+          <div class="ov-header-left">
+            <div class="ov-pulse"></div>
+            <span class="ov-title">Automation In Progress</span>
+            <span class="ov-mini-badge"></span>
+          </div>
+          <div class="ov-header-btns">
+            <button class="ov-minimize" title="Minimize">─</button>
+            <button class="ov-close" title="Stop & Close">✕</button>
+          </div>
+        </div>
+        <div class="ov-body">
+          <div class="ov-counter">Job 0 of 0</div>
+          <div class="ov-subtitle">Auto-applying to job applications</div>
+          <div class="ov-progress-track"><div class="ov-progress-fill" style="width:0%"></div></div>
+          <div class="ov-job">
+            <div class="ov-job-label">Current Job</div>
+            <div class="ov-job-url">Waiting...</div>
+          </div>
+          <div class="ov-status">
+            <div class="ov-status-dot running"></div>
+            <span class="ov-status-text">Starting automation...</span>
+          </div>
+          <div class="ov-stats">
+            <div class="ov-stat"><div class="ov-stat-val s-done" data-stat="done">0</div><div class="ov-stat-lbl">Applied</div></div>
+            <div class="ov-stat"><div class="ov-stat-val s-fail" data-stat="failed">0</div><div class="ov-stat-lbl">Failed</div></div>
+            <div class="ov-stat"><div class="ov-stat-val s-skip" data-stat="skipped">0</div><div class="ov-stat-lbl">Skipped</div></div>
+          </div>
+          <div class="ov-controls">
+            <button class="ov-btn ov-btn-pause">⏸ Pause</button>
+            <button class="ov-btn ov-btn-skip">⏭ Skip</button>
+            <button class="ov-btn ov-btn-quit">⏹ Quit</button>
+          </div>
+          <div class="ov-done-msg">All Done!</div>
+        </div>
+      `;
+
+      shadow.appendChild(style);
+      shadow.appendChild(container);
+
+      /* ── Drag logic ── */
+      const header = shadow.querySelector('.ov-header');
+      let isDragging = false, dragX = 0, dragY = 0;
+      header.addEventListener('mousedown', e => {
+        if (e.target.closest('button')) return;
+        isDragging = true;
+        dragX = e.clientX - overlayHost.getBoundingClientRect().left;
+        dragY = e.clientY - overlayHost.getBoundingClientRect().top;
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', e => {
+        if (!isDragging) return;
+        let nx = e.clientX - dragX;
+        let ny = e.clientY - dragY;
+        nx = Math.max(0, Math.min(window.innerWidth - 60, nx));
+        ny = Math.max(0, Math.min(window.innerHeight - 40, ny));
+        overlayHost.style.left   = nx + 'px';
+        overlayHost.style.top    = ny + 'px';
+        overlayHost.style.right  = 'auto';
+        overlayHost.style.bottom = 'auto';
+      });
+      document.addEventListener('mouseup', () => { isDragging = false; });
+
+      /* ── Minimize toggle ── */
+      shadow.querySelector('.ov-minimize').addEventListener('click', () => {
+        _isMinimized = !_isMinimized;
+        container.classList.toggle('minimized', _isMinimized);
+        shadow.querySelector('.ov-minimize').textContent = _isMinimized ? '□' : '─';
+        updateMiniBadge();
+      });
+
+      /* ── Close / Quit ── */
+      const removeOverlay = () => {
+        try { chrome.runtime.sendMessage({ type: 'STOP_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
+        destroyOverlay();
+      };
+      shadow.querySelector('.ov-close').addEventListener('click', removeOverlay);
+      shadow.querySelector('.ov-btn-quit').addEventListener('click', removeOverlay);
+
+      /* ── Pause / Resume ── */
+      shadow.querySelector('.ov-btn-pause').addEventListener('click', () => {
+        _isPaused = !_isPaused;
+        const btn = shadow.querySelector('.ov-btn-pause');
+        const pulse = shadow.querySelector('.ov-pulse');
+        const statusDot = shadow.querySelector('.ov-status-dot');
+        if (_isPaused) {
+          try { chrome.runtime.sendMessage({ type: 'PAUSE_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
+          btn.textContent = '▶ Resume';
+          pulse.classList.add('paused');
+          statusDot.className = 'ov-status-dot paused';
+          shadow.querySelector('.ov-status-text').textContent = 'Paused';
+          shadow.querySelector('.ov-title').textContent = 'Automation Paused';
+        } else {
+          try { chrome.runtime.sendMessage({ type: 'RESUME_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
+          btn.textContent = '⏸ Pause';
+          pulse.classList.remove('paused');
+          statusDot.className = 'ov-status-dot running';
+          shadow.querySelector('.ov-status-text').textContent = 'Filling application form...';
+          shadow.querySelector('.ov-title').textContent = 'Automation In Progress';
+        }
+      });
+
+      /* ── Skip ── */
+      shadow.querySelector('.ov-btn-skip').addEventListener('click', () => {
+        try { chrome.runtime.sendMessage({ type: 'SKIP_CSV_JOB' }).catch(() => {}); } catch (_) {}
+        shadow.querySelector('.ov-status-text').textContent = 'Skipping current job...';
+      });
+
+      LOG('CSV overlay created');
+    }
+
+    function destroyOverlay() {
+      if (overlayHost && overlayHost.parentNode) {
+        overlayHost.parentNode.removeChild(overlayHost);
+      }
+      overlayHost = null;
+      shadow = null;
+      if (_syncInterval) { clearInterval(_syncInterval); _syncInterval = null; }
+    }
+
+    function updateMiniBadge() {
+      if (!shadow) return;
+      const badge = shadow.querySelector('.ov-mini-badge');
+      if (badge) badge.textContent = `${_completedJobs} / ${_totalJobs}`;
+    }
+
+    /* ── Update the overlay UI ── */
+    function updateOverlayUI(stats) {
+      if (!shadow) return;
+      const { total, done, failed, dupes, completed, runIdx, queue } = stats;
+      _totalJobs = total;
+      _completedJobs = completed;
+
+      // Find running job
+      const runningJob = queue.find(j => j.status === 'running');
+      const currentIdx = runningJob ? queue.indexOf(runningJob) + 1 : completed;
+
+      shadow.querySelector('.ov-counter').textContent = `Job ${currentIdx} of ${total}`;
+      const pct = total > 0 ? Math.round(completed / total * 100) : 0;
+      shadow.querySelector('.ov-progress-fill').style.width = pct + '%';
+      shadow.querySelector('.ov-subtitle').textContent = `${pct}% complete · ${total - completed} remaining`;
+
+      if (runningJob) {
+        shadow.querySelector('.ov-job-url').textContent = runningJob.url;
+      }
+
+      shadow.querySelector('[data-stat="done"]').textContent = done;
+      shadow.querySelector('[data-stat="failed"]').textContent = failed;
+      shadow.querySelector('[data-stat="skipped"]').textContent = (stats.skipped || 0) + dupes;
+
+      updateMiniBadge();
+    }
+
+    /* ── Show "all done" state ── */
+    function showDoneState() {
+      if (!shadow) return;
+      const container = shadow.querySelector('.overlay');
+      container.classList.add('all-done');
+      shadow.querySelector('.ov-pulse').classList.add('done');
+      shadow.querySelector('.ov-title').textContent = 'Automation Complete';
+      shadow.querySelector('.ov-done-msg').style.display = 'block';
+      // Auto-remove after 8s
+      setTimeout(destroyOverlay, 8000);
+    }
+
+    /* ── Listen for messages from background ── */
+    chrome.runtime.onMessage.addListener(msg => {
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'CSV_JOB_STARTED') {
+        if (!shadow) {
+          // Create overlay if this is the automation tab
+          isAutomationTab().then(isActive => {
+            if (!isActive) return;
+            createOverlay();
+            readQueueStats().then(updateOverlayUI);
+          });
+        } else {
+          shadow.querySelector('.ov-job-url').textContent = msg.url || '';
+          if (!_isPaused) {
+            shadow.querySelector('.ov-status-text').textContent = 'Filling application form...';
+            shadow.querySelector('.ov-status-dot').className = 'ov-status-dot running';
+          }
+          readQueueStats().then(updateOverlayUI);
+        }
+      }
+
+      if (msg.type === 'CSV_JOB_COMPLETE') {
+        if (!shadow) return;
+        const statusMap = {
+          done:      'Applied successfully',
+          failed:    'Failed' + (msg.reason ? ': ' + msg.reason.slice(0, 40) : ''),
+          skipped:   'Skipped' + (msg.reason ? ': ' + msg.reason.slice(0, 40) : ''),
+          duplicate: 'Already applied — skipped',
+        };
+        const dotClass = msg.status === 'done' ? 'success' : msg.status === 'failed' ? 'failed' : 'running';
+        shadow.querySelector('.ov-status-text').textContent = statusMap[msg.status] || msg.status;
+        shadow.querySelector('.ov-status-dot').className = 'ov-status-dot ' + dotClass;
+        readQueueStats().then(updateOverlayUI);
+      }
+
+      if (msg.type === 'CSV_QUEUE_DONE') {
+        readQueueStats().then(stats => {
+          updateOverlayUI(stats);
+          showDoneState();
+        });
+      }
+
+      if (msg.type === 'CSV_QUEUE_PAUSED') {
+        _isPaused = true;
+        if (shadow) {
+          shadow.querySelector('.ov-btn-pause').textContent = '▶ Resume';
+          shadow.querySelector('.ov-pulse').classList.add('paused');
+          shadow.querySelector('.ov-status-dot').className = 'ov-status-dot paused';
+          shadow.querySelector('.ov-status-text').textContent = 'Paused';
+          shadow.querySelector('.ov-title').textContent = 'Automation Paused';
+        }
+      }
+    });
+
+    /* ── Initial check: if automation is already running, show overlay ── */
+    async function showOverlay() {
+      const active = await isAutomationTab();
+      if (!active) return;
+      createOverlay();
+      const stats = await readQueueStats();
+      updateOverlayUI(stats);
+    }
+
+    // Check on page load
+    sleep(1500).then(showOverlay);
+
+    // Periodic sync (handles tab reloads, external stops, etc.)
+    _syncInterval = setInterval(async () => {
+      try {
+        const data = await ST.get(['csvQueueRunning']);
+        if (!data.csvQueueRunning) {
+          if (shadow) destroyOverlay();
+          return;
+        }
+        if (shadow) {
+          const stats = await readQueueStats();
+          updateOverlayUI(stats);
+        }
+      } catch (_) {
+        // Extension context invalidated — stop syncing
+        clearInterval(_syncInterval);
+        _syncInterval = null;
+      }
+    }, 4000);
+
+  })();
+
   LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
 })();
