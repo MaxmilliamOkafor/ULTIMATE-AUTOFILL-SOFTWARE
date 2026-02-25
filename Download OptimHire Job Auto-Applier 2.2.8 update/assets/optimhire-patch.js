@@ -227,10 +227,43 @@
   async function getProfile() {
     const { candidateDetails } = await ST.get('candidateDetails');
     try {
-      return typeof candidateDetails === 'string'
+      const parsed = typeof candidateDetails === 'string'
         ? JSON.parse(candidateDetails)
         : (candidateDetails || {});
+      return normalizeProfile(parsed);
     } catch (_) { return {}; }
+  }
+
+  function pickFirst(...vals) {
+    for (const v of vals) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number') return String(v);
+    }
+    return '';
+  }
+
+  function normalizeProfile(raw = {}) {
+    const p = { ...(raw || {}) };
+    p.first_name = pickFirst(p.first_name, p.firstName, p.firstname, p.given_name, p.givenName);
+    p.last_name = pickFirst(p.last_name, p.lastName, p.lastname, p.family_name, p.familyName);
+    p.email = pickFirst(p.email, p.emailAddress, p.email_address, p.primaryEmail, p.workEmail);
+    p.phone = pickFirst(
+      p.phone, p.phoneNumber, p.phone_number, p.mobile, p.mobileNumber,
+      p.contactNumber, p.telephone
+    );
+    p.linkedin_profile_url = pickFirst(
+      p.linkedin_profile_url, p.linkedin, p.linkedIn, p.linkedinUrl, p.linkedin_url
+    );
+    p.website_url = pickFirst(p.website_url, p.website, p.portfolio, p.portfolio_url, p.personalWebsite);
+    p.github_url = pickFirst(p.github_url, p.github, p.githubUrl);
+    p.city = pickFirst(p.city, p.currentCity, p.locationCity);
+    p.state = pickFirst(p.state, p.region, p.province);
+    p.country = pickFirst(p.country, p.countryName);
+    p.postal_code = pickFirst(p.postal_code, p.zip, p.zipCode, p.postcode);
+    p.address = pickFirst(p.address, p.streetAddress, p.addressLine1);
+    p.current_title = pickFirst(p.current_title, p.currentTitle, p.title);
+    p.current_company = pickFirst(p.current_company, p.currentCompany, p.company);
+    return p;
   }
 
   /* ── Applications Account helper ────────────────────────── */
@@ -340,6 +373,63 @@
     } catch (_) {}
   }
 
+  function isFieldRequired(el) {
+    if (!el) return false;
+    if (el.required || el.getAttribute('aria-required') === 'true') return true;
+    if (el.getAttribute('required') !== null) return true;
+
+    const container = el.closest(
+      '.field,.application-field,.question,[class*="field"],[class*="Field"],[class*="question"],[class*="Question"],li,div'
+    );
+    const label = getLabel(el);
+    const labelText = (label || '').toLowerCase();
+    if (/\*\s*$|required/.test(labelText)) return true;
+
+    if (container) {
+      if (container.classList.contains('required')) return true;
+      if (container.getAttribute('data-required') === 'true') return true;
+      if (container.querySelector('.required,.asterisk,[aria-label*="required" i]')) return true;
+      const t = (container.textContent || '').slice(0, 180).toLowerCase();
+      if (/\brequired\b/.test(t)) return true;
+    }
+    return false;
+  }
+
+  function hasFieldValue(el) {
+    if (!el) return false;
+    if (el.tagName === 'SELECT') {
+      const val = (el.value || '').trim();
+      if (!val) return false;
+      const idx = el.selectedIndex;
+      if (idx >= 0) {
+        const opt = el.options[idx];
+        const txt = (opt?.textContent || '').trim().toLowerCase();
+        if (!txt || /select|choose|please|--/.test(txt)) return false;
+      }
+      return true;
+    }
+    if (el.type === 'checkbox' || el.type === 'radio') return !!el.checked;
+    return !!el.value?.trim();
+  }
+
+  function getMissingRequiredFields() {
+    const required = $$('input,textarea,select').filter(el => isVisible(el) && isFieldRequired(el));
+    const missing = [];
+    for (const el of required) {
+      if (el.type === 'radio' && el.name) {
+        const group = $$(`input[type="radio"][name="${CSS.escape(el.name)}"]`).filter(isVisible);
+        if (group.some(r => r.checked)) continue;
+      } else if (el.type === 'checkbox' && !el.checked) {
+        // required checkbox must be checked
+      } else if (hasFieldValue(el)) {
+        continue;
+      }
+      const lbl = getLabel(el) || el.name || el.id || 'Required field';
+      if (!missing.includes(lbl)) missing.push(lbl);
+    }
+    return missing;
+  }
+
   async function autoFillPage() {
     const p = await getProfile();
     const allFields = [];
@@ -355,17 +445,19 @@
     for (const el of allInputs) {
       const lbl = getLabel(el) || el.name || el.id || '';
       if (!lbl) continue;
-      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
-      allFields.push({ name: lbl, status: el.value?.trim() ? 'filled' : 'pending', required: isRequired });
-      if (el.value?.trim()) filledCount++;
+      const isRequired = isFieldRequired(el);
+      allFields.push({ name: lbl, status: hasFieldValue(el) ? 'filled' : 'pending', required: isRequired });
+      if (isRequired && hasFieldValue(el)) filledCount++;
     }
     for (const el of allSelects) {
       const lbl = getLabel(el) || el.name || el.id || '';
       if (!lbl) continue;
-      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
-      allFields.push({ name: lbl, status: el.value ? 'filled' : 'pending', required: isRequired });
-      if (el.value) filledCount++;
+      const isRequired = isFieldRequired(el);
+      allFields.push({ name: lbl, status: hasFieldValue(el) ? 'filled' : 'pending', required: isRequired });
+      if (isRequired && hasFieldValue(el)) filledCount++;
     }
+
+    const requiredFields = allFields.filter(f => f.required);
 
     // Send initial field list to sidebar
     reportFieldStatus(allFields);
@@ -374,7 +466,7 @@
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS',
         event: 'filling_progress',
-        total: allFields.length,
+        total: requiredFields.length,
         filled: filledCount,
         responses: Object.keys(p).length,
       }).catch(() => {});
@@ -393,7 +485,7 @@
       }
       inp.focus();
       nativeSet(inp, val);
-      filledCount++;
+      if (isFieldRequired(inp)) filledCount++;
       reportFieldFilled(lbl, 'filled');
       await sleep(60);
     }
@@ -413,7 +505,7 @@
       if (opt) {
         sel.value = opt.value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
-        filledCount++;
+        if (isFieldRequired(sel)) filledCount++;
         reportFieldFilled(lbl, 'filled');
       } else {
         reportFieldFilled(lbl, 'failed');
@@ -433,13 +525,22 @@
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         return guess && t.includes(guess.toLowerCase());
       });
-      if (match) { realClick(match); reportFieldFilled(lbl, 'filled'); filledCount++; continue; }
+      if (match) {
+        realClick(match);
+        reportFieldFilled(lbl, 'filled');
+        if (isFieldRequired(radios[0])) filledCount++;
+        continue;
+      }
       /* Default: pick Yes for yes/no questions */
       const yes = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
         return ['yes','true','1'].includes(t);
       });
-      if (yes) { realClick(yes); reportFieldFilled(lbl, 'filled'); filledCount++; }
+      if (yes) {
+        realClick(yes);
+        reportFieldFilled(lbl, 'filled');
+        if (isFieldRequired(radios[0])) filledCount++;
+      }
       else { reportFieldFilled(lbl, 'failed'); }
     }
 
@@ -448,18 +549,24 @@
       .filter(el => isVisible(el) && !el.checked)
       .forEach(cb => { realClick(cb); filledCount++; });
 
+    const missingRequired = getMissingRequiredFields();
+
     // Final progress update
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS',
         event: 'filling_progress',
-        total: allFields.length,
-        filled: filledCount,
+        total: requiredFields.length,
+        filled: Math.max(requiredFields.length - missingRequired.length, 0),
         responses: Object.keys(p).length,
       }).catch(() => {});
     } catch (_) {}
 
-    LOG(`autoFillPage: ${filledCount} of ${allFields.length} fields filled`);
+    LOG(`autoFillPage: ${requiredFields.length - missingRequired.length} of ${requiredFields.length} required fields filled`);
+    return {
+      totalRequired: requiredFields.length,
+      missingRequired,
+    };
   }
 
   /* ── Greenhouse: robust required-field handling ───────────── */
@@ -1185,6 +1292,13 @@
       return;
     }
 
+    const missingRequired = getMissingRequiredFields();
+    if (missingRequired.length > 0) {
+      LOG('Blocking submit: required fields still missing', missingRequired);
+      missingRequired.forEach(name => reportFieldFilled(name, 'failed'));
+      return;
+    }
+
     const submitSelectors = [
       'button[type="submit"]',
       'input[type="submit"]',
@@ -1263,6 +1377,7 @@
         else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
         await autoFillPage();
         await solveCaptcha();
+        await tryClickSubmit();
         sendResponse({ ok: true });
       })();
       return true;
