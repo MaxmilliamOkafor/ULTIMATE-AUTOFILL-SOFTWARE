@@ -624,9 +624,16 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
         sendResponse({ ok: true });
       }
       else if (msg.type === "SKIP_CSV_JOB" || msg.action === "skipCurrent") {
-        // Mark the most recently started active job as skipPending
+        // Directly resolve the active job as 'skipped' so queue moves to next CSV job immediately
         const entries = [..._activeJobs.values()];
-        if (entries.length) entries[entries.length - 1].skipPending = true;
+        for (const entry of entries) {
+          entry.skipPending = true;
+          if (entry.resolve) {
+            const r = entry.resolve;
+            entry.resolve = null;
+            r("skipped");
+          }
+        }
         relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'skipping' });
         sendResponse({ ok: true });
       }

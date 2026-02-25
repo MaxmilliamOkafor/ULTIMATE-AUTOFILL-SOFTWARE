@@ -79,6 +79,40 @@
   setTimeout(interceptStartApplying, 1000);
   setTimeout(interceptStartApplying, 3000);
 
+  /* ── 1c. Intercept Skip / Stop buttons to route through CSV queue ── */
+  function interceptSkipStop() {
+    const buttons = document.querySelectorAll('#__plasmo button, #__plasmo [role="button"]');
+    for (const btn of buttons) {
+      if (btn._ohSkipIntercepted) continue;
+      const text = (btn.textContent || '').trim().toLowerCase();
+      if (text === 'skip' || text === 'stop') {
+        btn._ohSkipIntercepted = true;
+        btn.addEventListener('click', async (e) => {
+          // Check if our CSV queue is running
+          try {
+            const { csvQueueRunning } = await ST.get('csvQueueRunning');
+            if (csvQueueRunning) {
+              e.stopImmediatePropagation();
+              e.preventDefault();
+              if (text === 'skip') {
+                console.log('[OH-SidepanelPatch] Skip clicked — skipping current CSV job');
+                chrome.runtime.sendMessage({ type: 'SKIP_CSV_JOB' }).catch(() => { });
+              } else {
+                console.log('[OH-SidepanelPatch] Stop clicked — stopping CSV queue');
+                chrome.runtime.sendMessage({ type: 'STOP_CSV_QUEUE' }).catch(() => { });
+              }
+              return false;
+            }
+          } catch (_) { }
+          // Not our queue — let native handle it
+        }, true);
+      }
+    }
+  }
+  // Keep scanning because Skip/Stop buttons appear dynamically
+  new MutationObserver(interceptSkipStop).observe(document.body, { childList: true, subtree: true });
+  interceptSkipStop();
+
   /* ── 2. Auto-trigger toggle ── */
   const toggle = document.getElementById('oh-auto-trigger-toggle');
   if (toggle) {
