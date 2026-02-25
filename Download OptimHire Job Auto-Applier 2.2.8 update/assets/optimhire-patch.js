@@ -319,37 +319,104 @@
   }
 
   /* ── T13/T17: Auto-fill missing required fields ─────────── */
+
+  /** Send field status updates to the sidebar via background relay */
+  function reportFieldStatus(fields) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_FIELD_LIST',
+        fields: fields, // [{name, status:'filled'|'pending'|'failed', required:bool}]
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
+  function reportFieldFilled(fieldName, status) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_FIELD_UPDATE',
+        fieldName: fieldName,
+        status: status, // 'filled', 'pending', 'failed'
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
   async function autoFillPage() {
     const p = await getProfile();
+    const allFields = [];
+    let filledCount = 0;
 
-    /* Inputs + textareas */
-    const inputs = $$(
+    /* ── Scan all visible form fields first to build field list ── */
+    const allInputs = $$(
       'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),' +
       'textarea'
-    ).filter(el => isVisible(el) && !el.value?.trim());
+    ).filter(isVisible);
+    const allSelects = $$('select').filter(isVisible);
+
+    for (const el of allInputs) {
+      const lbl = getLabel(el) || el.name || el.id || '';
+      if (!lbl) continue;
+      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
+      allFields.push({ name: lbl, status: el.value?.trim() ? 'filled' : 'pending', required: isRequired });
+      if (el.value?.trim()) filledCount++;
+    }
+    for (const el of allSelects) {
+      const lbl = getLabel(el) || el.name || el.id || '';
+      if (!lbl) continue;
+      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
+      allFields.push({ name: lbl, status: el.value ? 'filled' : 'pending', required: isRequired });
+      if (el.value) filledCount++;
+    }
+
+    // Send initial field list to sidebar
+    reportFieldStatus(allFields);
+    // Send overall status
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_STATUS',
+        event: 'filling_progress',
+        total: allFields.length,
+        filled: filledCount,
+        responses: Object.keys(p).length,
+      }).catch(() => {});
+    } catch (_) {}
+
+    /* Inputs + textareas — only unfilled */
+    const inputs = allInputs.filter(el => !el.value?.trim());
 
     for (const inp of inputs) {
       const lbl = getLabel(inp);
       if (!lbl) continue;
       const val = guessValue(lbl, p);
-      if (!val) continue;
+      if (!val) {
+        reportFieldFilled(lbl, 'failed');
+        continue;
+      }
       inp.focus();
       nativeSet(inp, val);
+      filledCount++;
+      reportFieldFilled(lbl, 'filled');
       await sleep(60);
     }
 
     /* Selects */
-    const selects = $$('select').filter(el => isVisible(el) && !el.value);
+    const selects = allSelects.filter(el => !el.value);
     for (const sel of selects) {
       const lbl = getLabel(sel);
       const val = guessValue(lbl, p);
-      if (!val) continue;
+      if (!val) {
+        if (lbl) reportFieldFilled(lbl, 'failed');
+        continue;
+      }
       const opt = $$('option', sel).find(
         o => o.text.toLowerCase().includes(val.toLowerCase())
       );
       if (opt) {
         sel.value = opt.value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
+        filledCount++;
+        reportFieldFilled(lbl, 'filled');
+      } else {
+        reportFieldFilled(lbl, 'failed');
       }
     }
 
@@ -366,19 +433,33 @@
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         return guess && t.includes(guess.toLowerCase());
       });
-      if (match) { realClick(match); continue; }
+      if (match) { realClick(match); reportFieldFilled(lbl, 'filled'); filledCount++; continue; }
       /* Default: pick Yes for yes/no questions */
       const yes = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
         return ['yes','true','1'].includes(t);
       });
-      if (yes) realClick(yes);
+      if (yes) { realClick(yes); reportFieldFilled(lbl, 'filled'); filledCount++; }
+      else { reportFieldFilled(lbl, 'failed'); }
     }
 
     /* Checkboxes – only required ones */
     $$('input[type=checkbox][required], input[type=checkbox][aria-required="true"]')
       .filter(el => isVisible(el) && !el.checked)
-      .forEach(cb => realClick(cb));
+      .forEach(cb => { realClick(cb); filledCount++; });
+
+    // Final progress update
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_STATUS',
+        event: 'filling_progress',
+        total: allFields.length,
+        filled: filledCount,
+        responses: Object.keys(p).length,
+      }).catch(() => {});
+    } catch (_) {}
+
+    LOG(`autoFillPage: ${filledCount} of ${allFields.length} fields filled`);
   }
 
   /* ── Greenhouse: robust required-field handling ───────────── */
@@ -1044,12 +1125,25 @@
     const successPatterns = [
       '/thanks', '/thank-you', '/success', '/confirmation',
       '/complete', '/submitted', '/application-submitted',
+      '/applied', '/done', '/thank_you',
     ];
     const checkSuccess = () => {
       const href = location.href.toLowerCase();
       if (successPatterns.some(p => href.includes(p))) { report('done'); return; }
       const body = document.body?.textContent?.toLowerCase() || '';
-      if (/application submitted|thank you for applying|application received|we.ve received your/i.test(body)) {
+      if (/application submitted|thank you for applying|application received|we.ve received your|your application has been|successfully submitted|application complete|thanks for applying|we have received|application was submitted/i.test(body)) {
+        report('done');
+      }
+      // Greenhouse-specific success
+      if (document.querySelector('#application_confirmation,.application-confirmation,.confirmation-text')) {
+        report('done');
+      }
+      // Lever-specific success
+      if (document.querySelector('.posting-confirmation,.application-confirmation')) {
+        report('done');
+      }
+      // Workday: success screen detection
+      if (document.querySelector('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"]')) {
         report('done');
       }
     };
@@ -1059,12 +1153,89 @@
 
     /* Auto-fill on page load for CSV mode */
     await sleep(2000);
+    // Notify sidebar: ATS detected, analyzing
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_STATUS', event: 'analyzing_form',
+        atsName: CURRENT_ATS || 'Unknown', url: location.href,
+      }).catch(() => {});
+    } catch (_) {}
+
     if (CURRENT_ATS === 'Workday')         await workdayAutofill();
     else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
     else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
     else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
     await autoFillPage();
     await solveCaptcha();
+
+    // After all fields filled, try to find and click submit button
+    // This ensures the application is actually submitted
+    await sleep(1500);
+    await tryClickSubmit();
+  }
+
+  /** Find and click the submit / apply button to ensure the application is sent */
+  async function tryClickSubmit() {
+    // Check if autoSubmit is enabled in settings
+    const { csvQueueSettings } = await ST.get('csvQueueSettings');
+    const autoSubmit = csvQueueSettings?.autoSubmit !== false; // default true for CSV mode
+
+    if (!autoSubmit) {
+      LOG('Auto-submit disabled — waiting for manual submit or timeout');
+      return;
+    }
+
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button[data-automation-id="bottom-navigation-next-button"]', // Workday
+      'button[data-automation-id="submit"]', // Workday submit
+      '#submit_app', // Greenhouse
+      '.postings-btn-submit', // Lever
+      'button.application-submit', // Lever
+      'button[data-qa="btn-submit"]', // SmartRecruiters
+      'button[aria-label*="Submit"]',
+      'button[aria-label*="submit"]',
+    ];
+
+    // Look for visible submit-like buttons
+    for (const sel of submitSelectors) {
+      const btn = $(sel);
+      if (btn && isVisible(btn)) {
+        LOG('Found submit button:', sel, btn.textContent?.trim());
+        try {
+          chrome.runtime.sendMessage({
+            type: 'SIDEBAR_STATUS', event: 'submitting',
+          }).catch(() => {});
+        } catch (_) {}
+        await sleep(500);
+        realClick(btn);
+        LOG('Clicked submit button');
+        return;
+      }
+    }
+
+    // Fallback: find button by text content
+    const buttons = $$('button,a[role="button"],input[type="submit"]').filter(isVisible);
+    const submitBtn = buttons.find(btn => {
+      const t = (btn.textContent || btn.value || '').trim().toLowerCase();
+      return /^(submit|apply|send|complete|finish|next|continue)(\s|$)/i.test(t) &&
+        !/cancel|back|prev|close/i.test(t);
+    });
+
+    if (submitBtn) {
+      LOG('Found submit button by text:', submitBtn.textContent?.trim());
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SIDEBAR_STATUS', event: 'submitting',
+        }).catch(() => {});
+      } catch (_) {}
+      await sleep(500);
+      realClick(submitBtn);
+      LOG('Clicked submit button (text match)');
+    } else {
+      LOG('No submit button found — relying on OptimHire pipeline submit');
+    }
   }
 
   /* Run ATS-specific autofill on DOM changes (CSV mode) */
@@ -1295,6 +1466,7 @@
 
     /* Open OptimHire side panel + show banner */
     chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'ats_detected', atsName: CURRENT_ATS, url: location.href }).catch(() => {});
     showAutofillBanner('detecting', CURRENT_ATS);
     acquireWakeLock();
     LOG(`Auto-trigger: ${CURRENT_ATS} application form detected — autofilling`);
@@ -1302,6 +1474,7 @@
     /* Short pause so the side panel renders */
     await sleep(800);
     showAutofillBanner('filling', CURRENT_ATS);
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS, url: location.href }).catch(() => {});
 
     try {
       /* ATS-specific autofill */

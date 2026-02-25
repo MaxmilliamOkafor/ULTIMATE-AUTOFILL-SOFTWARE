@@ -585,11 +585,12 @@ $el('invHeader').addEventListener('click', () => {
 
 /* ── Automation Settings ── */
 const SETTINGS_KEY = 'csvQueueSettings';
-let _settings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: false, reuseTab: false, skipCaptcha: true };
+let _settings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: true, reuseTab: true, skipCaptcha: true };
 
 function loadSettings() {
   return new Promise(res => chrome.storage.local.get(SETTINGS_KEY, d => {
     if (d[SETTINGS_KEY]) Object.assign(_settings, d[SETTINGS_KEY]);
+    _settings.reuseTab = true; // Always force single-tab mode
     $el('settingDelayMin').value       = _settings.delayMin;
     $el('settingDelayMax').value       = _settings.delayMax;
     $el('settingConcurrency').value    = _settings.concurrency;
@@ -606,7 +607,7 @@ function saveSettings() {
     delayMax:    Math.max(1, +$el('settingDelayMax').value   || 7),
     concurrency: Math.max(1, +$el('settingConcurrency').value || 1),
     autoSubmit:  $el('settingAutoSubmit').checked,
-    reuseTab:    $el('settingReuseTab').checked,
+    reuseTab:    true,  // Always use single tab
     skipCaptcha: $el('settingSkipCaptcha').checked,
   };
   chrome.storage.local.set({ [SETTINGS_KEY]: _settings });

@@ -85,11 +85,12 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   const _activeJobs    = new Map();
   let _reuseTabId      = null;  // for reuseTab mode (single-tab mode only)
   // Queue automation settings (defaults match UI defaults)
-  let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:false, skipCaptcha:true };
+  let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:true, skipCaptcha:true };
 
-  // Load persisted settings on startup
+  // Load persisted settings on startup — always force reuseTab for single-tab mode
   chrome.storage.local.get('csvQueueSettings', d => {
     if (d.csvQueueSettings) Object.assign(_queueSettings, d.csvQueueSettings);
+    _queueSettings.reuseTab = true; // ALWAYS use single tab
   });
 
   function randDelay(minS, maxS) {
@@ -105,6 +106,60 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       if (js.tabId) chrome.tabs.sendMessage(js.tabId, msg).catch(() => {});
     }
   }
+
+  // Relay field-tracking and status messages from content scripts to sidepanel
+  function relaySidebarMsg(msg) {
+    chrome.runtime.sendMessage(msg).catch(() => {});
+  }
+
+  /* ── ATS domain list for auto-detection on any tab navigation ── */
+  const _ATS_AUTO_DETECT = {
+    'greenhouse.io': 'Greenhouse', 'boards.greenhouse.io': 'Greenhouse',
+    'lever.co': 'Lever', 'jobs.lever.co': 'Lever', 'apply.lever.co': 'Lever',
+    'myworkdayjobs.com': 'Workday', 'workday.com': 'Workday',
+    'icims.com': 'iCIMS', 'oraclecloud.com': 'OracleCloud',
+    'smartrecruiters.com': 'SmartRecruiters', 'ashbyhq.com': 'Ashby',
+    'bamboohr.com': 'BambooHR', 'jobvite.com': 'Jobvite',
+    'apply.workable.com': 'Workable', 'workable.com': 'Workable',
+    'breezy.hr': 'BreezyHR', 'jazzhr.com': 'JazzHR',
+    'taleo.net': 'Taleo', 'indeed.com': 'Indeed', 'linkedin.com': 'LinkedIn',
+    'teamtailor.com': 'Teamtailor', 'paylocity.com': 'Paylocity',
+    'dice.com': 'Dice', 'ziprecruiter.com': 'ZipRecruiter',
+  };
+
+  function detectAtsFromUrl(url) {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      for (const [domain, name] of Object.entries(_ATS_AUTO_DETECT)) {
+        if (hostname.includes(domain)) {
+          // LinkedIn: only on /jobs path
+          if (name === 'LinkedIn' && !new URL(url).pathname.startsWith('/jobs')) return null;
+          return name;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /* ── Auto-open sidepanel on ATS page detection ── */
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status !== 'complete' || !tab.url) return;
+    const ats = detectAtsFromUrl(tab.url);
+    if (!ats) return;
+    // Auto-open sidepanel on this tab
+    try {
+      chrome.sidePanel.setOptions({ enabled: true, tabId: tabId, path: 'sidepanel.html' });
+      chrome.sidePanel.open({ tabId: tabId }).catch(() => {});
+    } catch (_) {}
+    // Broadcast ATS detection to sidepanel
+    chrome.runtime.sendMessage({
+      type: 'SIDEBAR_STATUS',
+      event: 'ats_detected',
+      atsName: ats,
+      url: tab.url,
+      tabId: tabId,
+    }).catch(() => {});
+  });
 
   async function updateCsvJobStatus(id, status, note) {
     try {
@@ -162,11 +217,13 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     }
 
     broadcast({ type: "CSV_JOB_STARTED", jobId: job.id, url: job.url });
+    // Send sidebar status: Opening job page
+    relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'opening_page', url: job.url, jobTitle: job.title || '', company: job.company || '' });
 
-    // Open the job URL (new tab, or reuse existing tab if reuseTab setting is on)
+    // Open the job URL — ALWAYS reuse single tab
     let tab;
     try {
-      if (_queueSettings.reuseTab && _reuseTabId) {
+      if (_reuseTabId) {
         // Try to reuse existing tab
         try {
           await chrome.tabs.update(_reuseTabId, { url: job.url, active: true });
@@ -178,7 +235,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       }
       if (!tab) {
         tab = await chrome.tabs.create({ url: job.url, active: true });
-        if (_queueSettings.reuseTab) _reuseTabId = tab.id;
+        _reuseTabId = tab.id;
       }
     } catch(e) {
       await updateCsvJobStatus(job.id, "failed", "Could not open tab: " + e.message);
@@ -236,6 +293,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
 
       // Wait for page JS to hydrate
       await new Promise(r => setTimeout(r, 2500));
+
+      // Sidebar: Analyzing form
+      relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', url: job.url, tabId: tab.id });
 
       try {
         // 1. Read the user's profile (same data the website sends)
@@ -357,6 +417,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
           },
         });
 
+        // Sidebar: Filling form
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'filling_form', atsName: atsName, url: job.url });
+
         // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
         //    Retry up to 3 times with increasing delays if content script isn't ready
         const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled };
@@ -409,11 +472,10 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       finalStatus = isTimeout ? "skipped" : "failed";
     }
     broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: finalStatus, reason: finalReason });
+    // Sidebar: job complete
+    relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'job_complete', status: finalStatus, jobId: job.id, url: job.url });
 
-    // Close the tab (unless reuseTab is on)
-    if (!_queueSettings.reuseTab) {
-      try { chrome.tabs.remove(tab.id); } catch(_) {}
-    }
+    // Never close tab in single-tab mode — it gets reused for the next URL
 
     // Pause check
     if (csvQueuePaused) {
@@ -477,6 +539,12 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   /* ─── Message listener for CSV queue + credits + dedup ──────── */
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const senderTabId = sender?.tab?.id;
+
+    // Relay field-tracking / status messages from content scripts -> sidepanel
+    if (msg && (msg.type === 'SIDEBAR_FIELD_UPDATE' || msg.type === 'SIDEBAR_STATUS' || msg.type === 'SIDEBAR_FIELD_LIST')) {
+      chrome.runtime.sendMessage(msg).catch(() => {});
+      return false;
+    }
 
     // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
     if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
@@ -542,14 +610,25 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         csvQueuePaused  = false;
         // Signal all active jobs to stop
         for (const js of _activeJobs.values()) { js.skipPending = true; }
-        if (_reuseTabId) { try { chrome.tabs.remove(_reuseTabId); } catch(_) {} _reuseTabId = null; }
+        _reuseTabId = null;
         await chrome.storage.local.set({ csvQueueRunning: false });
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'queue_stopped' });
         sendResponse({ ok: true });
       }
-      else if (msg.type === "SKIP_CSV_JOB") {
+      else if (msg.type === "SKIP_CSV_JOB" || msg.action === "skipCurrent") {
         // Mark the most recently started active job as skipPending
         const entries = [..._activeJobs.values()];
         if (entries.length) entries[entries.length - 1].skipPending = true;
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'skipping' });
+        sendResponse({ ok: true });
+      }
+      else if (msg.action === "stopQueue") {
+        csvQueueRunning = false;
+        csvQueuePaused  = false;
+        for (const js of _activeJobs.values()) { js.skipPending = true; }
+        _reuseTabId = null;
+        await chrome.storage.local.set({ csvQueueRunning: false });
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'queue_stopped' });
         sendResponse({ ok: true });
       }
       else if (msg.type === "CHECK_ALREADY_APPLIED") {
