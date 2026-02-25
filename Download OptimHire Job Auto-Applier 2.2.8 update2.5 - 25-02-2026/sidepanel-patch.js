@@ -285,6 +285,7 @@
         // Clear textarea
         csvUrls.value = '';
         refreshBadge();
+        renderJobList();
 
         // Start unified queue (CSV first → OptimHire API fallback)
         if (added > 0) {
@@ -303,7 +304,82 @@
     });
   }
 
-  /* ── 4. Listen for queue updates to refresh badge ── */
+  /* ── 4. Job list rendering + management ── */
+  const csvJobList = document.getElementById('csvJobList');
+  const csvJobItems = document.getElementById('csvJobItems');
+  const csvSelectAll = document.getElementById('csvSelectAll');
+  const csvDeleteBtn = document.getElementById('csvDeleteSelected');
+
+  async function renderJobList() {
+    if (!csvJobItems) return;
+    const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
+    const csvJobs = q.filter(j => j.source === 'csv_import');
+    if (csvJobs.length === 0) {
+      if (csvJobList) csvJobList.style.display = 'none';
+      return;
+    }
+    if (csvJobList) csvJobList.style.display = 'block';
+
+    const statusIcon = (s) => {
+      if (s === 'done') return '✅';
+      if (s === 'running') return '🔄';
+      if (s === 'failed') return '❌';
+      if (s === 'skipped') return '⏭';
+      if (s === 'duplicate') return '🔁';
+      return '⏳';
+    };
+
+    csvJobItems.innerHTML = csvJobs.map((j, i) => {
+      const num = j.queueNumber || (i + 1);
+      let hostname = '';
+      try { hostname = new URL(j.url).hostname; } catch (_) { hostname = j.url.slice(0, 40); }
+      return `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;font-size:10px;border-bottom:1px solid #1e2030">
+        <input type="checkbox" class="csv-job-cb" data-id="${j.id}" style="accent-color:#6366f1;flex-shrink:0">
+        <span style="color:#6366f1;font-weight:700;min-width:20px">#${num}</span>
+        <span style="color:${j.status === 'done' ? '#4ade80' : j.status === 'failed' ? '#ef4444' : '#94a3b8'};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+          title="${j.url}">${hostname}</span>
+        <span>${statusIcon(j.status)}</span>
+      </div>`;
+    }).join('');
+
+    // Wire up checkboxes → show/hide delete button
+    csvJobItems.querySelectorAll('.csv-job-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const checked = csvJobItems.querySelectorAll('.csv-job-cb:checked').length;
+        if (csvDeleteBtn) csvDeleteBtn.style.display = checked > 0 ? '' : 'none';
+        if (csvSelectAll) csvSelectAll.checked = checked === csvJobs.length;
+      });
+    });
+  }
+
+  // Select All handler
+  if (csvSelectAll) {
+    csvSelectAll.addEventListener('change', () => {
+      const cbs = csvJobItems?.querySelectorAll('.csv-job-cb') || [];
+      cbs.forEach(cb => { cb.checked = csvSelectAll.checked; });
+      if (csvDeleteBtn) csvDeleteBtn.style.display = csvSelectAll.checked && cbs.length > 0 ? '' : 'none';
+    });
+  }
+
+  // Delete Selected handler
+  if (csvDeleteBtn) {
+    csvDeleteBtn.addEventListener('click', async () => {
+      const checked = [...(csvJobItems?.querySelectorAll('.csv-job-cb:checked') || [])];
+      const idsToDelete = new Set(checked.map(cb => cb.dataset.id));
+      if (idsToDelete.size === 0) return;
+      const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
+      const filtered = q.filter(j => !idsToDelete.has(j.id));
+      await ST.set({ [CSV_QUEUE_KEY]: filtered });
+      if (csvSelectAll) csvSelectAll.checked = false;
+      csvDeleteBtn.style.display = 'none';
+      refreshBadge();
+      renderJobList();
+    });
+  }
+
+  renderJobList();
+
+  /* ── 5. Listen for queue updates to refresh badge + list ── */
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'IS_PANEL_OPEN') {
       sendResponse({ is_panel_open: true });
@@ -316,11 +392,12 @@
     if (msg?.type === 'CSV_QUEUE_UPDATED' || msg?.type === 'CSV_JOB_COMPLETE'
       || msg?.type === 'CSV_QUEUE_DONE') {
       refreshBadge();
+      renderJobList();
     }
   });
 
-  // Periodic badge refresh
-  setInterval(refreshBadge, 5000);
+  // Periodic badge + list refresh
+  setInterval(() => { refreshBadge(); renderJobList(); }, 5000);
 
   console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue)');
 })();

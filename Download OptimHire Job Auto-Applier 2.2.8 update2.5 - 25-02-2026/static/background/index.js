@@ -306,7 +306,7 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       csvActiveJobId: job.id,
       csvActiveTabId: tab.id,
       csvQueueRunning: true,
-      isAutoProcessStartJob: true,
+      // DO NOT set isAutoProcessStartJob — that triggers native pipeline which fetches its own jobs
       // Set autoApplyState so the OptimHire sidepanel shows "Auto-Apply Mode"
       autoApplyState: {
         isActive: true,
@@ -321,7 +321,6 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
           copilot_job_id: job.id,
         },
       },
-      // Also set appliedCount for the native counter
       appliedCount: _csvApplied,
     });
     // Notify sidepanel of state change with current job details
@@ -348,8 +347,8 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
     } catch (_) { }
 
     // ── Trigger autofill when the tab finishes loading ──────────
-    // DO NOT set isAutoProcessStartJob — that triggers the native pipeline
-    // which fetches its own unrelated API jobs. CSV jobs use our patch autofill only.
+    // Send FILL_COMPLEX_FORM with properly constructed data so autofill.js does
+    // field-by-field filling on THIS specific page. Also persist complexFormData.
     const _triggerOnTabLoad = async (updTabId, changeInfo) => {
       if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
       chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
@@ -357,26 +356,122 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       // Wait for page JS to hydrate (5s for SPAs like Workday)
       await new Promise(r => setTimeout(r, 5000));
 
-      // Set CSV job tracking (NOT isAutoProcessStartJob — that would start native pipeline)
+      // Update CSV tracking
       await chrome.storage.local.set({
         copilotTabId: tab.id,
         csvActiveJobId: job.id,
         csvActiveTabId: tab.id,
       });
 
-      // Sidebar: Analyzing form
       relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', url: job.url, tabId: tab.id });
 
-      // Send TRIGGER_AUTOFILL to our patch content script for ATS-specific filling
       try {
-        await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
-      } catch (_) { }
+        // 1. Read seeker/profile data from storage
+        const storageData = await chrome.storage.local.get([
+          'candidateDetails', 'cachedSeekerInfo', 'seekerDetails',
+          'Talent_Auth_Token', 'candidateId',
+        ]);
+        let profile = {};
+        try {
+          const cd = storageData.candidateDetails;
+          profile = typeof cd === 'string' ? JSON.parse(cd) : (cd || {});
+        } catch (_) { }
+        let seeker = storageData.cachedSeekerInfo
+          || storageData.seekerDetails
+          || profile?.seeker
+          || profile
+          || {};
 
-      // Retry after 8s for multi-page forms / late-rendering fields
-      await new Promise(r => setTimeout(r, 8000));
-      try {
-        await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
-      } catch (_) { }
+        // 2. If seeker is empty, fetch from API
+        if (!seeker?.first_name && storageData.Talent_Auth_Token && storageData.candidateId) {
+          try {
+            const resp = await fetch(
+              `https://optimhire.com/api/v1/candidate/${storageData.candidateId}/application`,
+              { headers: { 'Content-Type': 'application/json', 'Auth_Token': storageData.Talent_Auth_Token } }
+            );
+            if (resp.ok) {
+              const json = await resp.json();
+              if (json?.data?.data?.seeker) {
+                seeker = json.data.data.seeker;
+                await chrome.storage.local.set({ cachedSeekerInfo: seeker });
+              }
+            }
+          } catch (_) { }
+        }
+
+        // 3. Detect ATS from URL
+        const jobUrl = job.url.toLowerCase();
+        const atsEntries = [
+          ['greenhouse.io', 'greenhouse'], ['lever.co', 'lever'],
+          ['myworkdayjobs.com', 'workday'], ['workday.com', 'workday'],
+          ['icims.com', 'icims'], ['oraclecloud.com', 'oraclecloud'],
+          ['smartrecruiters.com', 'smartrecruiters'], ['ashbyhq.com', 'ashby'],
+          ['bamboohr.com', 'bamboohr'], ['jobvite.com', 'jobvite'],
+          ['workable.com', 'workable'], ['taleo.net', 'taleo'],
+          ['indeed.com', 'indeed'], ['linkedin.com', 'linkedin'],
+        ];
+        let atsName = '';
+        for (const [domain, name] of atsEntries) {
+          if (jobUrl.includes(domain)) { atsName = name; break; }
+        }
+
+        // 4. Build applicationDetails for THIS CSV URL
+        const applicationDetails = job.apiDetails || {
+          source: {
+            apply_now_url: job.url, ats_name: atsName,
+            job_title: job.title || '', company_name: job.company || '',
+          },
+          seeker: seeker,
+          copilot_job_id: job.id,
+          additional_info: {
+            additional_info: JSON.stringify({ requiresLogin: false, isCaptchaRequired: false }),
+          },
+        };
+        if (!applicationDetails.seeker) applicationDetails.seeker = seeker;
+
+        const complexInstructions = {
+          requiresLogin: false, isCaptchaRequired: false,
+          checkFormInIframe: {
+            enabled: true,
+            srcIncludes: ['greenhouse.io', 'lever.co', 'myworkdayjobs.com',
+              'icims.com', 'smartrecruiters.com', 'ashbyhq.com',
+              'bamboohr.com', 'jobvite.com', 'workable.com', 'taleo.net'],
+          },
+          applicationStatus: { jobClosed: [] },
+        };
+
+        // 5. Persist complexFormData — autofill.js reads this on page load/navigation
+        await chrome.storage.local.set({
+          complexFormInProgress: true,
+          complexFormData: {
+            applicationDetails, complexInstructions,
+            autoApplyEnabled: true, currentDepth: 0, maxDepth: 10,
+          },
+        });
+
+        // 6. Send FILL_COMPLEX_FORM for native field-by-field filling
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'filling_form', atsName, url: job.url });
+        const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled: true };
+        let fillSent = false;
+        for (let attempt = 0; attempt < 3 && !fillSent; attempt++) {
+          try {
+            const resp = await chrome.tabs.sendMessage(tab.id, fillMsg);
+            if (resp) fillSent = true;
+          } catch (_) { }
+          if (!fillSent) await new Promise(r => setTimeout(r, 2000 + attempt * 2000));
+        }
+
+        // 7. Also send TRIGGER_AUTOFILL to our patch as backup
+        try { await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }); } catch (_) { }
+
+        // 8. Retry after 10s for late-rendering fields
+        await new Promise(r => setTimeout(r, 10000));
+        try { await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }); } catch (_) { }
+
+      } catch (err) {
+        console.error('[OH-BGPatch] _triggerOnTabLoad error:', err);
+        try { await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }); } catch (_) { }
+      }
     };
     chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
 

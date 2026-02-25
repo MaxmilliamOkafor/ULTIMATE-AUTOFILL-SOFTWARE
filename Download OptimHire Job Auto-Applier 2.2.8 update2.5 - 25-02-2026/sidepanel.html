@@ -264,6 +264,19 @@
         <button class="csv-start-btn" id="csvStartBtn">⚡ Add to Queue & Start</button>
       </div>
       <div class="csv-counter" id="csvStatus"></div>
+
+      <!-- Queued jobs list -->
+      <div id="csvJobList" style="margin-top:8px;max-height:200px;overflow-y:auto;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;cursor:pointer">
+            <input type="checkbox" id="csvSelectAll" style="accent-color:#6366f1"> Select All
+          </label>
+          <button id="csvDeleteSelected"
+            style="font-size:10px;padding:2px 8px;background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;display:none">🗑
+            Delete Selected</button>
+        </div>
+        <div id="csvJobItems"></div>
+      </div>
     </div>
 
     <!-- Auto-trigger toggle -->
