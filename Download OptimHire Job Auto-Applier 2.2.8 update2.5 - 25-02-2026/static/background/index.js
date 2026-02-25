@@ -248,6 +248,13 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     // Register this tab as the copilot tab so autofill.js (COPILOT_TABID check)
     // returns sameTab:true and processes the form automatically.
     _activeJobs.set(job.id, { tabId: tab.id, resolve: null, skipPending: false });
+    // Compute CSV queue totals so the native sidepanel shows "X of Y applied"
+    let _csvTotal = 0, _csvApplied = 0;
+    try {
+      const { csvJobQueue: _cq = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+      _csvTotal = _cq.length;
+      _csvApplied = _cq.filter(j => ['done','failed','skipped','duplicate'].includes(j.status)).length;
+    } catch(_) {}
     await chrome.storage.local.set({
       copilotTabId:        tab.id,
       csvActiveJobId:      job.id,
@@ -257,22 +264,30 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       // Set autoApplyState so the OptimHire sidepanel shows "Auto-Apply Mode"
       autoApplyState: {
         isActive: true,
-        applicationState: 'in_progress',
-        progress: 50,
+        applicationState: 'in-progress',
+        progress: _csvTotal > 0 ? Math.round(_csvApplied / _csvTotal * 100) : 10,
         statusMessage: 'Filling application form...',
+        appliedCount: _csvApplied,
+        total: _csvTotal,
+        totalJobs: _csvTotal,
         applicationDetails: {
           source: { apply_now_url: job.url, job_title: job.title || '' },
           copilot_job_id: job.id,
         },
       },
+      // Also set appliedCount for the native counter
+      appliedCount: _csvApplied,
     });
-    // Notify sidepanel of state change
+    // Notify sidepanel of state change with counts
     chrome.runtime.sendMessage({
       type: 'AUTO_APPLY_STATE_UPDATE',
       isActive: true,
-      applicationState: 'in_progress',
-      progress: 50,
+      applicationState: 'in-progress',
+      progress: _csvTotal > 0 ? Math.round(_csvApplied / _csvTotal * 100) : 10,
       statusMessage: 'Filling application form...',
+      appliedCount: _csvApplied,
+      total: _csvTotal,
+      totalJobs: _csvTotal,
     }).catch(() => {});
 
     // Open the sidepanel on the job tab — mirrors what the original website flow does.
@@ -291,8 +306,8 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
       chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
 
-      // Wait for page JS to hydrate
-      await new Promise(r => setTimeout(r, 2500));
+      // Wait for page JS to hydrate (5s to ensure SPAs like Workday fully render)
+      await new Promise(r => setTimeout(r, 5000));
 
       // Sidebar: Analyzing form
       relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', url: job.url, tabId: tab.id });
@@ -424,15 +439,21 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         //    Retry up to 3 times with increasing delays if content script isn't ready
         const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled };
         let fillSent = false;
-        for (let attempt = 0; attempt < 3 && !fillSent; attempt++) {
+        for (let attempt = 0; attempt < 4 && !fillSent; attempt++) {
           try {
             const resp = await chrome.tabs.sendMessage(tab.id, fillMsg);
             if (resp) fillSent = true;
           } catch (_) {}
-          if (!fillSent) await new Promise(r => setTimeout(r, 2000 + attempt * 1500));
+          if (!fillSent) await new Promise(r => setTimeout(r, 3000 + attempt * 2000));
         }
         // 8. Also send TRIGGER_AUTOFILL as belt-and-suspenders for the patch autofill
         chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }).catch(() => {});
+
+        // 9. Secondary retry after 8s — catches multi-page forms where fields appear late
+        await new Promise(r => setTimeout(r, 8000));
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
+        } catch(_) {}
 
       } catch(err) {
         // Fallback: send TRIGGER_AUTOFILL for patch-based autofill
@@ -443,7 +464,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
 
     // Wait for autofill.js to report success/error via COMPLEX_FORM_SUCCESS/ERROR
-    const result = await waitForCsvResult(tab.id, job.id, 90_000); // 90s timeout — skip if no response
+    const result = await waitForCsvResult(tab.id, job.id, 180_000); // 180s timeout — enough for multi-page apps
 
     // Remove the load listener if the job timed out before the tab finished loading
     chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);

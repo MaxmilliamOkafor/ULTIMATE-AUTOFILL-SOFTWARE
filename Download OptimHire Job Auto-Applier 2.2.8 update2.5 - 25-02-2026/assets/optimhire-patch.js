@@ -35,9 +35,9 @@
 
   /* ── Helpers ───────────────────────────────────────────── */
   const LOG = (...a) => console.log('[OH-Patch]', ...a);
-  const ST  = chrome.storage.local;
-  const $   = (s, c = document) => c.querySelector(s);
-  const $$  = (s, c = document) => [...c.querySelectorAll(s)];
+  const ST = chrome.storage.local;
+  const $ = (s, c = document) => c.querySelector(s);
+  const $$ = (s, c = document) => [...c.querySelectorAll(s)];
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   /** React-compatible value setter */
@@ -49,9 +49,9 @@
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
       if (setter) setter.call(el, val); else el.value = val;
     } catch (_) { el.value = val; }
-    el.dispatchEvent(new Event('input',  { bubbles: true }));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur',   { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
   /** Real pointer-events click sequence */
@@ -59,7 +59,7 @@
     if (!el) return;
     el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     el.click();
   }
 
@@ -71,36 +71,36 @@
 
   /* ── T1: Supported ATS domains ─────────────────────────── */
   const ATS_DOMAINS = {
-    'greenhouse.io':       'Greenhouse',
-    'lever.co':            'Lever',
-    'breezy.hr':           'BreezyHR',
-    'myworkdayjobs.com':   'Workday',
-    'workday.com':         'Workday',
-    'icims.com':           'iCIMS',
-    'taleo.net':           'Taleo',
-    'oraclecloud.com':     'OracleCloud',
-    'fa.oraclecloud.com':  'OracleCloud',
+    'greenhouse.io': 'Greenhouse',
+    'lever.co': 'Lever',
+    'breezy.hr': 'BreezyHR',
+    'myworkdayjobs.com': 'Workday',
+    'workday.com': 'Workday',
+    'icims.com': 'iCIMS',
+    'taleo.net': 'Taleo',
+    'oraclecloud.com': 'OracleCloud',
+    'fa.oraclecloud.com': 'OracleCloud',
     'smartrecruiters.com': 'SmartRecruiters',
-    'ashbyhq.com':         'Ashby',
-    'bamboohr.com':        'BambooHR',
-    'jobvite.com':         'Jobvite',
-    'apply.workable.com':  'Workable',
-    'paylocity.com':       'Paylocity',
-    'jazzhr.com':          'JazzHR',
-    'ziprecruiter.com':    'ZipRecruiter',
-    'manatal.com':         'Manatal',
-    'teamtailor.com':      'Teamtailor',
-    'bullhorn.com':        'Bullhorn',
-    'dice.com':            'Dice',
-    'hiring.cafe':         'HiringCafe',
-    'indeed.com':          'Indeed',
-    'linkedin.com':        'LinkedIn',
-    'jobs.lever.co':       'Lever',
-    'boards.greenhouse.io':'Greenhouse',
-    'apply.lever.co':      'Lever',
+    'ashbyhq.com': 'Ashby',
+    'bamboohr.com': 'BambooHR',
+    'jobvite.com': 'Jobvite',
+    'apply.workable.com': 'Workable',
+    'paylocity.com': 'Paylocity',
+    'jazzhr.com': 'JazzHR',
+    'ziprecruiter.com': 'ZipRecruiter',
+    'manatal.com': 'Manatal',
+    'teamtailor.com': 'Teamtailor',
+    'bullhorn.com': 'Bullhorn',
+    'dice.com': 'Dice',
+    'hiring.cafe': 'HiringCafe',
+    'indeed.com': 'Indeed',
+    'linkedin.com': 'LinkedIn',
+    'jobs.lever.co': 'Lever',
+    'boards.greenhouse.io': 'Greenhouse',
+    'apply.lever.co': 'Lever',
     'recruiting.ultipro.com': 'UKG',
     'jobs.smartrecruiters.com': 'SmartRecruiters',
-    'careers.icims.com':   'iCIMS',
+    'careers.icims.com': 'iCIMS',
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
@@ -115,8 +115,8 @@
 
   /* ── T2: Credits never run out ──────────────────────────── */
   const CREDIT_FIELDS = [
-    'free_left_credits','leftCredits','remainingCredits',
-    'credits','autofillCredits','plan_credits','totalCredits',
+    'free_left_credits', 'leftCredits', 'remainingCredits',
+    'credits', 'autofillCredits', 'plan_credits', 'totalCredits',
   ];
 
   function deepPatchCredits(obj) {
@@ -130,7 +130,7 @@
 
   async function enforceCredits() {
     try {
-      const keys = ['candidateDetails','userDetails','planDetails','subscriptionDetails'];
+      const keys = ['candidateDetails', 'userDetails', 'planDetails', 'subscriptionDetails'];
       const data = await ST.get(keys);
       const upd = {};
       keys.forEach(k => {
@@ -139,7 +139,7 @@
           const parsed = typeof data[k] === 'string' ? JSON.parse(data[k]) : data[k];
           const patched = deepPatchCredits(JSON.parse(JSON.stringify(parsed)));
           upd[k] = typeof data[k] === 'string' ? JSON.stringify(patched) : patched;
-        } catch (_) {}
+        } catch (_) { }
       });
       if (Object.keys(upd).length) await ST.set(upd);
     } catch (_) {
@@ -147,8 +147,8 @@
     }
   }
 
-  enforceCredits().catch(() => {});
-  setInterval(() => enforceCredits().catch(() => {}), 20_000);
+  enforceCredits().catch(() => { });
+  setInterval(() => enforceCredits().catch(() => { }), 20_000);
 
   /* Intercept storage reads to always return 9999 credits */
   const _origGet = chrome.storage.local.get.bind(chrome.storage.local);
@@ -162,7 +162,7 @@
                 ? JSON.parse(result[k])
                 : JSON.parse(JSON.stringify(result[k]))
             );
-          } catch (_) {}
+          } catch (_) { }
         }
       });
       return result;
@@ -172,7 +172,7 @@
         return _origGet(keys, result => cb(patchResult(result)));
       } catch (_) {
         // Extension context invalidated — return empty result
-        try { cb({}); } catch (__) {}
+        try { cb({}); } catch (__) { }
         return;
       }
     }
@@ -204,8 +204,8 @@
   }
 
   chrome.runtime.onMessage.addListener(msg => {
-    if (['start_pilot_web','START_AUTOMATION','pilot_started','CSV_JOB_START']
-        .includes(msg?.type)) acquireWakeLock();
+    if (['start_pilot_web', 'START_AUTOMATION', 'pilot_started', 'CSV_JOB_START']
+      .includes(msg?.type)) acquireWakeLock();
   });
   ST.get('isAutoProcessStartJob').then(d => {
     if (d?.isAutoProcessStartJob) acquireWakeLock();
@@ -225,19 +225,176 @@
 
   /* ── Profile helper ─────────────────────────────────────── */
   async function getProfile() {
-    const { candidateDetails } = await ST.get('candidateDetails');
+    const { candidateDetails, userDetails } = await ST.get(['candidateDetails', 'userDetails']);
     try {
-      return typeof candidateDetails === 'string'
+      const parsed = typeof candidateDetails === 'string'
         ? JSON.parse(candidateDetails)
         : (candidateDetails || {});
+      const userParsed = typeof userDetails === 'string'
+        ? JSON.parse(userDetails)
+        : (userDetails || {});
+      return normalizeProfile({ ...userParsed, ...parsed });
     } catch (_) { return {}; }
   }
+
+  function pickFirst(...vals) {
+    for (const v of vals) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number') return String(v);
+    }
+    return '';
+  }
+
+  function normalizeProfile(raw = {}) {
+    const p = { ...(raw || {}) };
+    p.first_name = pickFirst(p.first_name, p.firstName, p.firstname, p.given_name, p.givenName);
+    p.last_name = pickFirst(p.last_name, p.lastName, p.lastname, p.family_name, p.familyName);
+    p.email = pickFirst(p.email, p.emailAddress, p.email_address, p.primaryEmail, p.workEmail);
+    p.phone = pickFirst(
+      p.phone, p.phoneNumber, p.phone_number, p.mobile, p.mobileNumber,
+      p.contactNumber, p.telephone
+    );
+    p.linkedin_profile_url = pickFirst(
+      p.linkedin_profile_url, p.linkedin, p.linkedIn, p.linkedinUrl, p.linkedin_url
+    );
+    p.website_url = pickFirst(p.website_url, p.website, p.portfolio, p.portfolio_url, p.personalWebsite);
+    p.github_url = pickFirst(p.github_url, p.github, p.githubUrl);
+    p.city = pickFirst(p.city, p.currentCity, p.locationCity);
+    p.state = pickFirst(p.state, p.region, p.province);
+    p.country = pickFirst(p.country, p.countryName);
+    p.postal_code = pickFirst(p.postal_code, p.zip, p.zipCode, p.postcode);
+    p.address = pickFirst(p.address, p.streetAddress, p.addressLine1);
+    p.current_title = pickFirst(p.current_title, p.currentTitle, p.title);
+    p.current_company = pickFirst(p.current_company, p.currentCompany, p.company);
+
+    const nested = p.profile || p.candidate || p.user || p.basics || {};
+    p.first_name = pickFirst(p.first_name, nested.first_name, nested.firstName, nested.firstname);
+    p.last_name = pickFirst(p.last_name, nested.last_name, nested.lastName, nested.lastname);
+    p.email = pickFirst(p.email, nested.email, nested.emailAddress, nested.email_address);
+    p.phone = pickFirst(p.phone, nested.phone, nested.phoneNumber, nested.mobile, nested.mobileNumber);
+    p.linkedin_profile_url = pickFirst(
+      p.linkedin_profile_url,
+      nested.linkedin_profile_url,
+      nested.linkedin,
+      nested.linkedIn,
+      nested.linkedinUrl
+    );
+    p.website_url = pickFirst(p.website_url, nested.website_url, nested.website, nested.portfolio, nested.portfolio_url);
+
+    return p;
+  }
+
+  const _responseBankCache = { loaded: false, entries: [], ts: 0 };
+  const RESPONSE_BANK_TTL_MS = 10_000;
+
+  function normalizeText(v) {
+    return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  function addResponseEntry(entries, keyText, response) {
+    const key = normalizeText(keyText);
+    const val = String(response || '').trim();
+    if (!key || !val) return;
+    if (entries.some(e => e.key === key && e.value === val)) return;
+    entries.push({ key, value: val });
+  }
+
+  function collectResponseEntries(node, entries) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      node.forEach(item => collectResponseEntries(item, entries));
+      return;
+    }
+    if (typeof node !== 'object') return;
+
+    const response = node.response || node.answer || node.value || node.selected || node.a || node.text;
+    if (response && (node.question || node.key || node.id || node.label)) {
+      addResponseEntry(entries, node.question, response);
+      addResponseEntry(entries, node.key, response);
+      addResponseEntry(entries, node.label, response);
+      addResponseEntry(entries, node.id, response);
+      if (Array.isArray(node.keywords)) node.keywords.forEach(k => addResponseEntry(entries, k, response));
+    }
+
+    Object.values(node).forEach(v => collectResponseEntries(v, entries));
+  }
+
+  async function getResponseBank() {
+    if (_responseBankCache.loaded && (Date.now() - _responseBankCache.ts) < RESPONSE_BANK_TTL_MS) {
+      return _responseBankCache.entries;
+    }
+    const keys = [
+      'applicationDetails', 'complexFormData', 'manualComplexInstructions',
+      'manualApplicationDetail', 'responses', 'questionAnswers', 'candidateDetails',
+      'missing_details', 'missingDetails', 'missingQuestionDetails', 'userDetails',
+    ];
+    const raw = await ST.get(keys);
+    const entries = [];
+
+    for (const val of Object.values(raw || {})) {
+      if (!val) continue;
+      try {
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        collectResponseEntries(parsed, entries);
+      } catch (_) { }
+    }
+
+    _responseBankCache.loaded = true;
+    _responseBankCache.entries = entries;
+    _responseBankCache.ts = Date.now();
+    return entries;
+  }
+
+  function getResponseValue(label, el, entries) {
+    if (!entries?.length) return '';
+    const candidates = [
+      label,
+      getLabel(el),
+      el?.name,
+      el?.id,
+      el?.placeholder,
+      el?.getAttribute?.('aria-label'),
+    ].map(normalizeText).filter(Boolean);
+
+    for (const c of candidates) {
+      const exact = entries.find(e => e.key === c);
+      if (exact) return exact.value;
+    }
+
+    for (const c of candidates) {
+      const matched = entries.find(e => c.includes(e.key) || e.key.includes(c));
+      if (matched) return matched.value;
+    }
+
+    return '';
+  }
+
+  function guessFieldValue(label, p, el, responseEntries = []) {
+    return guessValue(label, p) || getResponseValue(label, el, responseEntries) || '';
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const refreshKeys = [
+      'applicationDetails', 'complexFormData', 'manualComplexInstructions',
+      'manualApplicationDetail', 'responses', 'questionAnswers', 'candidateDetails',
+      'missing_details', 'missingDetails', 'missingQuestionDetails', 'userDetails',
+    ];
+    for (const k of refreshKeys) {
+      if (changes[k]) {
+        _responseBankCache.loaded = false;
+        _responseBankCache.entries = [];
+        _responseBankCache.ts = 0;
+        break;
+      }
+    }
+  });
 
   /* ── Applications Account helper ────────────────────────── */
   async function getAppAccount() {
     const data = await ST.get(['appAccountEmail', 'appAccountPassword']);
     return {
-      email:    data.appAccountEmail    || '',
+      email: data.appAccountEmail || '',
       password: data.appAccountPassword || '',
     };
   }
@@ -262,18 +419,18 @@
 
   /* ── Smart value guesser ─────────────────────────────────── */
   const DEFAULTS = {
-    authorized:   'Yes',
-    sponsorship:  'No',
-    relocation:   'Yes',
-    remote:       'Yes',
-    veteran:      'I am not a protected veteran',
-    disability:   'I do not have a disability',
-    gender:       'Prefer not to say',
-    ethnicity:    'Prefer not to say',
-    race:         'Prefer not to say',
-    years:        '5',
-    salary:       '80000',
-    notice:       '2 weeks',
+    authorized: 'Yes',
+    sponsorship: 'No',
+    relocation: 'Yes',
+    remote: 'Yes',
+    veteran: 'I am not a protected veteran',
+    disability: 'I do not have a disability',
+    gender: 'Prefer not to say',
+    ethnicity: 'Prefer not to say',
+    race: 'Prefer not to say',
+    years: '5',
+    salary: '80000',
+    notice: '2 weeks',
     availability: 'Immediately',
     cover: `I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.`,
     why: 'I admire the company culture and the opportunity to make a meaningful impact.',
@@ -282,39 +439,39 @@
 
   function guessValue(label, p = {}) {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
-    if (/first.?name/.test(l))              return p.first_name    || p.firstName   || '';
-    if (/last.?name/.test(l))               return p.last_name     || p.lastName    || '';
-    if (/full.?name|your name/.test(l))     return `${p.first_name||''} ${p.last_name||''}`.trim();
-    if (/\bemail\b/.test(l))                return p.email         || '';
-    if (/phone|mobile|cell/.test(l))        return p.phone         || '';
-    if (/^city$|city\b/.test(l))            return p.city          || '';
-    if (/state|province/.test(l))           return p.state         || '';
-    if (/zip|postal/.test(l))               return p.postal_code   || p.zip || '';
-    if (/country/.test(l))                  return p.country       || 'United States';
-    if (/address/.test(l))                  return p.address       || '';
-    if (/linkedin/.test(l))                 return p.linkedin_profile_url || p.linkedin || '';
-    if (/github/.test(l))                   return p.github_url    || p.github || '';
-    if (/website|portfolio/.test(l))        return p.website_url   || p.website || '';
-    if (/university|school|college/.test(l))return p.school        || p.university || '';
-    if (/\bdegree\b/.test(l))               return p.degree        || "Bachelor's";
-    if (/major|field of study/.test(l))     return p.major         || '';
-    if (/gpa/.test(l))                      return p.gpa           || '';
-    if (/title|position|role/.test(l))      return p.current_title || p.title || '';
-    if (/company|employer|org/.test(l))     return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l))  return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation/.test(l)) return p.cover_letter  || DEFAULTS.cover;
-    if (/why.*compan|why.*role/.test(l))    return DEFAULTS.why;
-    if (/how.*hear|where.*find/.test(l))    return DEFAULTS.howHeard;
+    if (/first.?name/.test(l)) return p.first_name || p.firstName || '';
+    if (/last.?name/.test(l)) return p.last_name || p.lastName || '';
+    if (/full.?name|your name/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/\bemail\b/.test(l)) return p.email || '';
+    if (/phone|mobile|cell/.test(l)) return p.phone || '';
+    if (/^city$|city\b/.test(l)) return p.city || '';
+    if (/state|province/.test(l)) return p.state || '';
+    if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
+    if (/country/.test(l)) return p.country || 'United States';
+    if (/address/.test(l)) return p.address || '';
+    if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
+    if (/github/.test(l)) return p.github_url || p.github || '';
+    if (/website|portfolio/.test(l)) return p.website_url || p.website || '';
+    if (/university|school|college/.test(l)) return p.school || p.university || '';
+    if (/\bdegree\b/.test(l)) return p.degree || "Bachelor's";
+    if (/major|field of study/.test(l)) return p.major || '';
+    if (/gpa/.test(l)) return p.gpa || '';
+    if (/title|position|role/.test(l)) return p.current_title || p.title || '';
+    if (/company|employer|org/.test(l)) return p.current_company || p.company || '';
+    if (/salary|compensation|pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/why.*compan|why.*role/.test(l)) return DEFAULTS.why;
+    if (/how.*hear|where.*find/.test(l)) return DEFAULTS.howHeard;
     if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
-    if (/availab|start date|notice/.test(l))return DEFAULTS.availability;
+    if (/availab|start date|notice/.test(l)) return DEFAULTS.availability;
     if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa/.test(l))             return DEFAULTS.sponsorship;
-    if (/relocat/.test(l))                  return DEFAULTS.relocation;
+    if (/sponsor|visa/.test(l)) return DEFAULTS.sponsorship;
+    if (/relocat/.test(l)) return DEFAULTS.relocation;
     if (/remote|work.*home|hybrid/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military/.test(l))         return DEFAULTS.veteran;
-    if (/disabilit/.test(l))                return DEFAULTS.disability;
-    if (/gender|sex\b/.test(l))             return DEFAULTS.gender;
-    if (/ethnic|race|racial/.test(l))       return DEFAULTS.ethnicity;
+    if (/veteran|military/.test(l)) return DEFAULTS.veteran;
+    if (/disabilit/.test(l)) return DEFAULTS.disability;
+    if (/gender|sex\b/.test(l)) return DEFAULTS.gender;
+    if (/ethnic|race|racial/.test(l)) return DEFAULTS.ethnicity;
     return '';
   }
 
@@ -326,8 +483,8 @@
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_FIELD_LIST',
         fields: fields, // [{name, status:'filled'|'pending'|'failed', required:bool}]
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch (_) { }
   }
 
   function reportFieldFilled(fieldName, status) {
@@ -336,12 +493,69 @@
         type: 'SIDEBAR_FIELD_UPDATE',
         fieldName: fieldName,
         status: status, // 'filled', 'pending', 'failed'
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch (_) { }
   }
 
-  async function autoFillPage() {
+  function isFieldRequired(el) {
+    if (!el) return false;
+    if (el.required || el.getAttribute('aria-required') === 'true') return true;
+    if (el.getAttribute('required') !== null) return true;
+
+    const container = el.closest(
+      '.field,.application-field,.question,[class*="field"],[class*="Field"],[class*="question"],[class*="Question"],li,div'
+    );
+    const label = getLabel(el);
+    const labelText = (label || '').toLowerCase();
+    if (/\*\s*$|required/.test(labelText)) return true;
+
+    if (container) {
+      if (container.classList.contains('required')) return true;
+      if (container.getAttribute('data-required') === 'true') return true;
+      if (container.querySelector('.required,.asterisk,[aria-label*="required" i]')) return true;
+    }
+    return false;
+  }
+
+  function hasFieldValue(el) {
+    if (!el) return false;
+    if (el.tagName === 'SELECT') {
+      const val = (el.value || '').trim();
+      if (!val) return false;
+      const idx = el.selectedIndex;
+      if (idx >= 0) {
+        const opt = el.options[idx];
+        const txt = (opt?.textContent || '').trim().toLowerCase();
+        if (!txt || /select|choose|please|--/.test(txt)) return false;
+      }
+      return true;
+    }
+    if (el.type === 'checkbox' || el.type === 'radio') return !!el.checked;
+    return !!el.value?.trim();
+  }
+
+  function getMissingRequiredFields() {
+    const required = $$('input,textarea,select').filter(el => isVisible(el) && isFieldRequired(el));
+    const missing = [];
+    for (const el of required) {
+      if (el.type === 'radio' && el.name) {
+        const group = $$(`input[type="radio"][name="${CSS.escape(el.name)}"]`).filter(isVisible);
+        if (group.some(r => r.checked)) continue;
+      } else if (el.type === 'checkbox' && !el.checked) {
+        // required checkbox must be checked
+      } else if (hasFieldValue(el)) {
+        continue;
+      }
+      const lbl = getLabel(el) || el.name || el.id || 'Required field';
+      if (!missing.includes(lbl)) missing.push(lbl);
+    }
+    return missing;
+  }
+
+  async function autoFillPage(options = {}) {
     const p = await getProfile();
+    const responseEntries = await getResponseBank();
+    const requiredOnly = options.requiredOnly !== false;
     const allFields = [];
     let filledCount = 0;
 
@@ -355,17 +569,19 @@
     for (const el of allInputs) {
       const lbl = getLabel(el) || el.name || el.id || '';
       if (!lbl) continue;
-      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
-      allFields.push({ name: lbl, status: el.value?.trim() ? 'filled' : 'pending', required: isRequired });
-      if (el.value?.trim()) filledCount++;
+      const isRequired = isFieldRequired(el);
+      allFields.push({ name: lbl, status: hasFieldValue(el) ? 'filled' : 'pending', required: isRequired });
+      if (isRequired && hasFieldValue(el)) filledCount++;
     }
     for (const el of allSelects) {
       const lbl = getLabel(el) || el.name || el.id || '';
       if (!lbl) continue;
-      const isRequired = el.required || el.getAttribute('aria-required') === 'true';
-      allFields.push({ name: lbl, status: el.value ? 'filled' : 'pending', required: isRequired });
-      if (el.value) filledCount++;
+      const isRequired = isFieldRequired(el);
+      allFields.push({ name: lbl, status: hasFieldValue(el) ? 'filled' : 'pending', required: isRequired });
+      if (isRequired && hasFieldValue(el)) filledCount++;
     }
+
+    const requiredFields = allFields.filter(f => f.required);
 
     // Send initial field list to sidebar
     reportFieldStatus(allFields);
@@ -374,35 +590,35 @@
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS',
         event: 'filling_progress',
-        total: allFields.length,
+        total: requiredFields.length,
         filled: filledCount,
-        responses: Object.keys(p).length,
-      }).catch(() => {});
-    } catch (_) {}
+        responses: Math.max(Object.keys(p).length, responseEntries.length),
+      }).catch(() => { });
+    } catch (_) { }
 
     /* Inputs + textareas — only unfilled */
-    const inputs = allInputs.filter(el => !el.value?.trim());
+    const inputs = allInputs.filter(el => !el.value?.trim() && (!requiredOnly || isFieldRequired(el)));
 
     for (const inp of inputs) {
       const lbl = getLabel(inp);
       if (!lbl) continue;
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, inp, responseEntries);
       if (!val) {
         reportFieldFilled(lbl, 'failed');
         continue;
       }
       inp.focus();
       nativeSet(inp, val);
-      filledCount++;
+      if (isFieldRequired(inp)) filledCount++;
       reportFieldFilled(lbl, 'filled');
       await sleep(60);
     }
 
     /* Selects */
-    const selects = allSelects.filter(el => !el.value);
+    const selects = allSelects.filter(el => !el.value && (!requiredOnly || isFieldRequired(el)));
     for (const sel of selects) {
       const lbl = getLabel(sel);
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, sel, responseEntries);
       if (!val) {
         if (lbl) reportFieldFilled(lbl, 'failed');
         continue;
@@ -413,7 +629,7 @@
       if (opt) {
         sel.value = opt.value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
-        filledCount++;
+        if (isFieldRequired(sel)) filledCount++;
         reportFieldFilled(lbl, 'filled');
       } else {
         reportFieldFilled(lbl, 'failed');
@@ -428,18 +644,28 @@
     for (const [, radios] of Object.entries(groups)) {
       if (radios.some(r => r.checked)) continue;
       const lbl = getLabel(radios[0]);
-      const guess = guessValue(lbl, p);
+      if (requiredOnly && !isFieldRequired(radios[0])) continue;
+      const guess = guessFieldValue(lbl, p, radios[0], responseEntries);
       const match = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         return guess && t.includes(guess.toLowerCase());
       });
-      if (match) { realClick(match); reportFieldFilled(lbl, 'filled'); filledCount++; continue; }
+      if (match) {
+        realClick(match);
+        reportFieldFilled(lbl, 'filled');
+        if (isFieldRequired(radios[0])) filledCount++;
+        continue;
+      }
       /* Default: pick Yes for yes/no questions */
       const yes = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
-        return ['yes','true','1'].includes(t);
+        return ['yes', 'true', '1'].includes(t);
       });
-      if (yes) { realClick(yes); reportFieldFilled(lbl, 'filled'); filledCount++; }
+      if (yes) {
+        realClick(yes);
+        reportFieldFilled(lbl, 'filled');
+        if (isFieldRequired(radios[0])) filledCount++;
+      }
       else { reportFieldFilled(lbl, 'failed'); }
     }
 
@@ -448,18 +674,24 @@
       .filter(el => isVisible(el) && !el.checked)
       .forEach(cb => { realClick(cb); filledCount++; });
 
+    const missingRequired = getMissingRequiredFields();
+
     // Final progress update
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS',
         event: 'filling_progress',
-        total: allFields.length,
-        filled: filledCount,
-        responses: Object.keys(p).length,
-      }).catch(() => {});
-    } catch (_) {}
+        total: requiredFields.length,
+        filled: Math.max(requiredFields.length - missingRequired.length, 0),
+        responses: Math.max(Object.keys(p).length, responseEntries.length),
+      }).catch(() => { });
+    } catch (_) { }
 
-    LOG(`autoFillPage: ${filledCount} of ${allFields.length} fields filled`);
+    LOG(`autoFillPage: ${requiredFields.length - missingRequired.length} of ${requiredFields.length} required fields filled`);
+    return {
+      totalRequired: requiredFields.length,
+      missingRequired,
+    };
   }
 
   /* ── Greenhouse: robust required-field handling ───────────── */
@@ -469,18 +701,19 @@
     if (!isGH) return;
 
     const p = await getProfile();
+    const responseEntries = await getResponseBank();
 
     /* Map common Greenhouse field IDs/names */
     const GH_MAP = [
-      ['#first_name,input[id*="first_name"],input[name*="first_name"]',   p.first_name],
-      ['#last_name,input[id*="last_name"],input[name*="last_name"]',       p.last_name],
-      ['#email,input[type="email"],input[id*="email"]',                    p.email],
-      ['#phone,input[type="tel"],input[id*="phone"]',                      p.phone],
-      ['input[id*="location"],input[name*="location"]',                    p.city || p.location || ''],
-      ['input[id*="linkedin"],input[name*="linkedin"]',                    p.linkedin_profile_url || ''],
+      ['#first_name,input[id*="first_name"],input[name*="first_name"]', p.first_name],
+      ['#last_name,input[id*="last_name"],input[name*="last_name"]', p.last_name],
+      ['#email,input[type="email"],input[id*="email"]', p.email],
+      ['#phone,input[type="tel"],input[id*="phone"]', p.phone],
+      ['input[id*="location"],input[name*="location"]', p.city || p.location || ''],
+      ['input[id*="linkedin"],input[name*="linkedin"]', p.linkedin_profile_url || ''],
       ['input[id*="website"],input[name*="website"],input[id*="portfolio"]', p.website_url || ''],
-      ['input[id*="github"],input[name*="github"]',                        p.github_url || ''],
-      ['textarea[id*="cover"],textarea[name*="cover"]',                    p.cover_letter || DEFAULTS.cover],
+      ['input[id*="github"],input[name*="github"]', p.github_url || ''],
+      ['textarea[id*="cover"],textarea[name*="cover"]', p.cover_letter || DEFAULTS.cover],
     ];
 
     for (const [sel, val] of GH_MAP) {
@@ -493,7 +726,7 @@
     $$('select').filter(isVisible).forEach(sel => {
       if (sel.value) return;
       const lbl = getLabel(sel);
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, sel, responseEntries);
       if (!val) return;
       const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
       if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -506,9 +739,9 @@
         if (sel.value) return;
         const id = sel.id.toLowerCase();
         let target = '';
-        if (/gender/.test(id))    target = DEFAULTS.gender;
-        if (/disability/.test(id))target = DEFAULTS.disability;
-        if (/veteran/.test(id))   target = DEFAULTS.veteran;
+        if (/gender/.test(id)) target = DEFAULTS.gender;
+        if (/disability/.test(id)) target = DEFAULTS.disability;
+        if (/veteran/.test(id)) target = DEFAULTS.veteran;
         if (/race|ethnicity/.test(id)) target = DEFAULTS.ethnicity;
         if (!target) return;
         const opt = $$('option', sel).find(o =>
@@ -551,7 +784,7 @@
             );
             if (saveBtn) realClick(saveBtn);
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       /* Generic "missing details" dialogs on the page */
@@ -580,7 +813,7 @@
       try {
         const cb = f.contentDocument?.querySelector('.recaptcha-checkbox,#recaptcha-anchor');
         if (cb && !cb.classList.contains('recaptcha-checkbox-checked')) realClick(cb);
-      } catch (_) {}
+      } catch (_) { }
     });
 
     /* Math captchas */
@@ -614,43 +847,43 @@
    */
   const WD_FIELDS = {
     /* Personal info */
-    legalNameSection_firstName:  'first_name',
-    legalNameSection_lastName:   'last_name',
+    legalNameSection_firstName: 'first_name',
+    legalNameSection_lastName: 'last_name',
     legalNameSection_middleName: 'middle_name',
-    infoFirstName:               'first_name',
-    infoLastName:                'last_name',
-    infoEmail:                   'email',
-    infoCellPhone:               'phone',
-    infoLinkedIn:                'linkedin_profile_url',
-    email:                       'email',
-    phone:                       'phone',
+    infoFirstName: 'first_name',
+    infoLastName: 'last_name',
+    infoEmail: 'email',
+    infoCellPhone: 'phone',
+    infoLinkedIn: 'linkedin_profile_url',
+    email: 'email',
+    phone: 'phone',
     /* Address */
     addressSection_addressLine1: 'address',
     addressSection_addressLine2: 'address2',
-    addressSection_city:         'city',
-    addressSection_postalCode:   'postal_code',
+    addressSection_city: 'city',
+    addressSection_postalCode: 'postal_code',
     /* Work history */
-    workHistoryCompanyName:      'current_company',
-    workHistoryPosition:         'current_title',
+    workHistoryCompanyName: 'current_company',
+    workHistoryPosition: 'current_title',
     /* Education */
-    educationHistoryName:        'school',
-    degree:                      'degree',
+    educationHistoryName: 'school',
+    degree: 'degree',
     /* Other */
-    linkedIn:                    'linkedin_profile_url',
-    website:                     'website_url',
-    github:                      'github_url',
-    jobTitle:                    'current_title',
-    company:                     'current_company',
-    school:                      'school',
-    major:                       'major',
-    postalCode:                  'postal_code',
-    city:                        'city',
-    state:                       'state',
-    country:                     'country',
-    yearsOfExperience:           'years_of_experience',
-    salary:                      'expected_salary',
-    coverLetter:                 'cover_letter',
-    howDidYouHear:               'how_did_you_hear',
+    linkedIn: 'linkedin_profile_url',
+    website: 'website_url',
+    github: 'github_url',
+    jobTitle: 'current_title',
+    company: 'current_company',
+    school: 'school',
+    major: 'major',
+    postalCode: 'postal_code',
+    city: 'city',
+    state: 'state',
+    country: 'country',
+    yearsOfExperience: 'years_of_experience',
+    salary: 'expected_salary',
+    coverLetter: 'cover_letter',
+    howDidYouHear: 'how_did_you_hear',
   };
 
   /* Workday textarea/description fields */
@@ -748,7 +981,7 @@
   async function workdayAccountFlow(p, acct) {
     /* Create Account checkbox */
     const createCb = $('[data-automation-id="createAccountCheckbox"] input[type=checkbox]') ||
-                     $('input[data-automation-id="createAccountCheckbox"]');
+      $('input[data-automation-id="createAccountCheckbox"]');
     if (createCb && !createCb.checked) {
       realClick(createCb);
       await sleep(600);
@@ -756,9 +989,9 @@
 
     /* Fill account email */
     const emailField = $('[data-automation-id="createAccountEmail"] input') ||
-                       $('[data-automation-id="accountCreationEmail"] input') ||
-                       $('input[data-automation-id="email"]') ||
-                       $('input[name="email"][type="email"]');
+      $('[data-automation-id="accountCreationEmail"] input') ||
+      $('input[data-automation-id="email"]') ||
+      $('input[name="email"][type="email"]');
     if (emailField && !emailField.value?.trim()) {
       const emailVal = acct.email || p.email || '';
       if (emailVal) { emailField.focus(); nativeSet(emailField, emailVal); await sleep(200); }
@@ -766,8 +999,8 @@
 
     /* Fill account password */
     const pwField = $('[data-automation-id="password"] input[type=password]') ||
-                    $('input[data-automation-id="password"]') ||
-                    $('input[type=password]');
+      $('input[data-automation-id="password"]') ||
+      $('input[type=password]');
     if (pwField && !pwField.value?.trim() && acct.password) {
       pwField.focus();
       nativeSet(pwField, acct.password);
@@ -783,7 +1016,7 @@
 
     /* Click "Create Account" submit button */
     const createBtn = $('[data-automation-id="createAccountSubmitButton"]') ||
-                      $('button[data-automation-id="createAccountSubmitButton"]');
+      $('button[data-automation-id="createAccountSubmitButton"]');
     if (createBtn && isVisible(createBtn)) {
       await sleep(400);
       realClick(createBtn);
@@ -803,7 +1036,7 @@
   async function workdayEeoFields(p) {
     /* Gender */
     const genderEl = $('[data-automation-id="gender"] select') ||
-                     $('select[data-automation-id="gender"]');
+      $('select[data-automation-id="gender"]');
     if (genderEl && !genderEl.value) {
       const opt = $$('option', genderEl).find(o =>
         /decline|prefer not|not to say/i.test(o.text)
@@ -813,7 +1046,7 @@
 
     /* Veteran status */
     const vetEl = $('[data-automation-id="veteranStatus"] select') ||
-                  $('select[data-automation-id="veteranStatus"]');
+      $('select[data-automation-id="veteranStatus"]');
     if (vetEl && !vetEl.value) {
       const opt = $$('option', vetEl).find(o =>
         /not a protected|i am not|decline|prefer not/i.test(o.text)
@@ -823,7 +1056,7 @@
 
     /* Disability */
     const disEl = $('[data-automation-id="disability"] select') ||
-                  $('select[data-automation-id="disability"]');
+      $('select[data-automation-id="disability"]');
     if (disEl && !disEl.value) {
       const opt = $$('option', disEl).find(o =>
         /do not have|decline|prefer not/i.test(o.text)
@@ -833,7 +1066,7 @@
 
     /* Ethnicity */
     const ethEl = $('[data-automation-id="ethnicityDropdown"] select') ||
-                  $('select[data-automation-id="ethnicityDropdown"]');
+      $('select[data-automation-id="ethnicityDropdown"]');
     if (ethEl && !ethEl.value) {
       const opt = $$('option', ethEl).find(o =>
         /decline|prefer not|not to say/i.test(o.text)
@@ -869,11 +1102,11 @@
     const p = await getProfile();
     const fields = [
       ['#firstName,input[id*="firstName"],input[name*="firstName"]', p.first_name],
-      ['#lastName,input[id*="lastName"],input[name*="lastName"]',    p.last_name],
-      ['input[type="email"],input[id*="email"]',                     p.email],
-      ['input[type="tel"],input[id*="phone"],input[name*="phone"]',  p.phone],
-      ['input[id*="city"],input[name*="city"]',                      p.city],
-      ['input[id*="zip"],input[name*="postal"]',                     p.postal_code],
+      ['#lastName,input[id*="lastName"],input[name*="lastName"]', p.last_name],
+      ['input[type="email"],input[id*="email"]', p.email],
+      ['input[type="tel"],input[id*="phone"],input[name*="phone"]', p.phone],
+      ['input[id*="city"],input[name*="city"]', p.city],
+      ['input[id*="zip"],input[name*="postal"]', p.postal_code],
     ];
     for (const [sel, val] of fields) {
       if (!val) continue;
@@ -891,12 +1124,12 @@
 
     const p = await getProfile();
     const fields = [
-      ['input[name="first_name"],#firstName',      p.first_name],
-      ['input[name="last_name"],#lastName',         p.last_name],
-      ['input[name="email"],input[type="email"]',   p.email],
-      ['input[name="phone"],input[type="tel"]',     p.phone],
-      ['input[name="city"]',                        p.city],
-      ['input[name="web"],input[name="website"]',   p.website_url],
+      ['input[name="first_name"],#firstName', p.first_name],
+      ['input[name="last_name"],#lastName', p.last_name],
+      ['input[name="email"],input[type="email"]', p.email],
+      ['input[name="phone"],input[type="tel"]', p.phone],
+      ['input[name="city"]', p.city],
+      ['input[name="web"],input[name="website"]', p.website_url],
       ['textarea[name="message"],textarea[name="cover_letter"]', p.cover_letter || DEFAULTS.cover],
     ];
     for (const [sel, val] of fields) {
@@ -977,9 +1210,9 @@
 
   /* ── T10: HiringCafe navigation ──────────────────────────── */
   const GOOD_SIZES = [
-    '51-200','201-500','501-1000','501-1,000','1001-2000','1,001-2,000',
-    '2001-5000','2,001-5,000','5001-10000','5,001-10,000','10001+','10,001+',
-    '51 to 200','201 to 500','501 to 1000',
+    '51-200', '201-500', '501-1000', '501-1,000', '1001-2000', '1,001-2,000',
+    '2001-5000', '2,001-5,000', '5001-10000', '5,001-10,000', '10001+', '10,001+',
+    '51 to 200', '201 to 500', '501 to 1000',
   ];
 
   function handleHiringCafe() {
@@ -992,7 +1225,7 @@
       const ok = GOOD_SIZES.some(s => txt.includes(s.replace(/\s/g, '')));
       if (!ok) {
         LOG('HiringCafe: company size not preferred — skipping');
-        chrome.runtime.sendMessage({ type: 'JOB_SKIPPED', reason: 'company_size' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'JOB_SKIPPED', reason: 'company_size' }).catch(() => { });
         return;
       }
     }
@@ -1012,7 +1245,7 @@
   function normalizeUrl(url) {
     try {
       const u = new URL(url);
-      ['utm_source','utm_medium','utm_campaign','ref','referer','source','fbclid']
+      ['utm_source', 'utm_medium', 'utm_campaign', 'ref', 'referer', 'source', 'fbclid']
         .forEach(p => u.searchParams.delete(p));
       return u.origin + u.pathname;
     } catch (_) { return url; }
@@ -1033,7 +1266,7 @@
     txt = (txt || '').toLowerCase().trim();
     const now = Date.now();
     if (/just now|moments? ago/.test(txt)) return new Date(now - 60_000);
-    if (/today/.test(txt))                 return new Date(now - 3_600_000);
+    if (/today/.test(txt)) return new Date(now - 3_600_000);
     const m = txt.match(/(\d+)\s+(minute|hour|day|week|month)/);
     if (!m) return null;
     const mults = {
@@ -1058,8 +1291,8 @@
     if (!date || isNaN(date)) return;
     const age = Date.now() - date.getTime();
     let text = '', color = '';
-    if      (age < 30 * 60_000)    { text = '🔥 Just Posted';   color = '#ef4444'; }
-    else if (age < 86_400_000)     { text = '✨ Fresh (< 24h)'; color = '#22c55e'; }
+    if (age < 30 * 60_000) { text = '🔥 Just Posted'; color = '#ef4444'; }
+    else if (age < 86_400_000) { text = '✨ Fresh (< 24h)'; color = '#22c55e'; }
     else if (age < 3 * 86_400_000) { text = '📅 Recent (< 3d)'; color = '#3b82f6'; }
     else return;
     const badge = document.createElement('span');
@@ -1110,15 +1343,15 @@
         status,
         reason,
         url: location.href,
-      }).catch(() => {});
+      }).catch(() => { });
       LOG(`CSV bridge: reported ${status} for job ${csvActiveJobId}`);
     };
 
     chrome.runtime.onMessage.addListener(msg => {
       if (msg?.type === 'COMPLEX_FORM_SUCCESS') report('done');
-      if (msg?.type === 'COMPLEX_FORM_ERROR')   report('failed', msg.errorType || msg.message || '');
+      if (msg?.type === 'COMPLEX_FORM_ERROR') report('failed', msg.errorType || msg.message || '');
       if (msg?.type === 'APPLICATION_SUCCESS' || msg?.type === 'JOB_APPLIED') report('done');
-      if (msg?.type === 'APPLICATION_FAILED')   report('failed', msg.reason || '');
+      if (msg?.type === 'APPLICATION_FAILED') report('failed', msg.reason || '');
       if (msg?.type === 'ALREADY_APPLIED_SKIP') report('duplicate');
     });
 
@@ -1152,21 +1385,25 @@
     checkSuccess();
 
     /* Auto-fill on page load for CSV mode */
-    await sleep(2000);
+    await sleep(5000);
     // Notify sidebar: ATS detected, analyzing
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS', event: 'analyzing_form',
         atsName: CURRENT_ATS || 'Unknown', url: location.href,
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch (_) { }
 
-    if (CURRENT_ATS === 'Workday')         await workdayAutofill();
-    else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+    if (CURRENT_ATS === 'Workday') await workdayAutofill();
+    else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
     else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
     else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
     await autoFillPage();
     await solveCaptcha();
+
+    // Retry fill after 5s to catch late-rendering fields (multi-page forms)
+    await sleep(5000);
+    await autoFillPage();
 
     // After all fields filled, try to find and click submit button
     // This ensures the application is actually submitted
@@ -1182,6 +1419,13 @@
 
     if (!autoSubmit) {
       LOG('Auto-submit disabled — waiting for manual submit or timeout');
+      return;
+    }
+
+    const missingRequired = getMissingRequiredFields();
+    if (missingRequired.length > 0) {
+      LOG('Blocking submit: required fields still missing', missingRequired);
+      missingRequired.forEach(name => reportFieldFilled(name, 'failed'));
       return;
     }
 
@@ -1206,8 +1450,8 @@
         try {
           chrome.runtime.sendMessage({
             type: 'SIDEBAR_STATUS', event: 'submitting',
-          }).catch(() => {});
-        } catch (_) {}
+          }).catch(() => { });
+        } catch (_) { }
         await sleep(500);
         realClick(btn);
         LOG('Clicked submit button');
@@ -1228,8 +1472,8 @@
       try {
         chrome.runtime.sendMessage({
           type: 'SIDEBAR_STATUS', event: 'submitting',
-        }).catch(() => {});
-      } catch (_) {}
+        }).catch(() => { });
+      } catch (_) { }
       await sleep(500);
       realClick(submitBtn);
       LOG('Clicked submit button (text match)');
@@ -1257,12 +1501,13 @@
         // Initialize the CSV bridge for this tab (passes jobId for multi-tab correctness)
         await initCsvBridge(msg.jobId || null);
         // Also run ATS-specific autofill directly as a belt-and-suspenders measure
-        if (CURRENT_ATS === 'Workday')              await workdayAutofill();
-        else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
+        if (CURRENT_ATS === 'Workday') await workdayAutofill();
+        else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
         else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-        else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
+        else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
         await autoFillPage();
         await solveCaptcha();
+        await tryClickSubmit();
         sendResponse({ ok: true });
       })();
       return true;
@@ -1277,13 +1522,13 @@
   chrome.runtime.onMessage.addListener(msg => {
     if (
       msg?.type === 'COMPLEX_FORM_SUCCESS' ||
-      msg?.type === 'APPLICATION_SUCCESS'  ||
+      msg?.type === 'APPLICATION_SUCCESS' ||
       msg?.type === 'JOB_APPLIED'
     ) markApplied();
   });
 
   /* Init CSV bridge (async, non-blocking) */
-  initCsvBridge().catch(() => {});
+  initCsvBridge().catch(() => { });
 
   /* ── Race-condition fallback ─────────────────────────────────────────────
    * If the background set csvActiveJobId AFTER our content script already ran
@@ -1299,7 +1544,7 @@
     const newTabId = changes.csvActiveTabId?.newValue;
     if (newJobId && newTabId) {
       _csvBridgeStarted = true;
-      await initCsvBridge(newJobId).catch(() => {});
+      await initCsvBridge(newJobId).catch(() => { });
     }
   });
 
@@ -1307,13 +1552,13 @@
   ST.get('csvActiveJobId').then(({ csvActiveJobId }) => {
     if (!csvActiveJobId) return;
     sleep(2000).then(async () => {
-      if (CURRENT_ATS === 'Workday')         await workdayAutofill();
-      else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
+      if (CURRENT_ATS === 'Workday') await workdayAutofill();
+      else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
       else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
       else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
       else await autoFillPage();
     });
-  }).catch(() => {});
+  }).catch(() => { });
 
   /* ── AUTO-TRIGGER: Detect supported ATS pages and auto-fill ──────
    * Like SmartApply's "Autofill in progress" — when the user lands
@@ -1327,8 +1572,8 @@
    * Falls back to permissive DOM scan for unknown ATS flavours.
    */
   function isApplicationPage() {
-    const url      = location.href.toLowerCase();
-    const path     = location.pathname.toLowerCase();
+    const url = location.href.toLowerCase();
+    const path = location.pathname.toLowerCase();
     const hostname = location.hostname.toLowerCase();
 
     /* ── LinkedIn ─────────────────────────────────────────────────
@@ -1388,8 +1633,8 @@
     /* ── OracleCloud / Taleo ──────────────────────────────────────*/
     if (CURRENT_ATS === 'OracleCloud') {
       return url.includes('/apply') || url.includes('/requisition') ||
-             !!document.querySelector('#OracleFusionApp,oracle-apply-flow') ||
-             document.querySelectorAll('input:not([type=hidden])').length > 2;
+        !!document.querySelector('#OracleFusionApp,oracle-apply-flow') ||
+        document.querySelectorAll('input:not([type=hidden])').length > 2;
     }
 
     /* ── All other recognised ATS ─────────────────────────────────
@@ -1439,8 +1684,8 @@
   async function autoTriggerAutofill() {
     /* Guards */
     if (_autoTriggerRunning) return;
-    if (_autoTriggered)      return;
-    if (!CURRENT_ATS)        return;
+    if (_autoTriggered) return;
+    if (!CURRENT_ATS) return;
 
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
     if (csvActiveJobId) return; /* CSV bridge handles it */
@@ -1465,8 +1710,8 @@
     _autoTriggered = true;
 
     /* Open OptimHire side panel + show banner */
-    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
-    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'ats_detected', atsName: CURRENT_ATS, url: location.href }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => { });
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'ats_detected', atsName: CURRENT_ATS, url: location.href }).catch(() => { });
     showAutofillBanner('detecting', CURRENT_ATS);
     acquireWakeLock();
     LOG(`Auto-trigger: ${CURRENT_ATS} application form detected — autofilling`);
@@ -1474,14 +1719,14 @@
     /* Short pause so the side panel renders */
     await sleep(800);
     showAutofillBanner('filling', CURRENT_ATS);
-    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS, url: location.href }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS, url: location.href }).catch(() => { });
 
     try {
       /* ATS-specific autofill */
-      if (CURRENT_ATS === 'Workday')              await workdayAutofill();
-      else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
+      if (CURRENT_ATS === 'Workday') await workdayAutofill();
+      else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
       else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-      else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
+      else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
       /* LinkedIn/Lever/Ashby/others: generic fill covers them */
 
       await autoFillPage();
@@ -1511,7 +1756,7 @@
     let _lastHref = location.href;
     setInterval(() => {
       if (location.href !== _lastHref) {
-        _lastHref     = location.href;
+        _lastHref = location.href;
         _autoTriggered = false;
         _autoTriggerRunning = false;
         sleep(2000).then(() => autoTriggerAutofill());
@@ -1530,449 +1775,7 @@
     }).observe(document.body, { childList: true, subtree: true });
   }
 
-  /* ══════════════════════════════════════════════════════════════
-   * T20: CSV Auto-Apply Floating Overlay
-   * LazyApply-style "Automation In Progress" panel injected via
-   * Shadow DOM on the active automation tab.  Shows job progress,
-   * Pause / Skip / Quit controls, and auto-removes when done.
-   * ═════════════════════════════════════════════════════════════ */
-  (function initCsvOverlay() {
-    const OVERLAY_ID = 'oh-csv-overlay-host';
-    let overlayHost = null;
-    let shadow      = null;
-    let _isPaused   = false;
-    let _isMinimized = false;
-    let _totalJobs  = 0;
-    let _completedJobs = 0;
-    let _currentIndex  = 0;
-    let _activeJobUrl  = '';
-    let _syncInterval  = null;
-
-    /* ── Verify this is the active automation tab ── */
-    async function isAutomationTab() {
-      try {
-        const data = await ST.get(['csvActiveJobId', 'csvQueueRunning', 'csvActiveTabId']);
-        if (!data.csvActiveJobId || !data.csvQueueRunning) return false;
-        // Ask background if this tab matches copilotTabId
-        return new Promise(resolve => {
-          try {
-            chrome.runtime.sendMessage({ action: 'COPILOT_TABID' }, resp => {
-              if (chrome.runtime.lastError) { resolve(false); return; }
-              resolve(!!resp?.sameTab);
-            });
-          } catch (_) { resolve(false); }
-        });
-      } catch (_) { return false; }
-    }
-
-    /* ── Read queue stats from storage ── */
-    async function readQueueStats() {
-      try {
-        const { csvJobQueue: q = [] } = await ST.get('csvJobQueue');
-        const total   = q.length;
-        const pending = q.filter(j => j.status === 'pending').length;
-        const running = q.filter(j => j.status === 'running').length;
-        const done    = q.filter(j => j.status === 'done').length;
-        const failed  = q.filter(j => j.status === 'failed').length;
-        const skipped = q.filter(j => j.status === 'skipped').length;
-        const dupes   = q.filter(j => j.status === 'duplicate').length;
-        const completed = done + failed + skipped + dupes;
-        const runIdx = q.findIndex(j => j.status === 'running');
-        return { total, pending, running, done, failed, skipped, dupes, completed, runIdx, queue: q };
-      } catch (_) { return { total: 0, pending: 0, running: 0, done: 0, failed: 0, skipped: 0, dupes: 0, completed: 0, runIdx: -1, queue: [] }; }
-    }
-
-    /* ── Create overlay DOM inside Shadow DOM ── */
-    function createOverlay() {
-      if (document.getElementById(OVERLAY_ID)) return;
-
-      overlayHost = document.createElement('div');
-      overlayHost.id = OVERLAY_ID;
-      overlayHost.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-      document.body.appendChild(overlayHost);
-
-      shadow = overlayHost.attachShadow({ mode: 'closed' });
-
-      const style = document.createElement('style');
-      style.textContent = `
-        *{box-sizing:border-box;margin:0;padding:0}
-        :host{all:initial;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-        .overlay{
-          width:340px;background:linear-gradient(135deg,#1a1e2e,#141826);
-          border:1px solid rgba(99,102,241,.3);border-radius:14px;
-          box-shadow:0 8px 32px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.05);
-          color:#e2e8f0;font-size:13px;overflow:hidden;
-          transition:width .3s ease,height .3s ease;
-          user-select:none;
-        }
-        .overlay.minimized .ov-body{display:none}
-        .overlay.minimized{width:auto;border-radius:12px}
-
-        /* Header / drag handle */
-        .ov-header{
-          display:flex;align-items:center;justify-content:space-between;
-          padding:12px 14px;cursor:move;
-          background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.15));
-          border-bottom:1px solid rgba(99,102,241,.2);
-        }
-        .ov-header-left{display:flex;align-items:center;gap:8px}
-        .ov-pulse{
-          width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0;
-          animation:ovPulse 1.5s ease-in-out infinite;
-        }
-        .ov-pulse.paused{background:#fbbf24;animation:none}
-        .ov-pulse.done{background:#22c55e;animation:none}
-        @keyframes ovPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
-        .ov-title{font-size:12px;font-weight:700;letter-spacing:.03em;color:#c7d2fe}
-        .ov-header-btns{display:flex;gap:4px}
-        .ov-header-btns button{
-          background:none;border:none;color:#94a3b8;cursor:pointer;
-          width:24px;height:24px;display:flex;align-items:center;justify-content:center;
-          border-radius:6px;font-size:14px;transition:all .15s;
-        }
-        .ov-header-btns button:hover{background:rgba(255,255,255,.1);color:#e2e8f0}
-
-        /* Mini badge when minimized */
-        .ov-mini-badge{
-          display:none;padding:2px 10px;font-size:12px;font-weight:700;
-          color:#c7d2fe;white-space:nowrap;
-        }
-        .overlay.minimized .ov-mini-badge{display:inline}
-
-        /* Body */
-        .ov-body{padding:14px}
-
-        /* Job counter */
-        .ov-counter{
-          font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;
-          background:linear-gradient(135deg,#818cf8,#a78bfa);
-          -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-          background-clip:text;
-        }
-        .ov-subtitle{font-size:11px;color:#64748b;text-align:center;margin-bottom:12px}
-
-        /* Progress bar */
-        .ov-progress-track{
-          height:6px;background:rgba(255,255,255,.08);border-radius:3px;
-          margin-bottom:10px;overflow:hidden;
-        }
-        .ov-progress-fill{
-          height:100%;border-radius:3px;transition:width .5s ease;
-          background:linear-gradient(90deg,#6366f1,#8b5cf6);
-        }
-
-        /* Current job */
-        .ov-job{
-          background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);
-          border-radius:8px;padding:8px 10px;margin-bottom:10px;
-        }
-        .ov-job-label{font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-        .ov-job-url{
-          font-size:12px;color:#93c5fd;word-break:break-all;
-          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-        }
-
-        /* Status line */
-        .ov-status{font-size:12px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
-        .ov-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-        .ov-status-dot.running{background:#4ade80}
-        .ov-status-dot.success{background:#22c55e}
-        .ov-status-dot.failed{background:#f87171}
-        .ov-status-dot.paused{background:#fbbf24}
-
-        /* Stats row */
-        .ov-stats{display:flex;gap:6px;margin-bottom:12px}
-        .ov-stat{
-          flex:1;text-align:center;padding:6px 4px;
-          background:rgba(255,255,255,.03);border-radius:6px;
-          border:1px solid rgba(255,255,255,.05);
-        }
-        .ov-stat-val{font-size:14px;font-weight:700}
-        .ov-stat-val.s-done{color:#4ade80}
-        .ov-stat-val.s-fail{color:#f87171}
-        .ov-stat-val.s-skip{color:#fbbf24}
-        .ov-stat-lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:1px}
-
-        /* Buttons */
-        .ov-controls{display:flex;gap:6px}
-        .ov-btn{
-          flex:1;padding:8px 0;border:none;border-radius:8px;
-          font-size:12px;font-weight:600;cursor:pointer;
-          transition:all .15s;display:flex;align-items:center;justify-content:center;gap:4px;
-        }
-        .ov-btn:active{transform:scale(.96)}
-        .ov-btn-pause{background:rgba(99,102,241,.2);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)}
-        .ov-btn-pause:hover{background:rgba(99,102,241,.35)}
-        .ov-btn-skip{background:rgba(251,191,36,.15);color:#fde68a;border:1px solid rgba(251,191,36,.25)}
-        .ov-btn-skip:hover{background:rgba(251,191,36,.3)}
-        .ov-btn-quit{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
-        .ov-btn-quit:hover{background:rgba(239,68,68,.3)}
-
-        /* Done state */
-        .ov-done-msg{
-          text-align:center;padding:8px 0;font-size:14px;font-weight:700;
-          color:#4ade80;display:none;
-        }
-        .overlay.all-done .ov-done-msg{display:block}
-        .overlay.all-done .ov-controls{display:none}
-        .overlay.all-done .ov-status{display:none}
-      `;
-
-      const container = document.createElement('div');
-      container.className = 'overlay';
-      container.innerHTML = `
-        <div class="ov-header">
-          <div class="ov-header-left">
-            <div class="ov-pulse"></div>
-            <span class="ov-title">Automation In Progress</span>
-            <span class="ov-mini-badge"></span>
-          </div>
-          <div class="ov-header-btns">
-            <button class="ov-minimize" title="Minimize">─</button>
-            <button class="ov-close" title="Stop & Close">✕</button>
-          </div>
-        </div>
-        <div class="ov-body">
-          <div class="ov-counter">Job 0 of 0</div>
-          <div class="ov-subtitle">Auto-applying to job applications</div>
-          <div class="ov-progress-track"><div class="ov-progress-fill" style="width:0%"></div></div>
-          <div class="ov-job">
-            <div class="ov-job-label">Current Job</div>
-            <div class="ov-job-url">Waiting...</div>
-          </div>
-          <div class="ov-status">
-            <div class="ov-status-dot running"></div>
-            <span class="ov-status-text">Starting automation...</span>
-          </div>
-          <div class="ov-stats">
-            <div class="ov-stat"><div class="ov-stat-val s-done" data-stat="done">0</div><div class="ov-stat-lbl">Applied</div></div>
-            <div class="ov-stat"><div class="ov-stat-val s-fail" data-stat="failed">0</div><div class="ov-stat-lbl">Failed</div></div>
-            <div class="ov-stat"><div class="ov-stat-val s-skip" data-stat="skipped">0</div><div class="ov-stat-lbl">Skipped</div></div>
-          </div>
-          <div class="ov-controls">
-            <button class="ov-btn ov-btn-pause">⏸ Pause</button>
-            <button class="ov-btn ov-btn-skip">⏭ Skip</button>
-            <button class="ov-btn ov-btn-quit">⏹ Quit</button>
-          </div>
-          <div class="ov-done-msg">All Done!</div>
-        </div>
-      `;
-
-      shadow.appendChild(style);
-      shadow.appendChild(container);
-
-      /* ── Drag logic ── */
-      const header = shadow.querySelector('.ov-header');
-      let isDragging = false, dragX = 0, dragY = 0;
-      header.addEventListener('mousedown', e => {
-        if (e.target.closest('button')) return;
-        isDragging = true;
-        dragX = e.clientX - overlayHost.getBoundingClientRect().left;
-        dragY = e.clientY - overlayHost.getBoundingClientRect().top;
-        e.preventDefault();
-      });
-      document.addEventListener('mousemove', e => {
-        if (!isDragging) return;
-        let nx = e.clientX - dragX;
-        let ny = e.clientY - dragY;
-        nx = Math.max(0, Math.min(window.innerWidth - 60, nx));
-        ny = Math.max(0, Math.min(window.innerHeight - 40, ny));
-        overlayHost.style.left   = nx + 'px';
-        overlayHost.style.top    = ny + 'px';
-        overlayHost.style.right  = 'auto';
-        overlayHost.style.bottom = 'auto';
-      });
-      document.addEventListener('mouseup', () => { isDragging = false; });
-
-      /* ── Minimize toggle ── */
-      shadow.querySelector('.ov-minimize').addEventListener('click', () => {
-        _isMinimized = !_isMinimized;
-        container.classList.toggle('minimized', _isMinimized);
-        shadow.querySelector('.ov-minimize').textContent = _isMinimized ? '□' : '─';
-        updateMiniBadge();
-      });
-
-      /* ── Close / Quit ── */
-      const removeOverlay = () => {
-        try { chrome.runtime.sendMessage({ type: 'STOP_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
-        destroyOverlay();
-      };
-      shadow.querySelector('.ov-close').addEventListener('click', removeOverlay);
-      shadow.querySelector('.ov-btn-quit').addEventListener('click', removeOverlay);
-
-      /* ── Pause / Resume ── */
-      shadow.querySelector('.ov-btn-pause').addEventListener('click', () => {
-        _isPaused = !_isPaused;
-        const btn = shadow.querySelector('.ov-btn-pause');
-        const pulse = shadow.querySelector('.ov-pulse');
-        const statusDot = shadow.querySelector('.ov-status-dot');
-        if (_isPaused) {
-          try { chrome.runtime.sendMessage({ type: 'PAUSE_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
-          btn.textContent = '▶ Resume';
-          pulse.classList.add('paused');
-          statusDot.className = 'ov-status-dot paused';
-          shadow.querySelector('.ov-status-text').textContent = 'Paused';
-          shadow.querySelector('.ov-title').textContent = 'Automation Paused';
-        } else {
-          try { chrome.runtime.sendMessage({ type: 'RESUME_CSV_QUEUE' }).catch(() => {}); } catch (_) {}
-          btn.textContent = '⏸ Pause';
-          pulse.classList.remove('paused');
-          statusDot.className = 'ov-status-dot running';
-          shadow.querySelector('.ov-status-text').textContent = 'Filling application form...';
-          shadow.querySelector('.ov-title').textContent = 'Automation In Progress';
-        }
-      });
-
-      /* ── Skip ── */
-      shadow.querySelector('.ov-btn-skip').addEventListener('click', () => {
-        try { chrome.runtime.sendMessage({ type: 'SKIP_CSV_JOB' }).catch(() => {}); } catch (_) {}
-        shadow.querySelector('.ov-status-text').textContent = 'Skipping current job...';
-      });
-
-      LOG('CSV overlay created');
-    }
-
-    function destroyOverlay() {
-      if (overlayHost && overlayHost.parentNode) {
-        overlayHost.parentNode.removeChild(overlayHost);
-      }
-      overlayHost = null;
-      shadow = null;
-      if (_syncInterval) { clearInterval(_syncInterval); _syncInterval = null; }
-    }
-
-    function updateMiniBadge() {
-      if (!shadow) return;
-      const badge = shadow.querySelector('.ov-mini-badge');
-      if (badge) badge.textContent = `${_completedJobs} / ${_totalJobs}`;
-    }
-
-    /* ── Update the overlay UI ── */
-    function updateOverlayUI(stats) {
-      if (!shadow) return;
-      const { total, done, failed, dupes, completed, runIdx, queue } = stats;
-      _totalJobs = total;
-      _completedJobs = completed;
-
-      // Find running job
-      const runningJob = queue.find(j => j.status === 'running');
-      const currentIdx = runningJob ? queue.indexOf(runningJob) + 1 : completed;
-
-      shadow.querySelector('.ov-counter').textContent = `Job ${currentIdx} of ${total}`;
-      const pct = total > 0 ? Math.round(completed / total * 100) : 0;
-      shadow.querySelector('.ov-progress-fill').style.width = pct + '%';
-      shadow.querySelector('.ov-subtitle').textContent = `${pct}% complete · ${total - completed} remaining`;
-
-      if (runningJob) {
-        shadow.querySelector('.ov-job-url').textContent = runningJob.url;
-      }
-
-      shadow.querySelector('[data-stat="done"]').textContent = done;
-      shadow.querySelector('[data-stat="failed"]').textContent = failed;
-      shadow.querySelector('[data-stat="skipped"]').textContent = (stats.skipped || 0) + dupes;
-
-      updateMiniBadge();
-    }
-
-    /* ── Show "all done" state ── */
-    function showDoneState() {
-      if (!shadow) return;
-      const container = shadow.querySelector('.overlay');
-      container.classList.add('all-done');
-      shadow.querySelector('.ov-pulse').classList.add('done');
-      shadow.querySelector('.ov-title').textContent = 'Automation Complete';
-      shadow.querySelector('.ov-done-msg').style.display = 'block';
-      // Auto-remove after 8s
-      setTimeout(destroyOverlay, 8000);
-    }
-
-    /* ── Listen for messages from background ── */
-    chrome.runtime.onMessage.addListener(msg => {
-      if (!msg || !msg.type) return;
-
-      if (msg.type === 'CSV_JOB_STARTED') {
-        if (!shadow) {
-          // Create overlay if this is the automation tab
-          isAutomationTab().then(isActive => {
-            if (!isActive) return;
-            createOverlay();
-            readQueueStats().then(updateOverlayUI);
-          });
-        } else {
-          shadow.querySelector('.ov-job-url').textContent = msg.url || '';
-          if (!_isPaused) {
-            shadow.querySelector('.ov-status-text').textContent = 'Filling application form...';
-            shadow.querySelector('.ov-status-dot').className = 'ov-status-dot running';
-          }
-          readQueueStats().then(updateOverlayUI);
-        }
-      }
-
-      if (msg.type === 'CSV_JOB_COMPLETE') {
-        if (!shadow) return;
-        const statusMap = {
-          done:      'Applied successfully',
-          failed:    'Failed' + (msg.reason ? ': ' + msg.reason.slice(0, 40) : ''),
-          skipped:   'Skipped' + (msg.reason ? ': ' + msg.reason.slice(0, 40) : ''),
-          duplicate: 'Already applied — skipped',
-        };
-        const dotClass = msg.status === 'done' ? 'success' : msg.status === 'failed' ? 'failed' : 'running';
-        shadow.querySelector('.ov-status-text').textContent = statusMap[msg.status] || msg.status;
-        shadow.querySelector('.ov-status-dot').className = 'ov-status-dot ' + dotClass;
-        readQueueStats().then(updateOverlayUI);
-      }
-
-      if (msg.type === 'CSV_QUEUE_DONE') {
-        readQueueStats().then(stats => {
-          updateOverlayUI(stats);
-          showDoneState();
-        });
-      }
-
-      if (msg.type === 'CSV_QUEUE_PAUSED') {
-        _isPaused = true;
-        if (shadow) {
-          shadow.querySelector('.ov-btn-pause').textContent = '▶ Resume';
-          shadow.querySelector('.ov-pulse').classList.add('paused');
-          shadow.querySelector('.ov-status-dot').className = 'ov-status-dot paused';
-          shadow.querySelector('.ov-status-text').textContent = 'Paused';
-          shadow.querySelector('.ov-title').textContent = 'Automation Paused';
-        }
-      }
-    });
-
-    /* ── Initial check: if automation is already running, show overlay ── */
-    async function showOverlay() {
-      const active = await isAutomationTab();
-      if (!active) return;
-      createOverlay();
-      const stats = await readQueueStats();
-      updateOverlayUI(stats);
-    }
-
-    // Check on page load
-    sleep(1500).then(showOverlay);
-
-    // Periodic sync (handles tab reloads, external stops, etc.)
-    _syncInterval = setInterval(async () => {
-      try {
-        const data = await ST.get(['csvQueueRunning']);
-        if (!data.csvQueueRunning) {
-          if (shadow) destroyOverlay();
-          return;
-        }
-        if (shadow) {
-          const stats = await readQueueStats();
-          updateOverlayUI(stats);
-        }
-      } catch (_) {
-        // Extension context invalidated — stop syncing
-        clearInterval(_syncInterval);
-        _syncInterval = null;
-      }
-    }, 4000);
-
-  })();
+  /* T20 floating overlay REMOVED — progress now shown via OptimHire's native React UI */
 
   LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
 })();
