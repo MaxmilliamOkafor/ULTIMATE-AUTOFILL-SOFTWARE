@@ -225,12 +225,15 @@
 
   /* ── Profile helper ─────────────────────────────────────── */
   async function getProfile() {
-    const { candidateDetails } = await ST.get('candidateDetails');
+    const { candidateDetails, userDetails } = await ST.get(['candidateDetails', 'userDetails']);
     try {
       const parsed = typeof candidateDetails === 'string'
         ? JSON.parse(candidateDetails)
         : (candidateDetails || {});
-      return normalizeProfile(parsed);
+      const userParsed = typeof userDetails === 'string'
+        ? JSON.parse(userDetails)
+        : (userDetails || {});
+      return normalizeProfile({ ...userParsed, ...parsed });
     } catch (_) { return {}; }
   }
 
@@ -281,7 +284,8 @@
     return p;
   }
 
-  const _responseBankCache = { loaded: false, entries: [] };
+  const _responseBankCache = { loaded: false, entries: [], ts: 0 };
+  const RESPONSE_BANK_TTL_MS = 10_000;
 
   function normalizeText(v) {
     return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -303,7 +307,7 @@
     }
     if (typeof node !== 'object') return;
 
-    const response = node.response || node.answer || node.value || node.selected;
+    const response = node.response || node.answer || node.value || node.selected || node.a || node.text;
     if (response && (node.question || node.key || node.id || node.label)) {
       addResponseEntry(entries, node.question, response);
       addResponseEntry(entries, node.key, response);
@@ -316,10 +320,13 @@
   }
 
   async function getResponseBank() {
-    if (_responseBankCache.loaded) return _responseBankCache.entries;
+    if (_responseBankCache.loaded && (Date.now() - _responseBankCache.ts) < RESPONSE_BANK_TTL_MS) {
+      return _responseBankCache.entries;
+    }
     const keys = [
       'applicationDetails', 'complexFormData', 'manualComplexInstructions',
       'manualApplicationDetail', 'responses', 'questionAnswers', 'candidateDetails',
+      'missing_details', 'missingDetails', 'missingQuestionDetails', 'userDetails',
     ];
     const raw = await ST.get(keys);
     const entries = [];
@@ -334,6 +341,7 @@
 
     _responseBankCache.loaded = true;
     _responseBankCache.entries = entries;
+    _responseBankCache.ts = Date.now();
     return entries;
   }
 
@@ -364,6 +372,23 @@
   function guessFieldValue(label, p, el, responseEntries = []) {
     return guessValue(label, p) || getResponseValue(label, el, responseEntries) || '';
   }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const refreshKeys = [
+      'applicationDetails', 'complexFormData', 'manualComplexInstructions',
+      'manualApplicationDetail', 'responses', 'questionAnswers', 'candidateDetails',
+      'missing_details', 'missingDetails', 'missingQuestionDetails', 'userDetails',
+    ];
+    for (const k of refreshKeys) {
+      if (changes[k]) {
+        _responseBankCache.loaded = false;
+        _responseBankCache.entries = [];
+        _responseBankCache.ts = 0;
+        break;
+      }
+    }
+  });
 
   /* ── Applications Account helper ────────────────────────── */
   async function getAppAccount() {
