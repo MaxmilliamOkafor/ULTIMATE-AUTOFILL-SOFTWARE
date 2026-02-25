@@ -439,39 +439,53 @@
 
   function guessValue(label, p = {}) {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
-    if (/first.?name/.test(l)) return p.first_name || p.firstName || '';
-    if (/last.?name/.test(l)) return p.last_name || p.lastName || '';
-    if (/full.?name|your name/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/first.?name|given.?name|prenom/.test(l)) return p.first_name || p.firstName || '';
+    if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
+    if (/middle.?name/.test(l)) return p.middle_name || '';
+    if (/preferred.?name|nick.?name/.test(l)) return p.preferred_name || p.first_name || '';
+    if (/full.?name|your name|name/.test(l) && !/company|last|first|user/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
     if (/\bemail\b/.test(l)) return p.email || '';
-    if (/phone|mobile|cell/.test(l)) return p.phone || '';
-    if (/^city$|city\b/.test(l)) return p.city || '';
-    if (/state|province/.test(l)) return p.state || '';
+    if (/phone|mobile|cell|telephone/.test(l)) return p.phone || '';
+    if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
+    if (/state|province|region/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
     if (/country/.test(l)) return p.country || 'United States';
-    if (/address/.test(l)) return p.address || '';
+    if (/address|street/.test(l)) return p.address || '';
+    if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
     if (/github/.test(l)) return p.github_url || p.github || '';
-    if (/website|portfolio/.test(l)) return p.website_url || p.website || '';
-    if (/university|school|college/.test(l)) return p.school || p.university || '';
-    if (/\bdegree\b/.test(l)) return p.degree || "Bachelor's";
-    if (/major|field of study/.test(l)) return p.major || '';
-    if (/gpa/.test(l)) return p.gpa || '';
-    if (/title|position|role/.test(l)) return p.current_title || p.title || '';
-    if (/company|employer|org/.test(l)) return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation/.test(l)) return p.cover_letter || DEFAULTS.cover;
-    if (/why.*compan|why.*role/.test(l)) return DEFAULTS.why;
-    if (/how.*hear|where.*find/.test(l)) return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
-    if (/availab|start date|notice/.test(l)) return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa/.test(l)) return DEFAULTS.sponsorship;
-    if (/relocat/.test(l)) return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military/.test(l)) return DEFAULTS.veteran;
+    if (/website|portfolio|personal.?url/.test(l)) return p.website_url || p.website || '';
+    if (/twitter|x\.com/.test(l)) return p.twitter_url || p.twitter || '';
+    if (/university|school|college|alma.?mater/.test(l)) return p.school || p.university || '';
+    if (/\bdegree\b|qualification/.test(l)) return p.degree || "Bachelor's";
+    if (/major|field.?of.?study|concentration|specialization/.test(l)) return p.major || '';
+    if (/gpa|grade.?point/.test(l)) return p.gpa || '';
+    if (/graduation|grad.?date|grad.?year/.test(l)) return p.graduation_year || p.grad_year || '';
+    if (/title|position|role|current.?title|job.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
+    if (/company|employer|org|current.?company/.test(l)) return p.current_company || p.company || '';
+    if (/salary|compensation|pay|desired.?pay|expected.?comp/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.?info|message.?to/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/summary|about.?(yourself|you|me)|bio|objective|profile.?summary/.test(l)) return p.summary || p.cover_letter || DEFAULTS.cover;
+    if (/why.*(compan|role|want|interest|position)/.test(l)) return DEFAULTS.why;
+    if (/how.*hear|where.*(find|learn|discover)|source|referred.?by|referral/.test(l)) return DEFAULTS.howHeard;
+    if (/years.*(exp|work)|exp.*years|total.*experience/.test(l)) return DEFAULTS.years;
+    if (/availab|start.?date|notice|when.*start|earliest.*start/.test(l)) return DEFAULTS.availability;
+    if (/authoriz|eligible|work.*right|legal.*right|permitted.*work/.test(l)) return DEFAULTS.authorized;
+    if (/sponsor|visa|immigration|work.?permit/.test(l)) return DEFAULTS.sponsorship;
+    if (/relocat|willing.*move|open.*reloc/.test(l)) return DEFAULTS.relocation;
+    if (/remote|work.*home|hybrid|on.?site|work.?model|work.?arrangement/.test(l)) return DEFAULTS.remote;
+    if (/veteran|military|armed.?forces|served/.test(l)) return DEFAULTS.veteran;
     if (/disabilit/.test(l)) return DEFAULTS.disability;
-    if (/gender|sex\b/.test(l)) return DEFAULTS.gender;
-    if (/ethnic|race|racial/.test(l)) return DEFAULTS.ethnicity;
+    if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
+    if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
+    if (/nationality|citizenship/.test(l)) return p.nationality || p.country || 'United States';
+    if (/language|fluency|fluent/.test(l)) return p.languages || 'English';
+    if (/certif|license|credential/.test(l)) return p.certifications || '';
+    if (/commute|travel|willing.*travel/.test(l)) return 'Yes';
+    if (/convicted|criminal|felony|background.?check/.test(l)) return 'No';
+    if (/drug.?test|screening/.test(l)) return 'Yes';
+    if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l)) return 'Yes';
+    if (/agree|acknowledge|certif|attest|confirm|consent/.test(l)) return 'Yes';
     return '';
   }
 
@@ -1388,10 +1402,12 @@
     setInterval(checkSuccess, 5000);
     checkSuccess();
 
-    /* Auto-fill on page load for CSV mode — this is the ONLY autofill for CSV jobs.
-     * The native autofill.js can NOT be used because isAutoProcessStartJob triggers
-     * the native pipeline which fetches unrelated API jobs. */
-    await sleep(5000);
+    /* ── Multi-page form loop ──────────────────────────────────
+     * Fill all fields → click Submit/Next → if Next, wait for page change → re-fill.
+     * Handles Workday multi-step, Greenhouse, Lever, and generic multi-page forms.
+     * Up to 10 pages max to prevent infinite loops.
+     * ─────────────────────────────────────────────────────────── */
+    await sleep(3000); // Initial wait for page DOM to settle
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS', event: 'analyzing_form',
@@ -1399,90 +1415,193 @@
       }).catch(() => { });
     } catch (_) { }
 
-    if (CURRENT_ATS === 'Workday') await workdayAutofill();
-    else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
-    else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-    else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
-    await autoFillPage();
-    await solveCaptcha();
+    const MAX_PAGES = 10;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      if (reported) break; // Success already detected by MutationObserver
 
-    // Retry fill after 5s to catch late-rendering fields
-    await sleep(5000);
-    await autoFillPage();
+      LOG(`── Page ${page}/${MAX_PAGES}: Filling fields ──`);
 
-    // Click submit button
-    await sleep(1500);
-    await tryClickSubmit();
-  }
+      // 1. ATS-specific fill
+      if (CURRENT_ATS === 'Workday') await workdayAutofill();
+      else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
+      else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+      else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
 
-  /** Find and click the submit / apply button to ensure the application is sent */
-  async function tryClickSubmit() {
-    // Check if autoSubmit is enabled in settings
-    const { csvQueueSettings } = await ST.get('csvQueueSettings');
-    const autoSubmit = csvQueueSettings?.autoSubmit !== false; // default true for CSV mode
+      // 2. Generic fill (catches fields ATS-specific handlers missed)
+      await autoFillPage({ requiredOnly: false });
+      await solveCaptcha();
 
-    if (!autoSubmit) {
-      LOG('Auto-submit disabled — waiting for manual submit or timeout');
-      return;
-    }
+      // 3. Wait and retry for lazy-rendered fields
+      await sleep(3000);
+      if (reported) break;
+      await autoFillPage({ requiredOnly: false });
 
-    const missingRequired = getMissingRequiredFields();
-    if (missingRequired.length > 0) {
-      LOG('Blocking submit: required fields still missing', missingRequired);
-      missingRequired.forEach(name => reportFieldFilled(name, 'failed'));
-      return;
-    }
+      // 4. Click submit or next
+      await sleep(1000);
+      if (reported) break;
+      const action = await tryClickSubmit();
 
-    const submitSelectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button[data-automation-id="bottom-navigation-next-button"]', // Workday
-      'button[data-automation-id="submit"]', // Workday submit
-      '#submit_app', // Greenhouse
-      '.postings-btn-submit', // Lever
-      'button.application-submit', // Lever
-      'button[data-qa="btn-submit"]', // SmartRecruiters
-      'button[aria-label*="Submit"]',
-      'button[aria-label*="submit"]',
-    ];
-
-    // Look for visible submit-like buttons
-    for (const sel of submitSelectors) {
-      const btn = $(sel);
-      if (btn && isVisible(btn)) {
-        LOG('Found submit button:', sel, btn.textContent?.trim());
+      if (action === 'submitted') {
+        LOG('Submit clicked — waiting for success confirmation');
+        // Wait for success detection (checkSuccess watcher will trigger report)
+        await sleep(10000);
+        break;
+      } else if (action === 'next_page') {
+        LOG('Next/Continue clicked — waiting for page transition');
+        // Wait for new page content to load
+        await sleep(5000);
+        // Re-analyze the new page
         try {
           chrome.runtime.sendMessage({
-            type: 'SIDEBAR_STATUS', event: 'submitting',
+            type: 'SIDEBAR_STATUS', event: 'filling_form',
+            atsName: CURRENT_ATS || 'Unknown', url: location.href,
+            page: page + 1,
           }).catch(() => { });
         } catch (_) { }
+        continue; // Loop back to fill the next page
+      } else {
+        LOG('No submit/next button — final fill attempt');
+        await sleep(3000);
+        await autoFillPage({ requiredOnly: false });
+        const retry = await tryClickSubmit();
+        if (retry) LOG(`Final attempt: ${retry}`);
+        break;
+      }
+    }
+  }
+
+  /** Find and click the submit / apply button to ensure the application is sent.
+   *  Returns: 'submitted' | 'next_page' | false */
+  async function tryClickSubmit() {
+    const { csvQueueSettings } = await ST.get('csvQueueSettings');
+    const autoSubmit = csvQueueSettings?.autoSubmit !== false;
+    if (!autoSubmit) { LOG('Auto-submit disabled'); return false; }
+
+    // Resume upload — handle input[type=file] fields
+    await tryResumeUpload();
+
+    const missingRequired = getMissingRequiredFields();
+
+    // ── Submit selectors (only click if ALL required fields filled) ──
+    const submitSelectors = [
+      'button[type="submit"]', 'input[type="submit"]',
+      'button[data-automation-id="submit"]',
+      '#submit_app', '.postings-btn-submit', 'button.application-submit',
+      'button[data-qa="btn-submit"]',
+      'button[aria-label*="Submit" i]',
+      '[data-testid="submit-application"]',
+      'button.btn-submit', '#resumeSubmitForm',
+    ];
+    if (missingRequired.length === 0) {
+      for (const sel of submitSelectors) {
+        const btn = document.querySelector(sel);
+        if (btn && isVisible(btn)) {
+          LOG('Clicking submit:', sel);
+          try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => { }); } catch (_) { }
+          await sleep(500);
+          realClick(btn);
+          return 'submitted';
+        }
+      }
+      // Fallback: button by text
+      const btns = $$('button,a[role="button"],input[type="submit"]').filter(isVisible);
+      const submitBtn = btns.find(b => {
+        const t = (b.textContent || b.value || '').trim().toLowerCase();
+        return /^(submit|apply|send|complete|finish)\b/i.test(t) && !/cancel|back|prev|close/i.test(t);
+      });
+      if (submitBtn) {
+        LOG('Clicking submit (text):', submitBtn.textContent?.trim());
+        try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => { }); } catch (_) { }
+        await sleep(500);
+        realClick(submitBtn);
+        return 'submitted';
+      }
+    } else {
+      LOG(`${missingRequired.length} required fields missing — trying Next/Continue`);
+      missingRequired.forEach(n => reportFieldFilled(n, 'failed'));
+    }
+
+    // ── Next/Continue selectors (click even with missing fields for multi-page) ──
+    const nextSelectors = [
+      'button[data-automation-id="bottom-navigation-next-button"]', // Workday
+      'button[data-automation-id="next-button"]',
+      'button[aria-label*="Next" i]', 'button[aria-label*="Continue" i]',
+      '[data-testid="next-step"]', '[data-testid="continue"]',
+    ];
+    for (const sel of nextSelectors) {
+      const btn = document.querySelector(sel);
+      if (btn && isVisible(btn)) {
+        LOG('Clicking Next/Continue:', sel);
         await sleep(500);
         realClick(btn);
-        LOG('Clicked submit button');
-        return;
+        return 'next_page';
+      }
+    }
+    // Fallback: Next/Continue by text
+    const allBtns = $$('button,a[role="button"]').filter(isVisible);
+    const nextBtn = allBtns.find(b => {
+      const t = (b.textContent || b.value || '').trim().toLowerCase();
+      return /^(next|continue|proceed|save.*continue|review)\b/i.test(t) && !/cancel|back|prev|close/i.test(t);
+    });
+    if (nextBtn) {
+      LOG('Clicking Next (text):', nextBtn.textContent?.trim());
+      await sleep(500);
+      realClick(nextBtn);
+      return 'next_page';
+    }
+
+    // Last resort: if fields are filled, submit even through generic submit button
+    if (missingRequired.length === 0) {
+      const anySubmitish = allBtns.find(b => {
+        const t = (b.textContent || b.value || '').trim().toLowerCase();
+        return /submit|apply|send|go|done/i.test(t) && !/cancel|back|close/i.test(t);
+      });
+      if (anySubmitish) {
+        LOG('Last resort submit:', anySubmitish.textContent?.trim());
+        await sleep(500);
+        realClick(anySubmitish);
+        return 'submitted';
       }
     }
 
-    // Fallback: find button by text content
-    const buttons = $$('button,a[role="button"],input[type="submit"]').filter(isVisible);
-    const submitBtn = buttons.find(btn => {
-      const t = (btn.textContent || btn.value || '').trim().toLowerCase();
-      return /^(submit|apply|send|complete|finish|next|continue)(\s|$)/i.test(t) &&
-        !/cancel|back|prev|close/i.test(t);
-    });
+    LOG('No submit/next button found');
+    return false;
+  }
 
-    if (submitBtn) {
-      LOG('Found submit button by text:', submitBtn.textContent?.trim());
-      try {
-        chrome.runtime.sendMessage({
-          type: 'SIDEBAR_STATUS', event: 'submitting',
-        }).catch(() => { });
-      } catch (_) { }
-      await sleep(500);
-      realClick(submitBtn);
-      LOG('Clicked submit button (text match)');
-    } else {
-      LOG('No submit button found — relying on OptimHire pipeline submit');
+  /** Attempt to upload resume to visible file input fields */
+  async function tryResumeUpload() {
+    const fileInputs = $$('input[type="file"]').filter(isVisible);
+    if (fileInputs.length === 0) return;
+
+    // Check if we have a stored resume
+    const { resumeFile, resumeFileName } = await ST.get(['resumeFile', 'resumeFileName']);
+    if (!resumeFile) {
+      LOG('No stored resume for upload');
+      return;
+    }
+
+    for (const fi of fileInputs) {
+      if (fi.files && fi.files.length > 0) continue; // Already has file
+      const lbl = getLabel(fi) || fi.name || fi.accept || '';
+      const l = lbl.toLowerCase();
+      // Only attach to resume/CV fields
+      if (/resume|cv|curriculum|document|upload|attach|file/i.test(l) || fi.accept?.includes('.pdf') || fi.accept?.includes('.doc')) {
+        try {
+          // resumeFile is expected to be a base64 data URI
+          const resp = await fetch(resumeFile);
+          const blob = await resp.blob();
+          const file = new File([blob], resumeFileName || 'resume.pdf', { type: blob.type || 'application/pdf' });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fi.files = dt.files;
+          fi.dispatchEvent(new Event('change', { bubbles: true }));
+          fi.dispatchEvent(new Event('input', { bubbles: true }));
+          LOG('Resume uploaded to:', lbl);
+          reportFieldFilled(lbl || 'Resume', 'filled');
+        } catch (e) {
+          LOG('Resume upload failed:', e);
+        }
+      }
     }
   }
 
