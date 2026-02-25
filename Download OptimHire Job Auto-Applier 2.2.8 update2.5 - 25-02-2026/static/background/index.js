@@ -90,7 +90,7 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
   const _activeJobs = new Map();
   let _reuseTabId = null;  // for reuseTab mode (single-tab mode only)
   // Queue automation settings (defaults match UI defaults)
-  let _queueSettings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: false, reuseTab: true, skipCaptcha: true };
+  let _queueSettings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: true, reuseTab: true, skipCaptcha: true };
   let _enableApiFallback = false; // When true, CSV queue exhaustion triggers OptimHire API job fetch
 
   // Load persisted settings on startup — always force reuseTab for single-tab mode
@@ -624,6 +624,9 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
     if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
       const entry = [..._activeJobs.values()].find(j => j.tabId === senderTabId);
       if (entry?.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
+      // Clean up form state for next job
+      chrome.storage.local.set({ complexFormInProgress: false }).catch(() => { });
+      chrome.storage.local.remove(['complexFormData']).catch(() => { });
       return false;
     }
     if (msg && msg.type === "COMPLEX_FORM_ERROR" && senderTabId) {
@@ -633,6 +636,9 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
         const result = errType === "alreadyApplied" ? "duplicate" : "failed:" + errType;
         const r = entry.resolve; entry.resolve = null; r(result);
       }
+      // Clean up form state for next job
+      chrome.storage.local.set({ complexFormInProgress: false }).catch(() => { });
+      chrome.storage.local.remove(['complexFormData']).catch(() => { });
       return false;
     }
 

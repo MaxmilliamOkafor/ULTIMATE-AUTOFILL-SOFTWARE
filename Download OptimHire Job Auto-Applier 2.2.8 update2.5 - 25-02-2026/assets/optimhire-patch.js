@@ -646,7 +646,26 @@
         if (isFieldRequired(sel)) filledCount++;
         reportFieldFilled(lbl, 'filled');
       } else {
-        reportFieldFilled(lbl, 'failed');
+        // Fallback: try to pick a reasonable default option
+        const lblLower = (lbl || '').toLowerCase();
+        const isEeo = /gender|disability|veteran|race|ethnicity|sex\b|heritage/i.test(lblLower);
+        const options = $$('option', sel).filter(o => o.value && o.value !== '' && o.index > 0);
+        let fallback = null;
+        if (isEeo) {
+          // EEO fields: prefer "Prefer not to say/Decline/I don't wish"
+          fallback = options.find(o => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
+        }
+        if (!fallback && options.length > 0) {
+          fallback = options[0]; // First valid option
+        }
+        if (fallback) {
+          sel.value = fallback.value;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          if (isFieldRequired(sel)) filledCount++;
+          reportFieldFilled(lbl, 'filled');
+        } else {
+          reportFieldFilled(lbl, 'failed');
+        }
       }
     }
 
@@ -1570,7 +1589,7 @@
 
   /** Attempt to upload resume to visible file input fields */
   async function tryResumeUpload() {
-    const fileInputs = $$('input[type="file"]').filter(isVisible);
+    const fileInputs = $$('input[type="file"]'); // File inputs are often hidden by design
     if (fileInputs.length === 0) return;
 
     // Check if we have a stored resume
