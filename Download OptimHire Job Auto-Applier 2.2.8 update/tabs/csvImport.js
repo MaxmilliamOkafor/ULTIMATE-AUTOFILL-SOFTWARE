@@ -151,13 +151,14 @@ async function addUrls(parsed, source = 'paste') {
   const existing = new Set(queue.map(j => normalize(j.url)));
   let added = 0, dupes = 0, alreadyApplied = 0;
 
+  const newJobs = [];
   for (const url of valid) {
     const norm = normalize(url);
     if (existing.has(norm)) { dupes++; continue; }
     existing.add(norm);
     const wasApplied = appliedSet.has(norm);
     if (wasApplied) alreadyApplied++;
-    queue.push({
+    newJobs.push({
       id:         crypto.randomUUID(),
       url,
       platform:   platform(url),
@@ -172,6 +173,16 @@ async function addUrls(parsed, source = 'paste') {
     });
     added++;
   }
+
+  if (newJobs.length) {
+    if (source === 'csv') {
+      // CSV imports are prioritized: merge into the existing queue at the front.
+      queue = [...newJobs, ...queue];
+    } else {
+      queue.push(...newJobs);
+    }
+  }
+
   saveQueue();
   render();
   showParseSummary(totalRows, added, dupes + alreadyApplied, invalid);

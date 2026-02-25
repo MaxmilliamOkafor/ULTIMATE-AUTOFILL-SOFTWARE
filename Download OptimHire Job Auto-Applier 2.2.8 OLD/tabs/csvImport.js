@@ -80,6 +80,39 @@ function normalize(url) {
   } catch { return url.trim().toLowerCase(); }
 }
 
+function normalizeQueueItem(raw, fallbackSource = 'queue') {
+  if (!raw) return null;
+  const url = typeof raw === 'string' ? raw : raw.url;
+  if (!url || typeof url !== 'string') return null;
+  return {
+    id: raw.id || crypto.randomUUID(),
+    url,
+    platform: raw.platform || platform(url),
+    source: raw.source || fallbackSource,
+    addedAt: raw.addedAt || Date.now(),
+    status: raw.status || 'pending',
+    attempts: Number.isFinite(raw.attempts) ? raw.attempts : 0,
+    lastError: raw.lastError || '',
+    startedAt: raw.startedAt ?? null,
+    finishedAt: raw.finishedAt ?? null,
+    note: raw.note || '',
+  };
+}
+
+function normalizeQueueList(rawQueue = [], fallbackSource = 'queue') {
+  const seen = new Set();
+  const normalized = [];
+  for (const item of rawQueue) {
+    const job = normalizeQueueItem(item, fallbackSource);
+    if (!job) continue;
+    const key = normalize(job.url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(job);
+  }
+  return normalized;
+}
+
 /* ── URL validator ── */
 function validateUrl(raw) {
   const s = (raw || '').replace(/^["'\s]+|["'\s]+$/g, '');
@@ -91,7 +124,12 @@ function validateUrl(raw) {
 
 /* ── Storage helpers ── */
 function loadQueue() {
-  return new Promise(res => chrome.storage.local.get(KEY_QUEUE, d => { queue = d[KEY_QUEUE] || []; res(); }));
+  return new Promise(res => chrome.storage.local.get(KEY_QUEUE, d => {
+    const raw = d[KEY_QUEUE] || [];
+    queue = normalizeQueueList(raw);
+    if (queue.length !== raw.length || raw.some(item => typeof item === 'string')) saveQueue();
+    res();
+  }));
 }
 function saveQueue() { chrome.storage.local.set({ [KEY_QUEUE]: queue }); }
 function loadApplied() { return new Promise(res => chrome.storage.local.get(KEY_APPLIED, d => res(d[KEY_APPLIED] || []))); }
@@ -151,13 +189,14 @@ async function addUrls(parsed, source = 'paste') {
   const existing = new Set(queue.map(j => normalize(j.url)));
   let added = 0, dupes = 0, alreadyApplied = 0;
 
+  const newJobs = [];
   for (const url of valid) {
     const norm = normalize(url);
     if (existing.has(norm)) { dupes++; continue; }
     existing.add(norm);
     const wasApplied = appliedSet.has(norm);
     if (wasApplied) alreadyApplied++;
-    queue.push({
+    newJobs.push({
       id:         crypto.randomUUID(),
       url,
       platform:   platform(url),
@@ -172,6 +211,16 @@ async function addUrls(parsed, source = 'paste') {
     });
     added++;
   }
+
+  if (newJobs.length) {
+    if (source === 'csv') {
+      // CSV imports are prioritized: merge into the existing queue at the front.
+      queue = [...newJobs, ...queue];
+    } else {
+      queue.push(...newJobs);
+    }
+  }
+
   saveQueue();
   render();
   showParseSummary(totalRows, added, dupes + alreadyApplied, invalid);

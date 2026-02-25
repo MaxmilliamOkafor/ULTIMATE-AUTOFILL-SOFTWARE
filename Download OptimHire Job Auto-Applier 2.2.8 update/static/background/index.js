@@ -176,6 +176,26 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     } catch (_) { /* storage may fail during extension update — ignore */ }
   }
 
+  function pickNextPendingJob(q) {
+    let chosen = null;
+    for (const job of q) {
+      if (job.status !== "pending") continue;
+      if (!chosen) { chosen = job; continue; }
+
+      const chosenCsv = chosen.source === "csv";
+      const jobCsv = job.source === "csv";
+      if (jobCsv !== chosenCsv) {
+        if (jobCsv) chosen = job;
+        continue;
+      }
+
+      const chosenAdded = chosen.addedAt || 0;
+      const jobAdded = job.addedAt || 0;
+      if (jobAdded > chosenAdded) chosen = job;
+    }
+    return chosen;
+  }
+
   /* Core queue loop */
   async function processNextCsvJob() {
     if (!csvQueueRunning || csvQueuePaused) return;
@@ -192,7 +212,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     let job = null;
     {
       const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
-      const candidate = q.find(j => j.status === "pending");
+      const candidate = pickNextPendingJob(q);
       if (!candidate) {
         // Check if any workers are still active; if none, broadcast done
         if (_activeJobs.size === 0 && csvQueueRunning) {
@@ -640,15 +660,17 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       else if (msg.type === "IMPORT_CSV_JOBS" && Array.isArray(msg.urls)) {
         const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
         const existing = new Set(q.map(j => j.url));
+        const additions = [];
         let added = 0;
         for (const url of msg.urls) {
           if (!url || existing.has(url)) continue;
           existing.add(url);
-          q.push({ id: crypto.randomUUID(), url, status: "pending", addedAt: Date.now() });
+          additions.push({ id: crypto.randomUUID(), url, source: "csv", status: "pending", addedAt: Date.now() });
           added++;
         }
-        await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
-        sendResponse({ added, total: q.length });
+        const mergedQueue = additions.length ? [...additions, ...q] : q;
+        await chrome.storage.local.set({ [CSV_QUEUE_KEY]: mergedQueue });
+        sendResponse({ added, total: mergedQueue.length });
       }
       else if (msg.type === "GET_CSV_QUEUE") {
         const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
