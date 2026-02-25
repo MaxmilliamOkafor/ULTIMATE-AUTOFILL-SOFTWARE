@@ -263,7 +263,106 @@
     p.address = pickFirst(p.address, p.streetAddress, p.addressLine1);
     p.current_title = pickFirst(p.current_title, p.currentTitle, p.title);
     p.current_company = pickFirst(p.current_company, p.currentCompany, p.company);
+
+    const nested = p.profile || p.candidate || p.user || p.basics || {};
+    p.first_name = pickFirst(p.first_name, nested.first_name, nested.firstName, nested.firstname);
+    p.last_name = pickFirst(p.last_name, nested.last_name, nested.lastName, nested.lastname);
+    p.email = pickFirst(p.email, nested.email, nested.emailAddress, nested.email_address);
+    p.phone = pickFirst(p.phone, nested.phone, nested.phoneNumber, nested.mobile, nested.mobileNumber);
+    p.linkedin_profile_url = pickFirst(
+      p.linkedin_profile_url,
+      nested.linkedin_profile_url,
+      nested.linkedin,
+      nested.linkedIn,
+      nested.linkedinUrl
+    );
+    p.website_url = pickFirst(p.website_url, nested.website_url, nested.website, nested.portfolio, nested.portfolio_url);
+
     return p;
+  }
+
+  const _responseBankCache = { loaded: false, entries: [] };
+
+  function normalizeText(v) {
+    return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  function addResponseEntry(entries, keyText, response) {
+    const key = normalizeText(keyText);
+    const val = String(response || '').trim();
+    if (!key || !val) return;
+    if (entries.some(e => e.key === key && e.value === val)) return;
+    entries.push({ key, value: val });
+  }
+
+  function collectResponseEntries(node, entries) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      node.forEach(item => collectResponseEntries(item, entries));
+      return;
+    }
+    if (typeof node !== 'object') return;
+
+    const response = node.response || node.answer || node.value || node.selected;
+    if (response && (node.question || node.key || node.id || node.label)) {
+      addResponseEntry(entries, node.question, response);
+      addResponseEntry(entries, node.key, response);
+      addResponseEntry(entries, node.label, response);
+      addResponseEntry(entries, node.id, response);
+      if (Array.isArray(node.keywords)) node.keywords.forEach(k => addResponseEntry(entries, k, response));
+    }
+
+    Object.values(node).forEach(v => collectResponseEntries(v, entries));
+  }
+
+  async function getResponseBank() {
+    if (_responseBankCache.loaded) return _responseBankCache.entries;
+    const keys = [
+      'applicationDetails', 'complexFormData', 'manualComplexInstructions',
+      'manualApplicationDetail', 'responses', 'questionAnswers', 'candidateDetails',
+    ];
+    const raw = await ST.get(keys);
+    const entries = [];
+
+    for (const val of Object.values(raw || {})) {
+      if (!val) continue;
+      try {
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        collectResponseEntries(parsed, entries);
+      } catch (_) {}
+    }
+
+    _responseBankCache.loaded = true;
+    _responseBankCache.entries = entries;
+    return entries;
+  }
+
+  function getResponseValue(label, el, entries) {
+    if (!entries?.length) return '';
+    const candidates = [
+      label,
+      getLabel(el),
+      el?.name,
+      el?.id,
+      el?.placeholder,
+      el?.getAttribute?.('aria-label'),
+    ].map(normalizeText).filter(Boolean);
+
+    for (const c of candidates) {
+      const exact = entries.find(e => e.key === c);
+      if (exact) return exact.value;
+    }
+
+    for (const c of candidates) {
+      const matched = entries.find(e => c.includes(e.key) || e.key.includes(c));
+      if (matched) return matched.value;
+    }
+
+    return '';
+  }
+
+  function guessFieldValue(label, p, el, responseEntries = []) {
+    return guessValue(label, p) || getResponseValue(label, el, responseEntries) || '';
   }
 
   /* ── Applications Account helper ────────────────────────── */
@@ -389,8 +488,6 @@
       if (container.classList.contains('required')) return true;
       if (container.getAttribute('data-required') === 'true') return true;
       if (container.querySelector('.required,.asterisk,[aria-label*="required" i]')) return true;
-      const t = (container.textContent || '').slice(0, 180).toLowerCase();
-      if (/\brequired\b/.test(t)) return true;
     }
     return false;
   }
@@ -430,8 +527,10 @@
     return missing;
   }
 
-  async function autoFillPage() {
+  async function autoFillPage(options = {}) {
     const p = await getProfile();
+    const responseEntries = await getResponseBank();
+    const requiredOnly = options.requiredOnly !== false;
     const allFields = [];
     let filledCount = 0;
 
@@ -468,17 +567,17 @@
         event: 'filling_progress',
         total: requiredFields.length,
         filled: filledCount,
-        responses: Object.keys(p).length,
+        responses: Math.max(Object.keys(p).length, responseEntries.length),
       }).catch(() => {});
     } catch (_) {}
 
     /* Inputs + textareas — only unfilled */
-    const inputs = allInputs.filter(el => !el.value?.trim());
+    const inputs = allInputs.filter(el => !el.value?.trim() && (!requiredOnly || isFieldRequired(el)));
 
     for (const inp of inputs) {
       const lbl = getLabel(inp);
       if (!lbl) continue;
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, inp, responseEntries);
       if (!val) {
         reportFieldFilled(lbl, 'failed');
         continue;
@@ -491,10 +590,10 @@
     }
 
     /* Selects */
-    const selects = allSelects.filter(el => !el.value);
+    const selects = allSelects.filter(el => !el.value && (!requiredOnly || isFieldRequired(el)));
     for (const sel of selects) {
       const lbl = getLabel(sel);
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, sel, responseEntries);
       if (!val) {
         if (lbl) reportFieldFilled(lbl, 'failed');
         continue;
@@ -520,7 +619,8 @@
     for (const [, radios] of Object.entries(groups)) {
       if (radios.some(r => r.checked)) continue;
       const lbl = getLabel(radios[0]);
-      const guess = guessValue(lbl, p);
+      if (requiredOnly && !isFieldRequired(radios[0])) continue;
+      const guess = guessFieldValue(lbl, p, radios[0], responseEntries);
       const match = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         return guess && t.includes(guess.toLowerCase());
@@ -558,7 +658,7 @@
         event: 'filling_progress',
         total: requiredFields.length,
         filled: Math.max(requiredFields.length - missingRequired.length, 0),
-        responses: Object.keys(p).length,
+        responses: Math.max(Object.keys(p).length, responseEntries.length),
       }).catch(() => {});
     } catch (_) {}
 
@@ -576,6 +676,7 @@
     if (!isGH) return;
 
     const p = await getProfile();
+    const responseEntries = await getResponseBank();
 
     /* Map common Greenhouse field IDs/names */
     const GH_MAP = [
@@ -600,7 +701,7 @@
     $$('select').filter(isVisible).forEach(sel => {
       if (sel.value) return;
       const lbl = getLabel(sel);
-      const val = guessValue(lbl, p);
+      const val = guessFieldValue(lbl, p, sel, responseEntries);
       if (!val) return;
       const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
       if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
