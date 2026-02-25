@@ -293,7 +293,7 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
     // *** CRITICAL FIX ***
     // Register this tab as the copilot tab so autofill.js (COPILOT_TABID check)
     // returns sameTab:true and processes the form automatically.
-    _activeJobs.set(job.id, { tabId: tab.id, resolve: null, skipPending: false });
+    _activeJobs.set(job.id, { tabId: tab.id, resolve: null, skipPending: false, startedAt: Date.now() });
     // Compute CSV queue totals so the native sidepanel shows "X of Y applied"
     let _csvTotal = 0, _csvApplied = 0;
     try {
@@ -324,13 +324,15 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       // Also set appliedCount for the native counter
       appliedCount: _csvApplied,
     });
-    // Notify sidepanel of state change with counts
+    // Notify sidepanel of state change with current job details
     chrome.runtime.sendMessage({
       type: 'AUTO_APPLY_STATE_UPDATE',
       isActive: true,
       applicationState: 'in-progress',
       progress: _csvTotal > 0 ? Math.round(_csvApplied / _csvTotal * 100) : 10,
-      statusMessage: 'Filling application form...',
+      statusMessage: `Filling: ${job.title || new URL(job.url).hostname}`,
+      currentJobUrl: job.url,
+      currentJobTitle: job.title || '',
       appliedCount: _csvApplied,
       total: _csvTotal,
       totalJobs: _csvTotal,
@@ -665,9 +667,23 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
     }
 
     // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
+    // IMPORTANT: Enforce minimum 25s processing time so autofill actually works
+    const MIN_PROCESSING_MS = 25000; // minimum seconds before accepting result
     if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
       const entry = [..._activeJobs.values()].find(j => j.tabId === senderTabId);
-      if (entry?.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
+      if (entry?.resolve) {
+        const elapsed = Date.now() - (entry.startedAt || 0);
+        if (elapsed < MIN_PROCESSING_MS) {
+          // Too early — the autofill hasn't had time to properly analyze and fill.
+          // Delay resolution until minimum time has passed.
+          console.log(`[OH-BGPatch] COMPLEX_FORM_SUCCESS received after ${Math.round(elapsed / 1000)}s — waiting until ${MIN_PROCESSING_MS / 1000}s minimum`);
+          setTimeout(() => {
+            if (entry.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
+          }, MIN_PROCESSING_MS - elapsed);
+        } else {
+          const r = entry.resolve; entry.resolve = null; r("done");
+        }
+      }
       return false;
     }
     if (msg && msg.type === "COMPLEX_FORM_ERROR" && senderTabId) {
@@ -675,7 +691,16 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       if (entry?.resolve) {
         const errType = msg.errorType || "";
         const result = errType === "alreadyApplied" ? "duplicate" : "failed:" + errType;
-        const r = entry.resolve; entry.resolve = null; r(result);
+        const elapsed = Date.now() - (entry.startedAt || 0);
+        if (elapsed < MIN_PROCESSING_MS && errType !== "alreadyApplied") {
+          // Too early for errors too (except duplicates) — let autofill retry
+          console.log(`[OH-BGPatch] COMPLEX_FORM_ERROR received after ${Math.round(elapsed / 1000)}s — waiting`);
+          setTimeout(() => {
+            if (entry.resolve) { const r = entry.resolve; entry.resolve = null; r(result); }
+          }, MIN_PROCESSING_MS - elapsed);
+        } else {
+          const r = entry.resolve; entry.resolve = null; r(result);
+        }
       }
       return false;
     }
