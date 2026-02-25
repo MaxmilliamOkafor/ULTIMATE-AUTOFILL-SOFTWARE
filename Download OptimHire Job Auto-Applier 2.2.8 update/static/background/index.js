@@ -85,11 +85,12 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   const _activeJobs    = new Map();
   let _reuseTabId      = null;  // for reuseTab mode (single-tab mode only)
   // Queue automation settings (defaults match UI defaults)
-  let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:false, skipCaptcha:true };
+  let _queueSettings   = { delayMin:2, delayMax:7, concurrency:1, autoSubmit:false, reuseTab:true, skipCaptcha:true };
 
-  // Load persisted settings on startup
+  // Load persisted settings on startup — always force reuseTab for single-tab mode
   chrome.storage.local.get('csvQueueSettings', d => {
     if (d.csvQueueSettings) Object.assign(_queueSettings, d.csvQueueSettings);
+    _queueSettings.reuseTab = true; // ALWAYS use single tab
   });
 
   function randDelay(minS, maxS) {
@@ -98,18 +99,93 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   }
 
   function broadcast(msg) {
+    // Send to extension pages (csvImport.html, sidepanel, etc.)
+    chrome.runtime.sendMessage(msg).catch(() => {});
+    // Also send to ALL active automation tabs so the floating overlay receives updates
+    for (const js of _activeJobs.values()) {
+      if (js.tabId) chrome.tabs.sendMessage(js.tabId, msg).catch(() => {});
+    }
+  }
+
+  // Relay field-tracking and status messages from content scripts to sidepanel
+  function relaySidebarMsg(msg) {
     chrome.runtime.sendMessage(msg).catch(() => {});
   }
 
+  /* ── ATS domain list for auto-detection on any tab navigation ── */
+  const _ATS_AUTO_DETECT = {
+    'greenhouse.io': 'Greenhouse', 'boards.greenhouse.io': 'Greenhouse',
+    'lever.co': 'Lever', 'jobs.lever.co': 'Lever', 'apply.lever.co': 'Lever',
+    'myworkdayjobs.com': 'Workday', 'workday.com': 'Workday',
+    'icims.com': 'iCIMS', 'oraclecloud.com': 'OracleCloud',
+    'smartrecruiters.com': 'SmartRecruiters', 'ashbyhq.com': 'Ashby',
+    'bamboohr.com': 'BambooHR', 'jobvite.com': 'Jobvite',
+    'apply.workable.com': 'Workable', 'workable.com': 'Workable',
+    'breezy.hr': 'BreezyHR', 'jazzhr.com': 'JazzHR',
+    'taleo.net': 'Taleo', 'indeed.com': 'Indeed', 'linkedin.com': 'LinkedIn',
+    'teamtailor.com': 'Teamtailor', 'paylocity.com': 'Paylocity',
+    'dice.com': 'Dice', 'ziprecruiter.com': 'ZipRecruiter',
+  };
+
+  function detectAtsFromUrl(url) {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      for (const [domain, name] of Object.entries(_ATS_AUTO_DETECT)) {
+        if (hostname.includes(domain)) {
+          // LinkedIn: only on /jobs path
+          if (name === 'LinkedIn' && !new URL(url).pathname.startsWith('/jobs')) return null;
+          return name;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /* ── Auto-open sidepanel on ATS page detection ── */
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status !== 'complete' || !tab.url) return;
+    const ats = detectAtsFromUrl(tab.url);
+    if (!ats) return;
+    // Auto-open sidepanel on this tab
+    try {
+      chrome.sidePanel.setOptions({ enabled: true, tabId: tabId, path: 'sidepanel.html' });
+      chrome.sidePanel.open({ tabId: tabId }).catch(() => {});
+    } catch (_) {}
+    // Broadcast ATS detection to sidepanel
+    chrome.runtime.sendMessage({
+      type: 'SIDEBAR_STATUS',
+      event: 'ats_detected',
+      atsName: ats,
+      url: tab.url,
+      tabId: tabId,
+    }).catch(() => {});
+  });
+
   async function updateCsvJobStatus(id, status, note) {
-    const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
-    const job = q.find(j => j.id === id);
-    if (job) { job.status = status; if (note !== undefined) job.note = note; }
-    await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    try {
+      const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+      const job = q.find(j => j.id === id);
+      if (job) {
+        job.status = status;
+        if (note !== undefined) job.lastError = note;
+        if (status === 'running') job.startedAt = Date.now();
+        if (['done','failed','skipped','duplicate'].includes(status)) job.finishedAt = Date.now();
+        if (status === 'failed') job.attempts = (job.attempts || 0) + 1;
+      }
+      await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    } catch (_) { /* storage may fail during extension update — ignore */ }
   }
 
   /* Core queue loop */
   async function processNextCsvJob() {
+    if (!csvQueueRunning || csvQueuePaused) return;
+    try { await _processNextCsvJobInner(); } catch (err) {
+      console.error('[OH-BGPatch] processNextCsvJob unexpected error:', err);
+      // Don't let the queue stall — continue after a delay
+      if (csvQueueRunning && !csvQueuePaused) setTimeout(processNextCsvJob, 3000);
+    }
+  }
+  async function _processNextCsvJobInner() {
     if (!csvQueueRunning || csvQueuePaused) return;
 
     // Atomic claim: read queue, find pending, mark running all in one write
@@ -141,11 +217,13 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
     }
 
     broadcast({ type: "CSV_JOB_STARTED", jobId: job.id, url: job.url });
+    // Send sidebar status: Opening job page
+    relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'opening_page', url: job.url, jobTitle: job.title || '', company: job.company || '' });
 
-    // Open the job URL (new tab, or reuse existing tab if reuseTab setting is on)
+    // Open the job URL — ALWAYS reuse single tab
     let tab;
     try {
-      if (_queueSettings.reuseTab && _reuseTabId) {
+      if (_reuseTabId) {
         // Try to reuse existing tab
         try {
           await chrome.tabs.update(_reuseTabId, { url: job.url, active: true });
@@ -157,7 +235,7 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       }
       if (!tab) {
         tab = await chrome.tabs.create({ url: job.url, active: true });
-        if (_queueSettings.reuseTab) _reuseTabId = tab.id;
+        _reuseTabId = tab.id;
       }
     } catch(e) {
       await updateCsvJobStatus(job.id, "failed", "Could not open tab: " + e.message);
@@ -215,6 +293,9 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
 
       // Wait for page JS to hydrate
       await new Promise(r => setTimeout(r, 2500));
+
+      // Sidebar: Analyzing form
+      relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', url: job.url, tabId: tab.id });
 
       try {
         // 1. Read the user's profile (same data the website sends)
@@ -336,24 +417,22 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
           },
         });
 
-        // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
-        const msgResult = await chrome.tabs.sendMessage(tab.id, {
-          type: 'FILL_COMPLEX_FORM',
-          applicationDetails,
-          complexInstructions,
-          autoApplyEnabled,
-        }).catch(() => null);
+        // Sidebar: Filling form
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'filling_form', atsName: atsName, url: job.url });
 
-        // 8. If content script wasn't ready yet, retry once after 3s
-        if (!msgResult) {
-          await new Promise(r => setTimeout(r, 3000));
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'FILL_COMPLEX_FORM',
-            applicationDetails,
-            complexInstructions,
-            autoApplyEnabled,
-          }).catch(() => {});
+        // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
+        //    Retry up to 3 times with increasing delays if content script isn't ready
+        const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled };
+        let fillSent = false;
+        for (let attempt = 0; attempt < 3 && !fillSent; attempt++) {
+          try {
+            const resp = await chrome.tabs.sendMessage(tab.id, fillMsg);
+            if (resp) fillSent = true;
+          } catch (_) {}
+          if (!fillSent) await new Promise(r => setTimeout(r, 2000 + attempt * 1500));
         }
+        // 8. Also send TRIGGER_AUTOFILL as belt-and-suspenders for the patch autofill
+        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }).catch(() => {});
 
       } catch(err) {
         // Fallback: send TRIGGER_AUTOFILL for patch-based autofill
@@ -393,11 +472,10 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       finalStatus = isTimeout ? "skipped" : "failed";
     }
     broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: finalStatus, reason: finalReason });
+    // Sidebar: job complete
+    relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'job_complete', status: finalStatus, jobId: job.id, url: job.url });
 
-    // Close the tab (unless reuseTab is on)
-    if (!_queueSettings.reuseTab) {
-      try { chrome.tabs.remove(tab.id); } catch(_) {}
-    }
+    // Never close tab in single-tab mode — it gets reused for the next URL
 
     // Pause check
     if (csvQueuePaused) {
@@ -417,42 +495,56 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
       const jobState = _activeJobs.get(jobId);
       if (jobState) jobState.resolve = resolve;
       const resultKey = `csvJobResult_${jobId}`;
+      let settled = false;
+
+      const settle = (value) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(pollInterval);
+        clearTimeout(timer);
+        chrome.tabs.onRemoved.removeListener(tabCloseListener);
+        const js = _activeJobs.get(jobId);
+        if (js?.resolve === resolve) js.resolve = null;
+        resolve(value);
+      };
+
+      // Detect tab closure — skip immediately if tab was closed
+      const tabCloseListener = (closedTabId) => {
+        if (closedTabId === tabId) settle("skipped");
+      };
+      chrome.tabs.onRemoved.addListener(tabCloseListener);
 
       // Poll storage for result key written by optimhire-patch.js content script
       const pollInterval = setInterval(async () => {
+        if (settled) return;
         const js = _activeJobs.get(jobId);
-        if (js?.skipPending) {
-          clearInterval(pollInterval);
-          clearTimeout(timer);
-          if (js.resolve === resolve) { js.resolve = null; resolve("skipped"); }
-          return;
-        }
-        const data = await chrome.storage.local.get(resultKey);
-        if (data[resultKey]) {
-          clearInterval(pollInterval);
-          clearTimeout(timer);
-          await chrome.storage.local.remove(resultKey);
-          const st = data[resultKey].status;
-          const js2 = _activeJobs.get(jobId);
-          if (js2?.resolve === resolve) {
-            js2.resolve = null;
-            resolve(st === "done" ? "done" : st === "duplicate" ? "duplicate" : "failed");
+        if (js?.skipPending) { settle("skipped"); return; }
+        try {
+          const data = await chrome.storage.local.get(resultKey);
+          if (data[resultKey]) {
+            await chrome.storage.local.remove(resultKey);
+            const st = data[resultKey].status;
+            settle(st === "done" ? "done" : st === "duplicate" ? "duplicate" : "failed");
           }
-        }
+        } catch (_) {}
+        // Also verify the tab still exists
+        try { await chrome.tabs.get(tabId); } catch (_) { settle("skipped"); }
       }, 3000);
 
       // Hard timeout
-      const timer = setTimeout(() => {
-        clearInterval(pollInterval);
-        const jsT = _activeJobs.get(jobId);
-        if (jsT?.resolve === resolve) { jsT.resolve = null; resolve("timeout"); }
-      }, maxMs);
+      const timer = setTimeout(() => settle("timeout"), maxMs);
     });
   }
 
   /* ─── Message listener for CSV queue + credits + dedup ──────── */
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const senderTabId = sender?.tab?.id;
+
+    // Relay field-tracking / status messages from content scripts -> sidepanel
+    if (msg && (msg.type === 'SIDEBAR_FIELD_UPDATE' || msg.type === 'SIDEBAR_STATUS' || msg.type === 'SIDEBAR_FIELD_LIST')) {
+      chrome.runtime.sendMessage(msg).catch(() => {});
+      return false;
+    }
 
     // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
     if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
@@ -518,14 +610,25 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
         csvQueuePaused  = false;
         // Signal all active jobs to stop
         for (const js of _activeJobs.values()) { js.skipPending = true; }
-        if (_reuseTabId) { try { chrome.tabs.remove(_reuseTabId); } catch(_) {} _reuseTabId = null; }
+        _reuseTabId = null;
         await chrome.storage.local.set({ csvQueueRunning: false });
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'queue_stopped' });
         sendResponse({ ok: true });
       }
-      else if (msg.type === "SKIP_CSV_JOB") {
+      else if (msg.type === "SKIP_CSV_JOB" || msg.action === "skipCurrent") {
         // Mark the most recently started active job as skipPending
         const entries = [..._activeJobs.values()];
         if (entries.length) entries[entries.length - 1].skipPending = true;
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'skipping' });
+        sendResponse({ ok: true });
+      }
+      else if (msg.action === "stopQueue") {
+        csvQueueRunning = false;
+        csvQueuePaused  = false;
+        for (const js of _activeJobs.values()) { js.skipPending = true; }
+        _reuseTabId = null;
+        await chrome.storage.local.set({ csvQueueRunning: false });
+        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'queue_stopped' });
         sendResponse({ ok: true });
       }
       else if (msg.type === "CHECK_ALREADY_APPLIED") {

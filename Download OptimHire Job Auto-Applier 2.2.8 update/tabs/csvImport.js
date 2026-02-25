@@ -219,8 +219,8 @@ function render() {
   const pct  = queue.length ? Math.round(done / queue.length * 100) : 0;
   $el('progressFill').style.width = pct + '%';
 
-  $el('selectPendingLabel').textContent = `Select All Pending (${counts.pending})`;
-  $el('btnStartLabel').textContent = isRunning ? 'Running…' : `Start Auto-Apply (${counts.pending})`;
+  $el('selectPendingLabel').textContent = `Select Pending (${counts.pending})`;
+  $el('btnStartLabel').textContent = isRunning ? 'Running...' : `Start Auto-Apply (${counts.pending})`;
 
   /* Paginate */
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -346,7 +346,7 @@ function setRunningUI(running, paused = false) {
   $el('autoApplyPanel').classList.toggle('active', running);
   $el('btnStart').style.display = running ? 'none' : 'flex';
   $el('btnPause').style.display = running ? 'flex' : 'none';
-  $el('btnPause').textContent   = paused ? '▶ Resume' : '⏸ Pause';
+  $el('btnPause').textContent   = paused ? 'Resume' : 'Pause';
   $el('btnStartLabel').textContent = `Start Auto-Apply (${queue.filter(j => j.status === 'pending').length})`;
 }
 
@@ -377,7 +377,7 @@ $el('btnStart').addEventListener('click', async () => {
   if (!pending.length) { toast('No pending jobs in queue'); return; }
   sessionApplied = 0;
   setRunningUI(true, false);
-  toast(`▶ Starting Auto-Apply for ${pending.length} job(s)…`);
+  toast(`Starting Auto-Apply for ${pending.length} job(s)...`);
   try {
     chrome.runtime.sendMessage({ type: 'START_CSV_QUEUE', settings: _settings }, resp => {
       if (chrome.runtime.lastError) console.warn('SW inactive:', chrome.runtime.lastError.message);
@@ -390,14 +390,14 @@ $el('btnPause').addEventListener('click', () => {
   if (!isRunning) return;
   if (isPaused) {
     isPaused = false;
-    $el('btnPause').textContent = '⏸ Pause';
+    $el('btnPause').textContent = 'Pause';
     chrome.runtime.sendMessage({ type: 'RESUME_CSV_QUEUE' }).catch(() => {});
-    toast('▶ Resumed');
+    toast('Resumed');
   } else {
     isPaused = true;
-    $el('btnPause').textContent = '▶ Resume';
+    $el('btnPause').textContent = 'Resume';
     chrome.runtime.sendMessage({ type: 'PAUSE_CSV_QUEUE' }).catch(() => {});
-    toast('⏸ Paused — will stop after current job');
+    toast('Paused — will stop after current job');
   }
 });
 
@@ -405,7 +405,7 @@ $el('btnPause').addEventListener('click', () => {
 $el('btnSkip').addEventListener('click', () => {
   if (!isRunning) { toast('Not running'); return; }
   chrome.runtime.sendMessage({ type: 'SKIP_CSV_JOB' }).catch(() => {});
-  toast('⏭ Skipping current job…');
+  toast('Skipping current job...');
 });
 
 /* ── Stop button ── */
@@ -416,7 +416,7 @@ $el('btnStop').addEventListener('click', () => {
   $el('aapJobUrl').textContent      = '—';
   $el('aapJobPlatform').textContent = '';
   $el('aapStatus').textContent      = 'Stopped.';
-  toast('⏹ Automation stopped');
+  toast('Automation stopped');
   render();
 });
 
@@ -449,15 +449,15 @@ chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'CSV_QUEUE_DONE') {
     setRunningUI(false);
     currentJobId = null;
-    $el('aapStatus').textContent  = 'All done! ✓';
+    $el('aapStatus').textContent  = 'All done!';
     $el('aapStatus').className    = 'aap-status success';
-    toast(`✅ Auto-Apply complete! ${sessionApplied} applied this session.`);
+    toast(`Auto-Apply complete! ${sessionApplied} applied this session.`);
     loadQueue().then(render);
   }
 
   if (msg.type === 'CSV_QUEUE_PAUSED') {
     isPaused = true;
-    $el('btnPause').textContent = '▶ Resume';
+    $el('btnPause').textContent = 'Resume';
   }
 });
 
@@ -585,11 +585,12 @@ $el('invHeader').addEventListener('click', () => {
 
 /* ── Automation Settings ── */
 const SETTINGS_KEY = 'csvQueueSettings';
-let _settings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: false, reuseTab: false, skipCaptcha: true };
+let _settings = { delayMin: 2, delayMax: 7, concurrency: 1, autoSubmit: true, reuseTab: true, skipCaptcha: true };
 
 function loadSettings() {
   return new Promise(res => chrome.storage.local.get(SETTINGS_KEY, d => {
     if (d[SETTINGS_KEY]) Object.assign(_settings, d[SETTINGS_KEY]);
+    _settings.reuseTab = true; // Always force single-tab mode
     $el('settingDelayMin').value       = _settings.delayMin;
     $el('settingDelayMax').value       = _settings.delayMax;
     $el('settingConcurrency').value    = _settings.concurrency;
@@ -606,7 +607,7 @@ function saveSettings() {
     delayMax:    Math.max(1, +$el('settingDelayMax').value   || 7),
     concurrency: Math.max(1, +$el('settingConcurrency').value || 1),
     autoSubmit:  $el('settingAutoSubmit').checked,
-    reuseTab:    $el('settingReuseTab').checked,
+    reuseTab:    true,  // Always use single tab
     skipCaptcha: $el('settingSkipCaptcha').checked,
   };
   chrome.storage.local.set({ [SETTINGS_KEY]: _settings });
@@ -616,7 +617,7 @@ $el('settingsCardToggle').addEventListener('click', () => {
   const body = $el('settingsCardBody');
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : 'block';
-  $el('settingsToggleArrow').textContent = open ? '▼ expand' : '▲ collapse';
+  $el('settingsToggleArrow').textContent = open ? '\u25BC' : '\u25B2';
 });
 
 $el('btnSaveSettings').addEventListener('click', () => {
@@ -643,7 +644,7 @@ $el('btnSaveSettings').addEventListener('click', () => {
   toggle.addEventListener('click', () => {
     const open = body.style.display !== 'none';
     body.style.display = open ? 'none' : 'block';
-    arrow.textContent  = open ? '▼ expand' : '▲ collapse';
+    arrow.textContent  = open ? '\u25BC' : '\u25B2';
   });
 
   togglePw.addEventListener('click', () => {
@@ -656,7 +657,7 @@ $el('btnSaveSettings').addEventListener('click', () => {
     if (data.appAccountPassword) pwEl.value    = data.appAccountPassword;
     if (data.appAccountEmail || data.appAccountPassword) {
       body.style.display = 'block';
-      arrow.textContent  = '▲ collapse';
+      arrow.textContent  = '\u25B2';
     }
   });
 
