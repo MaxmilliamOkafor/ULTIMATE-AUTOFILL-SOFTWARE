@@ -115,11 +115,14 @@
   async function refreshBadge() {
     try {
       const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
-      const pending = q.filter(j => j.status === 'pending').length;
-      const total = q.length;
+      // Only count CSV-imported jobs, not API-fetched ones
+      const csvJobs = q.filter(j => j.source === 'csv_import');
+      const pending = csvJobs.filter(j => j.status === 'pending').length;
+      const total = csvJobs.length;
+      const done = csvJobs.filter(j => ['done', 'failed', 'skipped', 'duplicate'].includes(j.status)).length;
       if (csvBadge) {
         if (total > 0) {
-          csvBadge.textContent = pending > 0 ? `${pending} pending` : `${total} total`;
+          csvBadge.textContent = pending > 0 ? `#${done + 1} of ${total} CSV jobs` : `${total} done`;
           csvBadge.style.display = '';
         } else {
           csvBadge.style.display = 'none';

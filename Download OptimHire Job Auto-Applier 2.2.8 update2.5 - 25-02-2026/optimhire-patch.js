@@ -1384,31 +1384,9 @@
     setInterval(checkSuccess, 5000);
     checkSuccess();
 
-    /* Auto-fill on page load for CSV mode */
-    await sleep(5000);
-    // Notify sidebar: ATS detected, analyzing
-    try {
-      chrome.runtime.sendMessage({
-        type: 'SIDEBAR_STATUS', event: 'analyzing_form',
-        atsName: CURRENT_ATS || 'Unknown', url: location.href,
-      }).catch(() => { });
-    } catch (_) { }
-
-    if (CURRENT_ATS === 'Workday') await workdayAutofill();
-    else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
-    else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-    else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
-    await autoFillPage();
-    await solveCaptcha();
-
-    // Retry fill after 5s to catch late-rendering fields (multi-page forms)
-    await sleep(5000);
-    await autoFillPage();
-
-    // After all fields filled, try to find and click submit button
-    // This ensures the application is actually submitted
-    await sleep(1500);
-    await tryClickSubmit();
+    /* Let the native autofill.js handle form filling with field-by-field progress.
+     * We only set up success detection watchers here — don't run our own fill pipeline
+     * which would race ahead and report done before native autofill finishes. */
   }
 
   /** Find and click the submit / apply button to ensure the application is sent */
@@ -1498,16 +1476,14 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'TRIGGER_AUTOFILL') {
       (async () => {
-        // Initialize the CSV bridge for this tab (passes jobId for multi-tab correctness)
-        await initCsvBridge(msg.jobId || null);
-        // Also run ATS-specific autofill directly as a belt-and-suspenders measure
+        // Run our patch autofill as a HELPER alongside native autofill.js
+        // Native autofill.js handles field-by-field progress tracking
         if (CURRENT_ATS === 'Workday') await workdayAutofill();
         else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
         else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
         else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
         await autoFillPage();
         await solveCaptcha();
-        await tryClickSubmit();
         sendResponse({ ok: true });
       })();
       return true;
@@ -1527,8 +1503,9 @@
     ) markApplied();
   });
 
-  /* Init CSV bridge (async, non-blocking) */
-  initCsvBridge().catch(() => { });
+  /* initCsvBridge only called from background via storage change — NOT on auto-load.
+   * This prevents it from racing ahead of native autofill.js */
+  // initCsvBridge().catch(() => { }); — REMOVED: was causing premature completion
 
   /* ── Race-condition fallback ─────────────────────────────────────────────
    * If the background set csvActiveJobId AFTER our content script already ran
