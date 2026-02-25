@@ -109,23 +109,16 @@ let n=t?.tab?.id;if("COMPLEX_FORM_SUCCESS"===e.type)return(async()=>{if(E("\uD83
   }
 
   function pickNextPendingJob(q) {
-    let chosen = null;
+    // Deterministic selection:
+    // 1) first pending CSV job in queue order
+    // 2) otherwise first pending non-CSV job in queue order
+    let firstPending = null;
     for (const job of q) {
       if (job.status !== "pending") continue;
-      if (!chosen) { chosen = job; continue; }
-
-      const chosenCsv = chosen.source === "csv";
-      const jobCsv = job.source === "csv";
-      if (jobCsv !== chosenCsv) {
-        if (jobCsv) chosen = job;
-        continue;
-      }
-
-      const chosenAdded = chosen.addedAt || 0;
-      const jobAdded = job.addedAt || 0;
-      if (jobAdded > chosenAdded) chosen = job;
+      if (!firstPending) firstPending = job;
+      if (job.source === "csv") return job;
     }
-    return chosen;
+    return firstPending;
   }
 
   /* Core queue loop */
