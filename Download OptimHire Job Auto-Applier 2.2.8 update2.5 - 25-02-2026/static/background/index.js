@@ -97,6 +97,7 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
   chrome.storage.local.get('csvQueueSettings', d => {
     if (d.csvQueueSettings) Object.assign(_queueSettings, d.csvQueueSettings);
     _queueSettings.reuseTab = true; // ALWAYS use single tab
+    _queueSettings.concurrency = 1; // ALWAYS single worker — prevents duplicate tabs
   });
 
   function randDelay(minS, maxS) {
@@ -217,7 +218,16 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
               apiDetails: apiJob, // preserve full API response for FILL_COMPLEX_FORM
             };
             if (syntheticJob.url) {
+              // Dedup: don't add if this URL is already in the queue or already applied
               const { csvJobQueue: currentQ = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+              const normApiUrl = syntheticJob.url.toLowerCase().replace(/\/$/, '');
+              const alreadyInQueue = currentQ.some(j => j.url.toLowerCase().replace(/\/$/, '') === normApiUrl);
+              if (alreadyInQueue || await isAlreadyApplied(syntheticJob.url)) {
+                console.log(`[OH-BGPatch] API job URL already in queue/applied — skipping: ${syntheticJob.url}`);
+                // Try fetching another API job
+                setTimeout(processNextCsvJob, 1000);
+                return;
+              }
               currentQ.push(syntheticJob);
               await chrome.storage.local.set({ [CSV_QUEUE_KEY]: currentQ });
               broadcast({ type: 'CSV_QUEUE_UPDATED', count: currentQ.length, source: 'api_fallback' });
@@ -708,9 +718,8 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
           csvQueueRunning = true;
           csvQueuePaused = false;
           _enableApiFallback = false; // CSV-only mode
-          // Launch N concurrent workers (default 1 for backwards compat)
-          const concurrency = Math.max(1, Math.min(_queueSettings.concurrency || 1, 5));
-          for (let _wi = 0; _wi < concurrency; _wi++) processNextCsvJob();
+          // ALWAYS single worker — prevents opening multiple tabs
+          processNextCsvJob();
         }
         sendResponse({ ok: true });
       }
@@ -725,8 +734,10 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
           csvQueuePaused = false;
           _enableApiFallback = true; // Enable API fallback after CSV exhausted
           await chrome.storage.local.set({ csvQueueRunning: true });
-          const concurrency = Math.max(1, Math.min(_queueSettings.concurrency || 1, 5));
-          for (let _wi = 0; _wi < concurrency; _wi++) processNextCsvJob();
+          // Small delay to ensure CSV jobs are written to storage before processing
+          await new Promise(r => setTimeout(r, 500));
+          // ALWAYS single worker — prevents opening multiple tabs
+          processNextCsvJob();
         }
         sendResponse({ ok: true });
       }
