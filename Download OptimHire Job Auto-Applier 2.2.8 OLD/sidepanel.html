@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="/tabs/missingDetails.df89bfed.css">
+  <title>OptimHire Job Auto-Applier</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Hide referral / affiliate section in sidepanel */
+    [class*="referral"],[class*="Referral"],[id*="referral"],
+    [data-testid*="referral"],[class*="affiliate"],
+    .referral-section,.referral-card,.referral-banner,
+    [class*="earnCredit"],[class*="inviteFriend"],[class*="invite-friend"],
+    [class*="ReferralScreen"]{display:none!important}
+
+    /* Auto-Apply Mode bar at bottom */
+    #oh-auto-apply-bar{
+      position:fixed;bottom:0;left:0;right:0;z-index:99999;
+      background:#111827;border-top:1px solid #374151;
+      padding:10px 14px;display:flex;align-items:center;gap:10px;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }
+    #oh-auto-apply-bar .oh-bar-btn{
+      display:flex;align-items:center;gap:6px;
+      background:linear-gradient(135deg,#2563eb,#7c3aed);
+      color:#fff;border:none;border-radius:8px;
+      padding:8px 14px;font-size:12.5px;font-weight:600;
+      cursor:pointer;white-space:nowrap;flex:1;justify-content:center;
+      box-shadow:0 2px 8px rgba(37,99,235,.35);
+      transition:transform .1s,box-shadow .15s;
+    }
+    #oh-auto-apply-bar .oh-bar-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(37,99,235,.45)}
+    #oh-auto-apply-bar .oh-bar-btn:active{transform:scale(.97)}
+    #oh-auto-apply-bar .oh-bar-btn svg{flex-shrink:0}
+    #oh-auto-apply-bar .oh-bar-info{
+      font-size:11px;color:#9ca3af;white-space:nowrap;
+    }
+    /* Auto-trigger toggle */
+    .oh-toggle-wrap{display:flex;align-items:center;gap:5px;white-space:nowrap}
+    .oh-toggle-wrap label{font-size:10.5px;color:#9ca3af;cursor:pointer;user-select:none}
+    .oh-toggle{
+      position:relative;width:32px;height:18px;background:#374151;
+      border-radius:9px;cursor:pointer;border:none;padding:0;
+      transition:background .2s;
+    }
+    .oh-toggle.active{background:#2563eb}
+    .oh-toggle::after{
+      content:'';position:absolute;top:2px;left:2px;
+      width:14px;height:14px;border-radius:50%;background:#fff;
+      transition:transform .2s;
+    }
+    .oh-toggle.active::after{transform:translateX(14px)}
+  </style>
+</head>
+<body>
+  <div id="__plasmo"></div>
+  <script src="/sidepanel.b7741352.js" defer></script>
+
+  <!-- Auto-Apply Mode bar at bottom of sidepanel -->
+  <div id="oh-auto-apply-bar">
+    <button class="oh-bar-btn" id="oh-csv-btn" title="Open Auto-Apply Mode — Import CSV, manage queue, start bulk applying">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+           fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Auto-Apply Mode
+    </button>
+    <span class="oh-bar-info" id="oh-bar-stats"></span>
+    <div class="oh-toggle-wrap">
+      <button class="oh-toggle active" id="oh-auto-trigger-toggle" title="Auto-fill forms on supported ATS pages"></button>
+      <label for="oh-auto-trigger-toggle">Auto</label>
+    </div>
+  </div>
+
+  <!-- CSP-safe: all JS in external file -->
+  <script src="/assets/sidepanel-patch.js" defer></script>
+</body>
+</html>
