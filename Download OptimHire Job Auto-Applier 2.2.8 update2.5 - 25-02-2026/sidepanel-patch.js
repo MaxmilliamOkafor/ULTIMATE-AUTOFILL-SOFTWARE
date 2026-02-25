@@ -33,6 +33,52 @@
     childList: true, subtree: true,
   });
 
+  /* ── 1b. Intercept "Start Applying" button to check CSV jobs first ── */
+  let _startBtnIntercepted = false;
+  function interceptStartApplying() {
+    if (_startBtnIntercepted) return;
+    // Find OptimHire's "Start Applying" button (React-rendered inside #__plasmo)
+    const buttons = document.querySelectorAll('#__plasmo button, #__plasmo [role="button"]');
+    for (const btn of buttons) {
+      const text = (btn.textContent || '').trim().toLowerCase();
+      if (text.includes('start applying') || text.includes('start auto')) {
+        _startBtnIntercepted = true;
+        // Add a capture-phase listener that fires BEFORE React's listener
+        btn.addEventListener('click', async (e) => {
+          // Check if there are pending CSV jobs in our queue
+          try {
+            const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
+            const pendingCsv = q.filter(j => j.status === 'pending');
+            if (pendingCsv.length > 0) {
+              // CSV jobs exist — hijack: prevent OptimHire's native flow
+              e.stopImmediatePropagation();
+              e.preventDefault();
+              console.log(`[OH-SidepanelPatch] Intercepted Start Applying — ${pendingCsv.length} CSV jobs pending, starting unified queue`);
+              // Start our unified queue (CSV first → API fallback)
+              chrome.runtime.sendMessage({
+                type: 'START_UNIFIED_QUEUE',
+                settings: { reuseTab: true, concurrency: 1 },
+              }).catch(() => { });
+              return false;
+            }
+          } catch (_) { }
+          // No CSV jobs — let OptimHire's native flow proceed normally
+        }, true); // <-- capture phase = fires first
+        console.log('[OH-SidepanelPatch] Intercepted "Start Applying" button');
+        break;
+      }
+    }
+  }
+  // React renders asynchronously — keep checking until button appears
+  const _startBtnObserver = new MutationObserver(() => {
+    if (!_startBtnIntercepted) interceptStartApplying();
+  });
+  _startBtnObserver.observe(document.body, { childList: true, subtree: true });
+  // Also try immediately and after delays
+  interceptStartApplying();
+  setTimeout(interceptStartApplying, 1000);
+  setTimeout(interceptStartApplying, 3000);
+
   /* ── 2. Auto-trigger toggle ── */
   const toggle = document.getElementById('oh-auto-trigger-toggle');
   if (toggle) {
