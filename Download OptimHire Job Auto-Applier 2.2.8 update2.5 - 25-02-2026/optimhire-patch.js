@@ -106,9 +106,9 @@
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
   const _rawATS = Object.entries(ATS_DOMAINS)
     .find(([domain]) => HOST.includes(domain))?.[1] || null;
-  // LinkedIn: only activate on /jobs path — not on feeds, profiles, or messaging
+  // LinkedIn: activate on /jobs, /in/, and company pages — not on feeds or messaging
   const CURRENT_ATS = _rawATS === 'LinkedIn'
-    ? (location.pathname.startsWith('/jobs') ? 'LinkedIn' : null)
+    ? (/^\/(jobs|in|company|hiring)/.test(location.pathname) ? 'LinkedIn' : null)
     : _rawATS;
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
@@ -1576,53 +1576,79 @@
     const path = location.pathname.toLowerCase();
     const hostname = location.hostname.toLowerCase();
 
-    /* ── LinkedIn ─────────────────────────────────────────────────
+    /* ── LinkedIn ─────────────────────────────────────────────
      * Job DETAIL page = /jobs/view/  or  /jobs/search/ with a panel open.
      * The Easy Apply modal opens AFTER a click — detect either state.   */
     if (CURRENT_ATS === 'LinkedIn') {
       if (path.includes('/jobs/view/') || path.includes('/jobs/collections/')) return true;
       /* Easy Apply modal already open */
       if (document.querySelector('.jobs-easy-apply-modal,[data-test-modal],[aria-modal="true"]')) return true;
-      /* Apply button present on the page */
-      if (document.querySelector('.jobs-apply-button,[aria-label*="Apply"],[data-control-name*="apply"]')) return true;
+      /* Apply button present on the page (Easy Apply OR direct Apply) */
+      if (document.querySelector('.jobs-apply-button,[aria-label*="Apply"],[data-control-name*="apply"],.jobs-s-apply button')) return true;
+      /* LinkedIn job search with detail panel open */
+      if (path.includes('/jobs/search/') && document.querySelector('.jobs-details,.job-details,.jobs-search__right-rail')) return true;
       return false;
     }
 
-    /* ── Workday ──────────────────────────────────────────────────
+    /* ── Indeed ──────────────────────────────────────────────
+     * /viewjob page with Easy Apply modal or Apply Now button.
+     * Also detect the Indeed Apply iframe that opens on company sites. */
+    if (CURRENT_ATS === 'Indeed') {
+      if (path.includes('/viewjob') || path.includes('/rc/clk') || path.includes('/applystart')) return true;
+      /* Easy Apply modal */
+      if (document.querySelector('#indeedApplyModal,.ia-container,[id*="indeedApply"],[class*="ia-BasePage"]')) return true;
+      /* Apply Now / Apply on company site buttons */
+      if (document.querySelector('[id*="applyButton"],[class*="apply-button"],button[aria-label*="Apply"],.jobsearch-IndeedApplyButton')) return true;
+      /* Indeed resume form */
+      if (document.querySelector('#resume-upload-container,form[action*="applystart"]')) return true;
+      return false;
+    }
+
+    /* ── HiringCafe ───────────────────────────────────────────
+     * hiring.cafe job pages with "Apply Directly" button */
+    if (CURRENT_ATS === 'HiringCafe') {
+      if (document.querySelector('a[href*="apply"],button:has-text("Apply"),[class*="apply-btn"],[class*="applyBtn"]')) return true;
+      /* Any visible link/button with Apply text */
+      const applyEls = $$('a, button').filter(el => {
+        const t = el.textContent.trim().toLowerCase();
+        return (t === 'apply' || t === 'apply now' || t === 'apply directly' || t.includes('apply directly')) && isVisible(el);
+      });
+      return applyEls.length > 0;
+    }
+
+    /* ── Workday ────────────────────────────────────────────
      * Application pages: URL has /apply  OR  page has automation IDs */
     if (CURRENT_ATS === 'Workday') {
       if (url.includes('/apply') || url.includes('apply=')) return true;
       return document.querySelectorAll('[data-automation-id]').length > 2;
     }
 
-    /* ── Greenhouse ───────────────────────────────────────────────
-     * boards.greenhouse.io/company/jobs/ID  is ALWAYS an application.
-     * Same for /jobs/ URLs on greenhouse.io subdomains.               */
+    /* ── Greenhouse ─────────────────────────────────────────
+     * boards.greenhouse.io/company/jobs/ID is ALWAYS an application. */
     if (CURRENT_ATS === 'Greenhouse') {
       if (hostname.includes('boards.greenhouse.io')) return true;
       if (hostname.includes('greenhouse.io') && path.includes('/jobs/')) return true;
       if (document.querySelector('#application_form,[data-provided-by="greenhouse"],form[action*="greenhouse"]')) return true;
-      /* Fallback: any form with name/email inputs */
       return document.querySelectorAll(
         'input[id*="first"],input[id*="last"],input[id*="email"],input[name*="first"],input[name*="email"]'
       ).length > 0;
     }
 
-    /* ── Lever ────────────────────────────────────────────────────
-     * jobs.lever.co/company/id   is always a job post (apply on page) */
+    /* ── Lever ────────────────────────────────────────────
+     * jobs.lever.co/company/id is always a job post (apply on page) */
     if (CURRENT_ATS === 'Lever') {
       if (hostname.includes('jobs.lever.co') || hostname.includes('apply.lever.co')) return true;
       return !!document.querySelector('.posting-apply,form.postings-form,.application-form');
     }
 
-    /* ── Ashby ────────────────────────────────────────────────────
-     * jobs.ashbyhq.com/company/UUID/application  */
+    /* ── Ashby ────────────────────────────────────────────
+     * jobs.ashbyhq.com/company/UUID/application */
     if (CURRENT_ATS === 'Ashby') {
       if (path.includes('/application')) return true;
       return !!document.querySelector('[data-ashby-form],._ashby_apply_form,[class*="ApplicationForm"]');
     }
 
-    /* ── SmartRecruiters ──────────────────────────────────────────*/
+    /* ── SmartRecruiters ──────────────────────────────────────*/
     if (CURRENT_ATS === 'SmartRecruiters') {
       if (url.includes('/apply') || path.includes('/jobs/')) return true;
       return document.querySelectorAll(
@@ -1630,19 +1656,73 @@
       ).length > 0;
     }
 
-    /* ── OracleCloud / Taleo ──────────────────────────────────────*/
+    /* ── OracleCloud / Taleo ──────────────────────────────────*/
     if (CURRENT_ATS === 'OracleCloud') {
       return url.includes('/apply') || url.includes('/requisition') ||
         !!document.querySelector('#OracleFusionApp,oracle-apply-flow') ||
         document.querySelectorAll('input:not([type=hidden])').length > 2;
     }
 
-    /* ── All other recognised ATS ─────────────────────────────────
-     * If we're on a known ATS domain, be permissive:
-     * 2+ non-hidden inputs anywhere in the DOM is enough.             */
-    return document.querySelectorAll(
-      'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea'
-    ).length >= 2;
+    /* ── Known ATS fallback ───────────────────────────────────
+     * If we're on a known ATS domain, 2+ non-hidden inputs is enough */
+    if (CURRENT_ATS) {
+      return document.querySelectorAll(
+        'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea'
+      ).length >= 2;
+    }
+
+    /* ── Generic / Unknown sites (company career pages) ──────────
+     * Detect Apply / Apply Now / Apply Directly buttons on any page.
+     * Also detect common career page indicators.                    */
+    return hasApplyButton() || hasApplicationForm();
+  }
+
+  /**
+   * Detect visible "Apply", "Apply Now", "Apply Directly" buttons/links.
+   * Works on company career pages, HiringCafe, and any unknown ATS.
+   */
+  function hasApplyButton() {
+    const applyPatterns = ['apply', 'apply now', 'apply directly', 'easy apply', 'apply for this job',
+      'submit application', 'apply to this job', 'apply for job', 'start application'];
+    const candidates = $$('a, button, [role="button"], input[type="submit"]');
+    for (const el of candidates) {
+      if (!isVisible(el)) continue;
+      const text = (el.textContent || el.value || '').trim().toLowerCase();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      const title = (el.getAttribute('title') || '').toLowerCase();
+      const combined = text + ' ' + aria + ' ' + title;
+      if (applyPatterns.some(p => combined === p || combined.startsWith(p + ' ') || combined.includes(p))) {
+        // Exclude tiny/navigation elements — apply buttons are typically 40px+ wide
+        const r = el.getBoundingClientRect();
+        if (r.width >= 40 && r.height >= 20) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Detect a visible application form on the page (name/email inputs, file uploads for resume).
+   */
+  function hasApplicationForm() {
+    const url = location.href.toLowerCase();
+    const path = location.pathname.toLowerCase();
+    // URL hints: /apply, /application, /career, /jobs
+    if (url.includes('/apply') || path.includes('/application') || path.includes('/career')) {
+      return document.querySelectorAll(
+        'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea'
+      ).length >= 2;
+    }
+    // Strong form signals: name + email inputs together
+    const hasName = !!document.querySelector(
+      'input[name*="name" i],input[id*="name" i],input[placeholder*="name" i],input[autocomplete="name"],input[autocomplete="given-name"]'
+    );
+    const hasEmail = !!document.querySelector(
+      'input[type="email"],input[name*="email" i],input[id*="email" i],input[placeholder*="email" i],input[autocomplete="email"]'
+    );
+    const hasResume = !!document.querySelector(
+      'input[type="file"],input[name*="resume" i],input[id*="resume" i],input[name*="cv" i],input[accept*="pdf"]'
+    );
+    return (hasName && hasEmail) || (hasEmail && hasResume);
   }
 
   /** Inject/update the "Autofill in progress" banner */
@@ -1685,7 +1765,7 @@
     /* Guards */
     if (_autoTriggerRunning) return;
     if (_autoTriggered) return;
-    if (!CURRENT_ATS) return;
+    /* No CURRENT_ATS guard — we detect generic Apply button pages too */
 
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
     if (csvActiveJobId) return; /* CSV bridge handles it */
@@ -1711,26 +1791,88 @@
 
     /* Open OptimHire side panel + show banner */
     chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => { });
-    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'ats_detected', atsName: CURRENT_ATS, url: location.href }).catch(() => { });
-    showAutofillBanner('detecting', CURRENT_ATS);
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'ats_detected', atsName: CURRENT_ATS || 'Career Page', url: location.href }).catch(() => { });
+    showAutofillBanner('detecting', CURRENT_ATS || 'Career Page');
     acquireWakeLock();
-    LOG(`Auto-trigger: ${CURRENT_ATS} application form detected — autofilling`);
+    LOG(`Auto-trigger: ${CURRENT_ATS || 'generic'} application form detected — autofilling`);
 
     /* Short pause so the side panel renders */
     await sleep(800);
-    showAutofillBanner('filling', CURRENT_ATS);
-    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS, url: location.href }).catch(() => { });
+    showAutofillBanner('filling', CURRENT_ATS || 'Career Page');
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS || 'Career Page', url: location.href }).catch(() => { });
 
     try {
+      /* ── LinkedIn: Click Easy Apply / Apply button first ── */
+      if (CURRENT_ATS === 'LinkedIn') {
+        const easyApplyBtn = document.querySelector('.jobs-apply-button,.jobs-s-apply button,[aria-label*="Easy Apply"],[data-control-name*="apply"]');
+        if (easyApplyBtn && isVisible(easyApplyBtn)) {
+          LOG('LinkedIn: Clicking Easy Apply button');
+          realClick(easyApplyBtn);
+          await sleep(2000); // Wait for modal to open
+        }
+        // Also try the direct "Apply" link (company site redirect)
+        const directApply = document.querySelector('a[href*="/jobs/view/"][class*="apply"],a[data-control-name="jobdetail_apply"]');
+        if (directApply && isVisible(directApply) && !easyApplyBtn) {
+          LOG('LinkedIn: Clicking direct Apply link');
+          realClick(directApply);
+          await sleep(2000);
+        }
+      }
+
+      /* ── Indeed: Click Easy Apply / Apply Now button first ── */
+      if (CURRENT_ATS === 'Indeed') {
+        const indeedApply = document.querySelector('.jobsearch-IndeedApplyButton,[id*="applyButton"],button[aria-label*="Apply"],.ia-IndeedApplyButton');
+        if (indeedApply && isVisible(indeedApply)) {
+          LOG('Indeed: Clicking Apply button');
+          realClick(indeedApply);
+          await sleep(2000); // Wait for apply modal/iframe
+        }
+      }
+
+      /* ── HiringCafe: Click "Apply Directly" button ── */
+      if (CURRENT_ATS === 'HiringCafe') {
+        const cafeApply = $$('a, button').find(el => {
+          const t = el.textContent.trim().toLowerCase();
+          return (t.includes('apply directly') || t === 'apply' || t === 'apply now') && isVisible(el);
+        });
+        if (cafeApply) {
+          LOG('HiringCafe: Clicking Apply button');
+          realClick(cafeApply);
+          await sleep(2000);
+        }
+      }
+
+      /* ── Generic career page: Click visible Apply button ── */
+      if (!CURRENT_ATS && hasApplyButton()) {
+        const applyPatterns = ['apply', 'apply now', 'apply directly', 'easy apply',
+          'apply for this job', 'submit application', 'start application'];
+        const applyBtn = $$('a, button, [role="button"], input[type="submit"]').find(el => {
+          if (!isVisible(el)) return false;
+          const text = (el.textContent || el.value || '').trim().toLowerCase();
+          const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+          const combined = text + ' ' + aria;
+          return applyPatterns.some(p => combined === p || combined.startsWith(p) || combined.includes(p));
+        });
+        if (applyBtn) {
+          LOG('Generic page: Clicking Apply button');
+          realClick(applyBtn);
+          await sleep(3000); // Wait for form/redirect
+        }
+      }
+
       /* ATS-specific autofill */
       if (CURRENT_ATS === 'Workday') await workdayAutofill();
       else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
       else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
       else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
-      /* LinkedIn/Lever/Ashby/others: generic fill covers them */
+      /* LinkedIn/Lever/Ashby/Indeed/HiringCafe/others: generic fill covers them */
 
       await autoFillPage();
       await solveCaptcha();
+
+      /* Retry fill after 3s for late-rendering fields */
+      await sleep(3000);
+      await autoFillPage();
 
       /* Remember */
       ohAutoFilledUrls.push(norm);
@@ -1748,8 +1890,9 @@
   }
 
   /* ── Initial trigger after page load ── */
-  if (CURRENT_ATS) {
-    /* First attempt after 2.5 s (most SPAs have rendered by then) */
+  /* Run on ALL pages, not just known ATS — catches generic Apply button pages */
+  {
+    /* First attempt after 2.5s (most SPAs have rendered by then) */
     sleep(2500).then(() => autoTriggerAutofill());
 
     /* ── SPA navigation watcher (URL changes without full reload) ── */

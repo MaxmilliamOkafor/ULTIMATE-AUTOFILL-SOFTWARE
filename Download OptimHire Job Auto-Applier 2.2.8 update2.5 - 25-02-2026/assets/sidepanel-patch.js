@@ -1,20 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════
- * OptimHire Sidepanel Patch v2.2.8 — Simplified
+ * OptimHire Sidepanel Patch v2.2.8 — CSV Import + Unified Queue
  * 
- * With the duplicate purple panel removed, this patch now only:
  * 1. Hides referral/affiliate UI elements
  * 2. Manages the auto-trigger toggle
- * 3. Responds to IS_PANEL_OPEN pings
- * 
- * All auto-apply progress is shown by OptimHire's native React UI
- * via the autoApplyState storage key.
+ * 3. CSV import: paste URLs / upload CSV → add to queue → start unified
+ * 4. Responds to IS_PANEL_OPEN pings
  * ═══════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
 
   const ST = chrome.storage.local;
+  const CSV_QUEUE_KEY = 'csvJobQueue';
 
-  /* ── 1. Hide referral / affiliate elements via MutationObserver ── */
+  /* ── 1. Hide referral / affiliate elements ── */
   const REFERRAL_SELS = [
     '[class*="referral"]', '[class*="Referral"]', '[id*="referral"]',
     '[data-testid*="referral"]', '[class*="affiliate"]',
@@ -38,12 +36,10 @@
   /* ── 2. Auto-trigger toggle ── */
   const toggle = document.getElementById('oh-auto-trigger-toggle');
   if (toggle) {
-    // Load persisted state
     ST.get('ohAutoTrigger').then(data => {
-      const enabled = data.ohAutoTrigger !== false; // default on
+      const enabled = data.ohAutoTrigger !== false;
       toggle.classList.toggle('active', enabled);
     });
-
     toggle.addEventListener('click', async () => {
       const nowActive = !toggle.classList.contains('active');
       toggle.classList.toggle('active', nowActive);
@@ -51,18 +47,189 @@
     });
   }
 
-  /* ── 3. Respond to IS_PANEL_OPEN pings from background ── */
+  /* ── 3. CSV Import Section ── */
+  const csvHeader = document.getElementById('csvToggleHeader');
+  const csvSection = document.getElementById('csvSection');
+  const csvArrow = document.getElementById('csvArrow');
+  const csvBadge = document.getElementById('csvBadge');
+  const csvUrls = document.getElementById('csvUrls');
+  const csvFile = document.getElementById('csvFileInput');
+  const csvStart = document.getElementById('csvStartBtn');
+  const csvStatus = document.getElementById('csvStatus');
+
+  // Toggle expand/collapse
+  if (csvHeader && csvSection) {
+    csvHeader.addEventListener('click', () => {
+      const isOpen = csvSection.classList.toggle('open');
+      csvHeader.classList.toggle('expanded', isOpen);
+    });
+  }
+
+  // Update badge with queued count
+  async function refreshBadge() {
+    try {
+      const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
+      const pending = q.filter(j => j.status === 'pending').length;
+      const total = q.length;
+      if (csvBadge) {
+        if (total > 0) {
+          csvBadge.textContent = pending > 0 ? `${pending} pending` : `${total} total`;
+          csvBadge.style.display = '';
+        } else {
+          csvBadge.style.display = 'none';
+        }
+      }
+    } catch (_) { }
+  }
+  refreshBadge();
+
+  // Parse URLs from text (one per line, or comma-separated)
+  function parseUrls(text) {
+    if (!text) return [];
+    return text
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(s => {
+        try { const u = new URL(s); return u.protocol.startsWith('http'); }
+        catch (_) { return false; }
+      });
+  }
+
+  // Parse CSV file content (look for URL columns)
+  function parseCsvContent(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length === 0) return [];
+    const urls = [];
+    // Try to detect header
+    const header = lines[0].toLowerCase();
+    let urlCol = -1;
+    const cols = lines[0].split(',').map(c => c.trim().toLowerCase());
+    for (let i = 0; i < cols.length; i++) {
+      if (cols[i].includes('url') || cols[i].includes('link') || cols[i].includes('apply')) {
+        urlCol = i; break;
+      }
+    }
+    const startLine = (urlCol >= 0) ? 1 : 0; // skip header if found
+    if (urlCol < 0) urlCol = 0; // default to first column
+
+    for (let i = startLine; i < lines.length; i++) {
+      // Handle quoted CSV fields
+      const fields = lines[i].match(/(?:\"[^\"]*\"|[^,])+/g) || [];
+      const raw = (fields[urlCol] || '').replace(/^"|"$/g, '').trim();
+      try {
+        const u = new URL(raw);
+        if (u.protocol.startsWith('http')) urls.push(raw);
+      } catch (_) {
+        // Also try to find any URL in the entire line
+        const urlMatch = lines[i].match(/https?:\/\/[^\s,\"]+/);
+        if (urlMatch) urls.push(urlMatch[0]);
+      }
+    }
+    return urls;
+  }
+
+  // File upload handler
+  if (csvFile) {
+    csvFile.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const urls = parseCsvContent(reader.result);
+        if (urls.length > 0) {
+          const existing = csvUrls.value.trim();
+          csvUrls.value = (existing ? existing + '\n' : '') + urls.join('\n');
+          if (csvStatus) csvStatus.innerHTML = `📄 Loaded <b>${urls.length}</b> URLs from ${file.name}`;
+        } else {
+          if (csvStatus) csvStatus.textContent = '⚠️ No valid URLs found in file';
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  // Start button handler
+  if (csvStart) {
+    csvStart.addEventListener('click', async () => {
+      csvStart.disabled = true;
+      csvStart.textContent = '⏳ Adding...';
+
+      try {
+        const urls = parseUrls(csvUrls.value);
+        if (urls.length === 0) {
+          if (csvStatus) csvStatus.textContent = '⚠️ No valid URLs to add. Paste URLs above.';
+          csvStart.disabled = false;
+          csvStart.textContent = '⚡ Add to Queue & Start';
+          return;
+        }
+
+        // Read existing queue and dedupe
+        const { csvJobQueue: existing = [] } = await ST.get(CSV_QUEUE_KEY);
+        const existingUrls = new Set(existing.map(j => j.url.toLowerCase().replace(/\/$/, '')));
+        let added = 0;
+
+        for (const url of urls) {
+          const normUrl = url.toLowerCase().replace(/\/$/, '');
+          if (existingUrls.has(normUrl)) continue;
+          existingUrls.add(normUrl);
+          existing.unshift({ // Prepend for priority
+            id: 'csv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            url: url,
+            title: '',
+            company: '',
+            status: 'pending',
+            addedAt: Date.now(),
+            source: 'csv_import',
+          });
+          added++;
+        }
+
+        await ST.set({ [CSV_QUEUE_KEY]: existing });
+
+        if (csvStatus) {
+          csvStatus.innerHTML = `✅ Added <b>${added}</b> job${added !== 1 ? 's' : ''} to queue` +
+            (urls.length - added > 0 ? ` (${urls.length - added} duplicates skipped)` : '');
+        }
+
+        // Clear textarea
+        csvUrls.value = '';
+        refreshBadge();
+
+        // Start unified queue (CSV first → OptimHire API fallback)
+        if (added > 0) {
+          chrome.runtime.sendMessage({
+            type: 'START_UNIFIED_QUEUE',
+            settings: { reuseTab: true, concurrency: 1 },
+          }).catch(() => { });
+          if (csvStatus) csvStatus.innerHTML += '<br>🚀 <b>Automation started!</b> CSV jobs will run first.';
+        }
+      } catch (err) {
+        if (csvStatus) csvStatus.textContent = '❌ Error: ' + err.message;
+      }
+
+      csvStart.disabled = false;
+      csvStart.textContent = '⚡ Add to Queue & Start';
+    });
+  }
+
+  /* ── 4. Listen for queue updates to refresh badge ── */
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'IS_PANEL_OPEN') {
       sendResponse({ is_panel_open: true });
       return true;
     }
     if (msg?.type === 'SIDE_PANEL_RELOAD' || msg?.type === 'SIDE_PANEL_MANUAL_RELOAD') {
-      // Reload to pick up fresh React state
       location.reload();
       return true;
     }
+    if (msg?.type === 'CSV_QUEUE_UPDATED' || msg?.type === 'CSV_JOB_COMPLETE'
+      || msg?.type === 'CSV_QUEUE_DONE') {
+      refreshBadge();
+    }
   });
 
-  console.log('[OH-SidepanelPatch v2.2.8] Loaded (simplified — native UI handles progress)');
+  // Periodic badge refresh
+  setInterval(refreshBadge, 5000);
+
+  console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue)');
 })();
