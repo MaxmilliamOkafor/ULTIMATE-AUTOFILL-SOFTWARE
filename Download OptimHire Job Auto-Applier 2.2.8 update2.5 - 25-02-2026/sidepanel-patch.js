@@ -213,12 +213,17 @@
         const { csvJobQueue: existing = [] } = await ST.get(CSV_QUEUE_KEY);
         const existingUrls = new Set(existing.map(j => j.url.toLowerCase().replace(/\/$/, '')));
         let added = 0;
+        // Number URLs sequentially starting from next available number
+        const maxExistingNum = existing.reduce((m, j) => Math.max(m, j.queueNumber || 0), 0);
+        let nextNum = maxExistingNum + 1;
 
+        // Build new jobs array (in order) then prepend all at once for correct priority
+        const newJobs = [];
         for (const url of urls) {
           const normUrl = url.toLowerCase().replace(/\/$/, '');
           if (existingUrls.has(normUrl)) continue;
           existingUrls.add(normUrl);
-          existing.unshift({ // Prepend for priority
+          newJobs.push({
             id: 'csv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
             url: url,
             title: '',
@@ -226,9 +231,12 @@
             status: 'pending',
             addedAt: Date.now(),
             source: 'csv_import',
+            queueNumber: nextNum++,
           });
           added++;
         }
+        // Prepend in correct order: #1 first, #2 second, etc.
+        existing.unshift(...newJobs);
 
         await ST.set({ [CSV_QUEUE_KEY]: existing });
 

@@ -347,178 +347,38 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       chrome.sidePanel.open({ tabId: tab.id }, () => { chrome.runtime.lastError; });
     } catch (_) { }
 
-    // ── FIX: Trigger REAL OptimHire autofill pipeline when tab loads ──────────
-    // Construct applicationDetails from the user's profile + job URL, then
-    // send FILL_COMPLEX_FORM — the exact message the OptimHire website uses.
+    // ── Trigger autofill when the tab finishes loading ──────────
+    // SIMPLIFIED: Don't construct synthetic FILL_COMPLEX_FORM (that breaks the native pipeline).
+    // Instead, set isAutoProcessStartJob=true so autofill.js runs its native pipeline,
+    // AND send TRIGGER_AUTOFILL to our patch for ATS-specific filling.
     const _triggerOnTabLoad = async (updTabId, changeInfo) => {
       if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
       chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
 
-      // Wait for page JS to hydrate (5s to ensure SPAs like Workday fully render)
+      // Wait for page JS to hydrate (5s for SPAs like Workday)
       await new Promise(r => setTimeout(r, 5000));
+
+      // Re-set isAutoProcessStartJob — this is how autofill.js knows to auto-fill
+      await chrome.storage.local.set({
+        isAutoProcessStartJob: true,
+        copilotTabId: tab.id,
+        csvActiveJobId: job.id,
+        csvActiveTabId: tab.id,
+      });
 
       // Sidebar: Analyzing form
       relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', url: job.url, tabId: tab.id });
 
+      // Send TRIGGER_AUTOFILL to our patch content script for ATS-specific filling
       try {
-        // 1. Read the user's profile (same data the website sends)
-        const storageData = await chrome.storage.local.get([
-          'candidateDetails', 'cachedSeekerInfo', 'seekerDetails',
-        ]);
-        let profile = {};
-        try {
-          const cd = storageData.candidateDetails;
-          profile = typeof cd === 'string' ? JSON.parse(cd) : (cd || {});
-        } catch (_) { }
-        // Try multiple possible storage keys for seeker data
-        const seeker = storageData.cachedSeekerInfo
-          || storageData.seekerDetails
-          || profile?.seeker
-          || profile
-          || {};
+        await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
+      } catch (_) { }
 
-        // 2. Detect ATS from the job URL (domain + URL parameter checks)
-        const jobUrl = job.url.toLowerCase();
-        const _atsMap = {
-          'greenhouse.io': 'greenhouse', 'boards.greenhouse.io': 'greenhouse',
-          'lever.co': 'lever', 'jobs.lever.co': 'lever',
-          'myworkdayjobs.com': 'workday', 'workday.com': 'workday',
-          'icims.com': 'icims',
-          'oraclecloud.com': 'oraclecloud',
-          'smartrecruiters.com': 'smartrecruiters',
-          'ashbyhq.com': 'ashby', 'app.ashbyhq.com': 'ashby',
-          'bamboohr.com': 'bamboohr',
-          'jobvite.com': 'jobvite',
-          'workable.com': 'workable',
-          'breezy.hr': 'breezyhr',
-          'jazzhr.com': 'jazzhr',
-          'ziprecruiter.com': 'ziprecruiter',
-          'taleo.net': 'taleo',
-          'dice.com': 'dice',
-          'indeed.com': 'indeed',
-          'linkedin.com': 'linkedin',
-          'paylocity.com': 'paylocity',
-          'manatal.com': 'manatal',
-          'successfactors.com': 'successfactors',
-          'adp.com': 'adp',
-          'recruiting.ultipro.com': 'ultipro',
-          'hire.withgoogle.com': 'google',
-          'app.dover.com': 'dover',
-        };
-        let atsName = '';
-        for (const [domain, name] of Object.entries(_atsMap)) {
-          if (jobUrl.includes(domain)) { atsName = name; break; }
-        }
-        // Detect ATS from URL query params (company pages embedding ATS via iframe)
-        if (!atsName) {
-          if (jobUrl.includes('gh_jid=') || jobUrl.includes('greenhouse')) atsName = 'greenhouse';
-          else if (jobUrl.includes('lever')) atsName = 'lever';
-          else if (jobUrl.includes('workday') || jobUrl.includes('wd3.') || jobUrl.includes('wd5.'))
-            atsName = 'workday';
-          else if (jobUrl.includes('icims')) atsName = 'icims';
-          else if (jobUrl.includes('smartrecruiters')) atsName = 'smartrecruiters';
-          else if (jobUrl.includes('ashby')) atsName = 'ashby';
-          else if (jobUrl.includes('bamboohr')) atsName = 'bamboohr';
-          else if (jobUrl.includes('jobvite') || jobUrl.includes('jobs2web')) atsName = 'jobvite';
-        }
-
-        // 3. Determine auto-submit setting
-        const autoApplyEnabled = !!_queueSettings.autoSubmit;
-
-        // 4. Construct applicationDetails — use full API data when available (API-sourced jobs)
-        let applicationDetails;
-        let complexInstructions;
-
-        if (job.apiDetails) {
-          // API-sourced job — use the real API response for maximum autofill quality
-          applicationDetails = job.apiDetails;
-          // Parse complex instructions from API additional_info
-          try {
-            const aiRaw = applicationDetails.additional_info?.additional_info;
-            complexInstructions = aiRaw ? JSON.parse(aiRaw.replace(/[\n\r\t]+/g, '').trim()) : {};
-          } catch (_) {
-            complexInstructions = { requiresLogin: false, isCaptchaRequired: false };
-          }
-        } else {
-          // CSV-imported URL — construct synthetic applicationDetails
-          applicationDetails = {
-            source: {
-              apply_now_url: job.url,
-              ats_name: atsName,
-              job_title: job.title || '',
-              company_name: job.company || '',
-            },
-            seeker: seeker,
-            copilot_job_id: job.id,
-            additional_info: {
-              additional_info: JSON.stringify({
-                requiresLogin: false,
-                isCaptchaRequired: false,
-              }),
-            },
-          };
-          complexInstructions = {
-            requiresLogin: false,
-            isCaptchaRequired: false,
-            checkFormInIframe: {
-              enabled: true,
-              srcIncludes: [
-                'greenhouse.io', 'boards.greenhouse.io',
-                'lever.co', 'jobs.lever.co',
-                'myworkdayjobs.com', 'icims.com',
-                'smartrecruiters.com', 'ashbyhq.com',
-                'bamboohr.com', 'jobvite.com',
-                'workable.com', 'taleo.net',
-              ],
-            },
-            applicationStatus: { jobClosed: [] },
-          };
-        }
-
-        // 6. Persist complexFormData in storage BEFORE sending FILL_COMPLEX_FORM.
-        //    This is the key fix for multi-page application flows:
-        //    when smartHandleComplexForm navigates to the next page, y() runs
-        //    again and reads complexFormData to resume from where it left off.
-        //    Seeding it here also ensures page-load race conditions don't lose data.
-        await chrome.storage.local.set({
-          complexFormInProgress: true,
-          complexFormData: {
-            applicationDetails,
-            complexInstructions,
-            autoApplyEnabled,
-            currentDepth: 0,
-            maxDepth: 10,
-          },
-        });
-
-        // Sidebar: Filling form
-        relaySidebarMsg({ type: 'SIDEBAR_STATUS', event: 'filling_form', atsName: atsName, url: job.url });
-
-        // 7. Send FILL_COMPLEX_FORM — the real OptimHire autofill pipeline
-        //    Retry up to 3 times with increasing delays if content script isn't ready
-        const fillMsg = { type: 'FILL_COMPLEX_FORM', applicationDetails, complexInstructions, autoApplyEnabled };
-        let fillSent = false;
-        for (let attempt = 0; attempt < 4 && !fillSent; attempt++) {
-          try {
-            const resp = await chrome.tabs.sendMessage(tab.id, fillMsg);
-            if (resp) fillSent = true;
-          } catch (_) { }
-          if (!fillSent) await new Promise(r => setTimeout(r, 3000 + attempt * 2000));
-        }
-        // 8. Also send TRIGGER_AUTOFILL as belt-and-suspenders for the patch autofill
-        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id }).catch(() => { });
-
-        // 9. Secondary retry after 8s — catches multi-page forms where fields appear late
-        await new Promise(r => setTimeout(r, 8000));
-        try {
-          await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
-        } catch (_) { }
-
-      } catch (err) {
-        // Fallback: send TRIGGER_AUTOFILL for patch-based autofill
-        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id })
-          .catch(() => { });
-      }
+      // Retry after 8s for multi-page forms / late-rendering fields
+      await new Promise(r => setTimeout(r, 8000));
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTOFILL', jobId: job.id });
+      } catch (_) { }
     };
     chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
 
@@ -666,24 +526,11 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       return false;
     }
 
-    // *** KEY FIX: intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
-    // IMPORTANT: Enforce minimum 25s processing time so autofill actually works
-    const MIN_PROCESSING_MS = 25000; // minimum seconds before accepting result
+    // *** Intercept COMPLEX_FORM_SUCCESS / ERROR from any active CSV tab ***
+    // Trust the native autofill pipeline's timing — resolve immediately
     if (msg && msg.type === "COMPLEX_FORM_SUCCESS" && senderTabId) {
       const entry = [..._activeJobs.values()].find(j => j.tabId === senderTabId);
-      if (entry?.resolve) {
-        const elapsed = Date.now() - (entry.startedAt || 0);
-        if (elapsed < MIN_PROCESSING_MS) {
-          // Too early — the autofill hasn't had time to properly analyze and fill.
-          // Delay resolution until minimum time has passed.
-          console.log(`[OH-BGPatch] COMPLEX_FORM_SUCCESS received after ${Math.round(elapsed / 1000)}s — waiting until ${MIN_PROCESSING_MS / 1000}s minimum`);
-          setTimeout(() => {
-            if (entry.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
-          }, MIN_PROCESSING_MS - elapsed);
-        } else {
-          const r = entry.resolve; entry.resolve = null; r("done");
-        }
-      }
+      if (entry?.resolve) { const r = entry.resolve; entry.resolve = null; r("done"); }
       return false;
     }
     if (msg && msg.type === "COMPLEX_FORM_ERROR" && senderTabId) {
@@ -691,16 +538,7 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       if (entry?.resolve) {
         const errType = msg.errorType || "";
         const result = errType === "alreadyApplied" ? "duplicate" : "failed:" + errType;
-        const elapsed = Date.now() - (entry.startedAt || 0);
-        if (elapsed < MIN_PROCESSING_MS && errType !== "alreadyApplied") {
-          // Too early for errors too (except duplicates) — let autofill retry
-          console.log(`[OH-BGPatch] COMPLEX_FORM_ERROR received after ${Math.round(elapsed / 1000)}s — waiting`);
-          setTimeout(() => {
-            if (entry.resolve) { const r = entry.resolve; entry.resolve = null; r(result); }
-          }, MIN_PROCESSING_MS - elapsed);
-        } else {
-          const r = entry.resolve; entry.resolve = null; r(result);
-        }
+        const r = entry.resolve; entry.resolve = null; r(result);
       }
       return false;
     }
