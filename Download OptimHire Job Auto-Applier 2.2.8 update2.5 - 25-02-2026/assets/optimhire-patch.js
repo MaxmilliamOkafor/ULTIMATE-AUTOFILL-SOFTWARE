@@ -1379,14 +1379,40 @@
       if (document.querySelector('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"]')) {
         report('done');
       }
+      // Already-applied detection — prevents freezing on duplicate jobs
+      if (/already applied|already submitted|you.ve applied|you have already|previously applied|duplicate application/i.test(body)) {
+        report('duplicate');
+      }
     };
     new MutationObserver(checkSuccess).observe(document.body, { childList: true, subtree: true });
     setInterval(checkSuccess, 5000);
     checkSuccess();
 
-    /* Let the native autofill.js handle form filling with field-by-field progress.
-     * We only set up success detection watchers here — don't run our own fill pipeline
-     * which would race ahead and report done before native autofill finishes. */
+    /* Auto-fill on page load for CSV mode — this is the ONLY autofill for CSV jobs.
+     * The native autofill.js can NOT be used because isAutoProcessStartJob triggers
+     * the native pipeline which fetches unrelated API jobs. */
+    await sleep(5000);
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SIDEBAR_STATUS', event: 'analyzing_form',
+        atsName: CURRENT_ATS || 'Unknown', url: location.href,
+      }).catch(() => { });
+    } catch (_) { }
+
+    if (CURRENT_ATS === 'Workday') await workdayAutofill();
+    else if (CURRENT_ATS === 'OracleCloud') await oracleAutofill();
+    else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
+    else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
+    await autoFillPage();
+    await solveCaptcha();
+
+    // Retry fill after 5s to catch late-rendering fields
+    await sleep(5000);
+    await autoFillPage();
+
+    // Click submit button
+    await sleep(1500);
+    await tryClickSubmit();
   }
 
   /** Find and click the submit / apply button to ensure the application is sent */
@@ -1503,9 +1529,9 @@
     ) markApplied();
   });
 
-  /* initCsvBridge only called from background via storage change — NOT on auto-load.
-   * This prevents it from racing ahead of native autofill.js */
-  // initCsvBridge().catch(() => { }); — REMOVED: was causing premature completion
+  /* Init CSV bridge on page load — sets up success detection watchers
+   * AND does the actual form filling for CSV jobs */
+  initCsvBridge().catch(() => { });
 
   /* ── Race-condition fallback ─────────────────────────────────────────────
    * If the background set csvActiveJobId AFTER our content script already ran

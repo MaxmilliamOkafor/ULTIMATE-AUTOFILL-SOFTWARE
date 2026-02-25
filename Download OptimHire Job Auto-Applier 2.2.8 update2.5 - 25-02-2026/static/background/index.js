@@ -348,9 +348,8 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
     } catch (_) { }
 
     // ── Trigger autofill when the tab finishes loading ──────────
-    // SIMPLIFIED: Don't construct synthetic FILL_COMPLEX_FORM (that breaks the native pipeline).
-    // Instead, set isAutoProcessStartJob=true so autofill.js runs its native pipeline,
-    // AND send TRIGGER_AUTOFILL to our patch for ATS-specific filling.
+    // DO NOT set isAutoProcessStartJob — that triggers the native pipeline
+    // which fetches its own unrelated API jobs. CSV jobs use our patch autofill only.
     const _triggerOnTabLoad = async (updTabId, changeInfo) => {
       if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
       chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
@@ -358,9 +357,8 @@ var e, t; "function" == typeof (e = globalThis.define) && (t = e, e = null), fun
       // Wait for page JS to hydrate (5s for SPAs like Workday)
       await new Promise(r => setTimeout(r, 5000));
 
-      // Re-set isAutoProcessStartJob — this is how autofill.js knows to auto-fill
+      // Set CSV job tracking (NOT isAutoProcessStartJob — that would start native pipeline)
       await chrome.storage.local.set({
-        isAutoProcessStartJob: true,
         copilotTabId: tab.id,
         csvActiveJobId: job.id,
         csvActiveTabId: tab.id,
