@@ -1426,7 +1426,7 @@
      * Handles Workday multi-step, Greenhouse, Lever, and generic multi-page forms.
      * Up to 10 pages max to prevent infinite loops.
      * ─────────────────────────────────────────────────────────── */
-    await sleep(3000); // Initial wait for page DOM to settle
+    await sleep(8000); // Initial wait for page DOM to settle (increased from 3s to prevent premature fill)
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS', event: 'analyzing_form',
@@ -1451,7 +1451,7 @@
       await solveCaptcha();
 
       // 3. Wait and retry for lazy-rendered fields
-      await sleep(3000);
+      await sleep(5000);
       if (reported) break;
       await autoFillPage({ requiredOnly: false });
 
@@ -1463,7 +1463,7 @@
       if (action === 'submitted') {
         LOG('Submit clicked — waiting for success confirmation');
         // Wait for success detection (checkSuccess watcher will trigger report)
-        await sleep(10000);
+        await sleep(20000);
         break;
       } else if (action === 'next_page') {
         LOG('Next/Continue clicked — waiting for page transition');
