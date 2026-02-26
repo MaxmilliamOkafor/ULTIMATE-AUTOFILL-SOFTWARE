@@ -1866,36 +1866,12 @@
     return (hasName && hasEmail) || (hasEmail && hasResume);
   }
 
-  /** Inject/update the "Autofill in progress" banner */
-  function showAutofillBanner(status, atsName) {
-    let banner = document.getElementById('oh-autofill-banner');
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.id = 'oh-autofill-banner';
-      banner.style.cssText = `
-        position:fixed;top:0;left:0;right:0;z-index:2147483647;
-        padding:10px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-        font-size:13px;font-weight:600;text-align:center;
-        transition:background .3s ease,color .3s ease;pointer-events:none;
-        box-shadow:0 2px 12px rgba(0,0,0,.2);
-      `;
-      document.body.appendChild(banner);
-    }
-    const name = atsName || CURRENT_ATS || 'ATS';
-    if (status === 'detecting') {
-      banner.textContent = `🔍 ${name} detected — starting autofill…`;
-      banner.style.background = 'linear-gradient(135deg,#1e40af,#7c3aed)';
-      banner.style.color = '#fff';
-    } else if (status === 'filling') {
-      banner.textContent = `⚡ Autofill in progress — filling ${name} form…`;
-      banner.style.background = 'linear-gradient(135deg,#2563eb,#7c3aed)';
-      banner.style.color = '#fff';
-    } else if (status === 'done') {
-      banner.textContent = '✅ Autofill complete — please review and submit';
-      banner.style.background = 'linear-gradient(135deg,#059669,#10b981)';
-      banner.style.color = '#fff';
-      setTimeout(() => { if (banner.parentNode) banner.remove(); }, 5000);
-    }
+  /** Banner REMOVED — it injected DOM text like "Autofill complete" which
+   *  triggered the success-detection regex and caused premature skipping. */
+  function showAutofillBanner() {
+    // Remove any leftover banner from previous runs
+    const old = document.getElementById('oh-autofill-banner');
+    if (old) old.remove();
   }
 
   /** Run the full auto-trigger flow */
