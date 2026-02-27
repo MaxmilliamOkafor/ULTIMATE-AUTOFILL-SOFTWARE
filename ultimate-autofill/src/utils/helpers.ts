@@ -65,3 +65,12 @@ export function isValidHttpsUrl(url: string): boolean {
   try { return new URL(url).protocol === 'https:'; }
   catch { return false; }
 }
+
+/** Validate http or https URL */
+export function isValidHttpUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  }
+  catch { return false; }
+}

@@ -3,6 +3,9 @@ import * as store from '../savedResponses/storage';
 import { findMatches } from '../savedResponses/matcher';
 import { findDuplicates } from '../utils/fuzzy';
 import * as queue from '../jobQueue/storage';
+import * as settings from '../settings/storage';
+import * as autoApply from '../autoApply/engine';
+import * as scraper from '../autoApply/scraper';
 
 chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
   handleMessage(msg).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
@@ -84,9 +87,8 @@ async function handleMessage(msg: ExtMessage): Promise<ExtResponse> {
     case 'ADD_JOB_URLS':
       return { ok: true, data: await queue.addUrls(p.urls) };
     case 'IMPORT_JOB_CSV': {
-      const parsed = queue.parseJobCSV(p.csv);
-      const added = await queue.addUrls(parsed);
-      return { ok: true, data: { parsed: parsed.length, added } };
+      const stats = await queue.importCSVJobs(p.csv);
+      return { ok: true, data: stats };
     }
     case 'UPDATE_JOB_STATUS':
       await queue.updateStatus(p.id, p.status, p.reason);
@@ -98,12 +100,78 @@ async function handleMessage(msg: ExtMessage): Promise<ExtResponse> {
       await chrome.tabs.create({ url: p.url, active: true });
       await queue.updateStatus(p.id, 'opened');
       return { ok: true };
+    case 'REMOVE_JOB':
+      await queue.removeItem(p.id);
+      return { ok: true };
+    case 'RETRY_FAILED_JOBS': {
+      const retried = await queue.retryFailed();
+      return { ok: true, data: retried };
+    }
+    case 'GET_IMPORT_STATS':
+      return { ok: true, data: await queue.getImportStats() };
+    case 'EXPORT_JOB_RESULTS': {
+      const csv = await queue.exportQueue();
+      return { ok: true, data: csv };
+    }
+
+    // ─── Auto-Apply Pipeline ───
+    case 'START_AUTO_APPLY':
+      autoApply.startAutoApply(p?.source || 'all');
+      return { ok: true };
+    case 'STOP_AUTO_APPLY':
+      autoApply.stopAutoApply();
+      return { ok: true };
+    case 'PAUSE_AUTO_APPLY':
+      autoApply.pauseAutoApply();
+      return { ok: true };
+    case 'RESUME_AUTO_APPLY':
+      autoApply.resumeAutoApply();
+      return { ok: true };
+    case 'GET_AUTO_APPLY_STATUS':
+      return { ok: true, data: autoApply.getStatus() };
+
+    // ─── Settings ───
+    case 'GET_SETTINGS':
+      return { ok: true, data: await settings.loadSettings() };
+    case 'SAVE_SETTINGS':
+      await settings.saveSettings(p);
+      return { ok: true };
+
+    // ─── Applications Account ───
+    case 'SAVE_APP_ACCOUNT':
+      await settings.saveAppAccount(p.email, p.password, p.passphrase);
+      return { ok: true };
+    case 'GET_APP_ACCOUNT': {
+      const account = await settings.getAppAccount(p.passphrase);
+      if (account) return { ok: true, data: { email: account.email } }; // Never return password to UI
+      return { ok: false, error: 'Invalid passphrase or no account saved' };
+    }
+    case 'CLEAR_APP_ACCOUNT':
+      await settings.clearAppAccount();
+      return { ok: true };
+
+    // ─── Credits ───
+    case 'GET_CREDITS':
+    case 'CHECK_CREDITS':
+      return { ok: true, data: await settings.checkCredits() };
+
+    // ─── Scraper ───
+    case 'START_SCRAPER':
+      await scraper.startScraper();
+      return { ok: true };
+    case 'STOP_SCRAPER':
+      scraper.stopScraper();
+      return { ok: true };
+    case 'GET_SCRAPED_JOBS': {
+      const jobs = await scraper.getRankedJobs(p?.targetCount);
+      return { ok: true, data: jobs };
+    }
 
     // ─── Autofill (forwarded to content script via tabs) ───
     case 'START_AUTOFILL': {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, { type: 'START_AUTOFILL' });
+        await chrome.tabs.sendMessage(tab.id, { type: 'START_AUTOFILL', payload: p });
       }
       return { ok: true };
     }
@@ -122,6 +190,16 @@ async function handleMessage(msg: ExtMessage): Promise<ExtResponse> {
       }
       return { ok: false, error: 'No active tab' };
     }
+    case 'AUTO_DETECT_FILL': {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: 'AUTO_DETECT_FILL' });
+      }
+      return { ok: true };
+    }
+    case 'PAGE_AUTOFILL_COMPLETE':
+      // Content script reports completion - forwarded to auto-apply engine
+      return { ok: true };
 
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
@@ -143,5 +221,31 @@ chrome.runtime.onInstalled?.addListener(async () => {
       activeLibraryId: 'default',
       domainMappings: {},
     });
+  }
+  // Initialize settings with defaults
+  await settings.loadSettings();
+});
+
+// Auto-detect ATS on tab updates and trigger autofill if enabled
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete' || !tab.url) return;
+
+  try {
+    const s = await settings.loadSettings();
+    if (!s.autoDetectAndFill) return;
+
+    // Check if URL matches any supported platform
+    const url = tab.url;
+    const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
+    if (!isSupported) return;
+
+    // Send auto-detect-and-fill to the content script
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'AUTO_DETECT_FILL' });
+    } catch {
+      // Content script not yet loaded, ignore
+    }
+  } catch {
+    // Settings not yet initialized, ignore
   }
 });

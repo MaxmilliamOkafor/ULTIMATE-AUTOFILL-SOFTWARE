@@ -1,4 +1,5 @@
 import type { ATSDetectionResult, ATSType } from '../types/index';
+import { PLATFORM_REGISTRY, isLinkedInEasyApply } from './platformRegistry';
 
 interface Sig {
   type: ATSType;
@@ -7,56 +8,13 @@ interface Sig {
   meta: { name: string; pat: RegExp }[];
 }
 
-const SIGS: Sig[] = [
-  {
-    type: 'workday',
-    urls: [/myworkdayjobs\.com/i, /myworkday\.com/i],
-    dom: ['[data-automation-id]', '[data-uxi-element-id]'],
-    meta: [{ name: 'generator', pat: /workday/i }],
-  },
-  {
-    type: 'greenhouse',
-    urls: [/greenhouse\.io/i, /boards\.greenhouse\.io/i],
-    dom: ['#greenhouse_application', '#grnhse_app', 'form#application_form'],
-    meta: [],
-  },
-  {
-    type: 'lever',
-    urls: [/lever\.co/i, /jobs\.lever\.co/i],
-    dom: ['.lever-application-form', '[data-qa="application-form"]', '.posting-headline'],
-    meta: [],
-  },
-  {
-    type: 'smartrecruiters',
-    urls: [/smartrecruiters\.com/i],
-    dom: ['[class*="smartrecruiters"]', '.st-apply-form'],
-    meta: [],
-  },
-  {
-    type: 'icims',
-    urls: [/icims\.com/i],
-    dom: ['#icims_content', '[class*="icims"]'],
-    meta: [],
-  },
-  {
-    type: 'taleo',
-    urls: [/taleo\.net/i],
-    dom: ['[class*="taleo"]', '#requisitionDescriptionInterface'],
-    meta: [{ name: 'generator', pat: /taleo/i }],
-  },
-  {
-    type: 'ashby',
-    urls: [/ashbyhq\.com/i],
-    dom: ['[data-ashby-job-posting-id]', '.ashby-job-posting-brief-location'],
-    meta: [],
-  },
-  {
-    type: 'bamboohr',
-    urls: [/bamboohr\.com/i],
-    dom: ['.BambooHR-ATS-board', '[class*="BambooHR"]'],
-    meta: [],
-  },
-];
+// Build signatures from the canonical platform registry
+const SIGS: Sig[] = PLATFORM_REGISTRY.filter((p) => p.enabled).map((p) => ({
+  type: p.id,
+  urls: p.urlPatterns,
+  dom: p.domSignals,
+  meta: p.metaSignals.map((m) => ({ name: m.name, pat: m.pattern })),
+}));
 
 export function detectATS(doc: Document): ATSDetectionResult {
   const url = doc.location?.href || '';
@@ -80,6 +38,14 @@ export function detectATS(doc: Document): ATSDetectionResult {
     }
 
     conf = Math.min(conf, 1);
+
+    // Special case: filter out LinkedIn Easy Apply
+    if (s.type === 'linkedin' && conf > 0) {
+      if (isLinkedInEasyApply(doc)) {
+        continue; // Skip - we only support non-Easy Apply
+      }
+    }
+
     if (conf > bestConf) { bestConf = conf; best = s.type; bestSigs.length = 0; bestSigs.push(...found); }
   }
 
@@ -90,7 +56,15 @@ export function atsName(type: ATSType): string {
   const m: Record<ATSType, string> = {
     workday: 'Workday', greenhouse: 'Greenhouse', lever: 'Lever',
     smartrecruiters: 'SmartRecruiters', icims: 'iCIMS', taleo: 'Taleo',
-    ashby: 'Ashby', bamboohr: 'BambooHR', generic: 'Generic',
+    ashby: 'Ashby', bamboohr: 'BambooHR',
+    oraclecloud: 'Oracle Cloud', linkedin: 'LinkedIn', indeed: 'Indeed',
+    generic: 'Generic',
   };
-  return m[type];
+  return m[type] || type;
+}
+
+/** Check if current page is a supported ATS application page */
+export function isApplicationPage(doc: Document): boolean {
+  const result = detectATS(doc);
+  return result.type !== 'generic' && result.confidence >= 0.3;
 }
