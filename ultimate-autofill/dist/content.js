@@ -1,56 +1,159 @@
 "use strict";
 (() => {
-  // src/atsDetector/index.ts
-  var SIGS = [
+  // src/atsDetector/platformRegistry.ts
+  var PLATFORM_REGISTRY = [
+    // ─── Existing Platforms ───
     {
-      type: "workday",
-      urls: [/myworkdayjobs\.com/i, /myworkday\.com/i],
-      dom: ["[data-automation-id]", "[data-uxi-element-id]"],
-      meta: [{ name: "generator", pat: /workday/i }]
+      id: "workday",
+      name: "Workday",
+      domains: ["myworkdayjobs.com", "myworkday.com", "wd1.myworkdaysite.com", "wd3.myworkdaysite.com", "wd5.myworkdaysite.com"],
+      urlPatterns: [/myworkdayjobs\.com/i, /myworkday\.com/i, /myworkdaysite\.com/i, /\.wd\d+\.myworkdayjobs\.com/i],
+      domSignals: ["[data-automation-id]", "[data-uxi-element-id]"],
+      metaSignals: [{ name: "generator", pattern: /workday/i }],
+      enabled: true,
+      supportsAutoSubmit: true,
+      notes: "Multi-step forms with React components. Handles combobox/listbox interactions."
     },
     {
-      type: "greenhouse",
-      urls: [/greenhouse\.io/i, /boards\.greenhouse\.io/i],
-      dom: ["#greenhouse_application", "#grnhse_app", "form#application_form"],
-      meta: []
+      id: "greenhouse",
+      name: "Greenhouse",
+      domains: ["greenhouse.io", "boards.greenhouse.io"],
+      urlPatterns: [/greenhouse\.io/i, /boards\.greenhouse\.io/i],
+      domSignals: ["#greenhouse_application", "#grnhse_app", "form#application_form"],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true,
+      notes: "Uses bracket notation for field names: job_application[first_name]."
     },
     {
-      type: "lever",
-      urls: [/lever\.co/i, /jobs\.lever\.co/i],
-      dom: [".lever-application-form", '[data-qa="application-form"]', ".posting-headline"],
-      meta: []
+      id: "lever",
+      name: "Lever",
+      domains: ["lever.co", "jobs.lever.co"],
+      urlPatterns: [/lever\.co/i, /jobs\.lever\.co/i],
+      domSignals: [".lever-application-form", '[data-qa="application-form"]', ".posting-headline"],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true
     },
     {
-      type: "smartrecruiters",
-      urls: [/smartrecruiters\.com/i],
-      dom: ['[class*="smartrecruiters"]', ".st-apply-form"],
-      meta: []
+      id: "smartrecruiters",
+      name: "SmartRecruiters",
+      domains: ["smartrecruiters.com", "jobs.smartrecruiters.com"],
+      urlPatterns: [/smartrecruiters\.com/i],
+      domSignals: ['[class*="smartrecruiters"]', ".st-apply-form", '[class*="ApplyButton"]'],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true
     },
     {
-      type: "icims",
-      urls: [/icims\.com/i],
-      dom: ["#icims_content", '[class*="icims"]'],
-      meta: []
+      id: "icims",
+      name: "iCIMS",
+      domains: ["icims.com", "careers-icims.com"],
+      urlPatterns: [/icims\.com/i, /careers-icims\.com/i],
+      domSignals: ["#icims_content", '[class*="icims"]', ".iCIMS_MainWrapper"],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true
     },
     {
-      type: "taleo",
-      urls: [/taleo\.net/i],
-      dom: ['[class*="taleo"]', "#requisitionDescriptionInterface"],
-      meta: [{ name: "generator", pat: /taleo/i }]
+      id: "taleo",
+      name: "Taleo (Oracle)",
+      domains: ["taleo.net", "taleoquickfind.com"],
+      urlPatterns: [/taleo\.net/i, /taleoquickfind\.com/i],
+      domSignals: ['[class*="taleo"]', "#requisitionDescriptionInterface", ".taleoContent"],
+      metaSignals: [{ name: "generator", pattern: /taleo/i }],
+      enabled: true,
+      supportsAutoSubmit: true
     },
     {
-      type: "ashby",
-      urls: [/ashbyhq\.com/i],
-      dom: ["[data-ashby-job-posting-id]", ".ashby-job-posting-brief-location"],
-      meta: []
+      id: "ashby",
+      name: "Ashby",
+      domains: ["ashbyhq.com", "jobs.ashbyhq.com"],
+      urlPatterns: [/ashbyhq\.com/i],
+      domSignals: ["[data-ashby-job-posting-id]", ".ashby-job-posting-brief-location"],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true
     },
     {
-      type: "bamboohr",
-      urls: [/bamboohr\.com/i],
-      dom: [".BambooHR-ATS-board", '[class*="BambooHR"]'],
-      meta: []
+      id: "bamboohr",
+      name: "BambooHR",
+      domains: ["bamboohr.com"],
+      urlPatterns: [/bamboohr\.com/i],
+      domSignals: [".BambooHR-ATS-board", '[class*="BambooHR"]'],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true
+    },
+    // ─── Newly Added Platforms ───
+    {
+      id: "oraclecloud",
+      name: "Oracle Cloud HCM / Oracle Recruiting",
+      domains: ["oraclecloud.com", "fa.oraclecloud.com"],
+      urlPatterns: [/oraclecloud\.com/i, /fa\..*\.oraclecloud\.com/i, /hcm\d*.*\.oraclecloud\.com/i],
+      domSignals: [
+        '[class*="oracle"]',
+        '[id*="oj-"]',
+        ".oj-web-applcore-page",
+        "[data-oj-binding-provider]",
+        ".oj-flex",
+        "#ojAppRoot"
+      ],
+      metaSignals: [{ name: "generator", pattern: /oracle/i }],
+      enabled: true,
+      supportsAutoSubmit: true,
+      notes: "Oracle JET-based UI. Uses oj- prefixed component IDs. Dynamic SPA with knockout.js bindings."
+    },
+    {
+      id: "linkedin",
+      name: "LinkedIn (Non-Easy Apply Only)",
+      domains: ["linkedin.com", "www.linkedin.com"],
+      urlPatterns: [/linkedin\.com\/jobs/i, /linkedin\.com\/in/i],
+      domSignals: [
+        ".jobs-apply-button",
+        ".jobs-unified-top-card",
+        "[data-job-id]",
+        ".jobs-details"
+      ],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: false,
+      notes: "Only for non-Easy Apply flows. Easy Apply is filtered out by detection logic."
+    },
+    {
+      id: "indeed",
+      name: "Indeed",
+      domains: ["indeed.com", "www.indeed.com", "apply.indeed.com"],
+      urlPatterns: [/indeed\.com/i, /apply\.indeed\.com/i],
+      domSignals: [
+        "#jobsearch-ViewJobButtons-container",
+        ".jobsearch-ViewJobLayout",
+        '[data-testid="apply-button"]',
+        "#ia-container"
+      ],
+      metaSignals: [],
+      enabled: true,
+      supportsAutoSubmit: true,
+      notes: "Indeed Apply flow uses iframe-based application forms."
     }
   ];
+  function isLinkedInEasyApply(doc) {
+    const easyApplyBtn = doc.querySelector(".jobs-apply-button--top-card .jobs-apply-button");
+    if (easyApplyBtn) {
+      const text = easyApplyBtn.textContent?.toLowerCase() || "";
+      return text.includes("easy apply");
+    }
+    const badge = doc.querySelector('[class*="easy-apply"]') || doc.querySelector('[data-is-easy-apply="true"]');
+    return !!badge;
+  }
+
+  // src/atsDetector/index.ts
+  var SIGS = PLATFORM_REGISTRY.filter((p) => p.enabled).map((p) => ({
+    type: p.id,
+    urls: p.urlPatterns,
+    dom: p.domSignals,
+    meta: p.metaSignals.map((m) => ({ name: m.name, pat: m.pattern }))
+  }));
   function detectATS(doc) {
     const url = doc.location?.href || "";
     let best = "generic";
@@ -85,6 +188,11 @@
         }
       }
       conf = Math.min(conf, 1);
+      if (s.type === "linkedin" && conf > 0) {
+        if (isLinkedInEasyApply(doc)) {
+          continue;
+        }
+      }
       if (conf > bestConf) {
         bestConf = conf;
         best = s.type;
@@ -624,6 +732,603 @@
     }
   };
 
+  // src/adapters/lever/index.ts
+  var ID_MAP2 = {
+    name: "Full Name",
+    email: "Email Address",
+    phone: "Phone Number",
+    org: "Current Company",
+    urls: "LinkedIn / Website",
+    resume: "Resume",
+    comments: "Additional Information"
+  };
+  function elType3(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input")
+      return el.type || "text";
+    if (tag === "textarea")
+      return "textarea";
+    if (tag === "select")
+      return "select";
+    return el.getAttribute("role") || "unknown";
+  }
+  var leverAdapter = {
+    type: "lever",
+    detect(doc) {
+      const signals = [];
+      let conf = 0;
+      const docHref = doc.location?.href;
+      const url = (docHref && docHref !== "about:blank" ? docHref : null) || (typeof window !== "undefined" ? window.location?.href : "") || "";
+      if (/lever\.co/i.test(url)) {
+        conf += 0.5;
+        signals.push("url:lever");
+      }
+      if (doc.querySelector(".lever-application-form")) {
+        conf += 0.3;
+        signals.push("lever-form");
+      }
+      if (doc.querySelector('[data-qa="application-form"]')) {
+        conf += 0.2;
+        signals.push("data-qa");
+      }
+      return { type: "lever", confidence: Math.min(conf, 1), signals };
+    },
+    getFields(doc) {
+      const fields = [];
+      const container = doc.querySelector(".lever-application-form") || doc.querySelector('[data-qa="application-form"]') || doc;
+      const els = container.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([disabled]), textarea:not([disabled]), select:not([disabled])'
+      );
+      for (const el of els) {
+        if (el.offsetParent === null)
+          continue;
+        const signals = extractFieldSignals(el);
+        const name = el.getAttribute("name") || "";
+        if (name && ID_MAP2[name]) {
+          signals.push({ source: "lever-field-name", value: ID_MAP2[name], weight: 1 });
+        }
+        const card = el.closest(".application-question");
+        if (card) {
+          const label = card.querySelector(".application-label");
+          if (label?.textContent?.trim()) {
+            signals.push({ source: "lever-question-label", value: label.textContent.trim(), weight: 0.95 });
+          }
+        }
+        fields.push({ element: el, type: elType3(el), signals });
+      }
+      return fields;
+    },
+    async fillField(field, value) {
+      try {
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          field.focus();
+          field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+          field.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const opt = Array.from(field.options).find(
+            (o) => o.text.toLowerCase().includes(value.toLowerCase()) || o.value.toLowerCase() === value.toLowerCase()
+          );
+          if (opt) {
+            field.value = opt.value;
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }
+        if (field.contentEditable === "true") {
+          field.textContent = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  // src/adapters/smartrecruiters/index.ts
+  var delay2 = (ms) => new Promise((r) => setTimeout(r, ms));
+  function elType4(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input")
+      return el.type || "text";
+    if (tag === "textarea")
+      return "textarea";
+    if (tag === "select")
+      return "select";
+    return el.getAttribute("role") || "unknown";
+  }
+  var smartrecruitersAdapter = {
+    type: "smartrecruiters",
+    detect(doc) {
+      const signals = [];
+      let conf = 0;
+      const docHref = doc.location?.href;
+      const url = (docHref && docHref !== "about:blank" ? docHref : null) || (typeof window !== "undefined" ? window.location?.href : "") || "";
+      if (/smartrecruiters\.com/i.test(url)) {
+        conf += 0.5;
+        signals.push("url:smartrecruiters");
+      }
+      if (doc.querySelector('[class*="smartrecruiters"]') || doc.querySelector(".st-apply-form")) {
+        conf += 0.3;
+        signals.push("sr-form");
+      }
+      if (doc.querySelector('[class*="ApplyButton"]')) {
+        conf += 0.2;
+        signals.push("apply-btn");
+      }
+      return { type: "smartrecruiters", confidence: Math.min(conf, 1), signals };
+    },
+    getFields(doc) {
+      const fields = [];
+      const container = doc.querySelector(".st-apply-form") || doc.querySelector('[class*="smartrecruiters"]') || doc;
+      const els = container.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [role="combobox"], [role="listbox"]'
+      );
+      for (const el of els) {
+        if (el.offsetParent === null)
+          continue;
+        const signals = extractFieldSignals(el);
+        const dataTest = el.getAttribute("data-test") || el.closest("[data-test]")?.getAttribute("data-test");
+        if (dataTest) {
+          signals.push({ source: "sr-data-test", value: dataTest.replace(/[-_]/g, " "), weight: 0.85 });
+        }
+        fields.push({ element: el, type: elType4(el), signals });
+      }
+      return fields;
+    },
+    async fillField(field, value) {
+      try {
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          field.focus();
+          const setter = Object.getOwnPropertyDescriptor(
+            field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+            "value"
+          )?.set;
+          if (setter)
+            setter.call(field, value);
+          else
+            field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+          field.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const opt = Array.from(field.options).find(
+            (o) => o.text.toLowerCase().includes(value.toLowerCase()) || o.value.toLowerCase() === value.toLowerCase()
+          );
+          if (opt) {
+            field.value = opt.value;
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }
+        if (field.getAttribute("role") === "combobox" || field.getAttribute("role") === "listbox") {
+          field.click();
+          await delay2(200);
+          const inp = field.querySelector("input");
+          if (inp) {
+            inp.value = value;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          await delay2(300);
+          for (const opt of document.querySelectorAll('[role="option"]')) {
+            if (opt.textContent?.toLowerCase().includes(value.toLowerCase())) {
+              opt.click();
+              return true;
+            }
+          }
+          return false;
+        }
+        if (field.contentEditable === "true") {
+          field.textContent = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  // src/adapters/oraclecloud/index.ts
+  var FIELD_MAP2 = {
+    firstName: "First Name",
+    lastName: "Last Name",
+    email: "Email Address",
+    phoneNumber: "Phone Number",
+    addressLine1: "Address Line 1",
+    city: "City",
+    state: "State",
+    postalCode: "Postal Code",
+    country: "Country",
+    resume: "Resume",
+    coverLetter: "Cover Letter",
+    linkedInUrl: "LinkedIn Profile"
+  };
+  function elType5(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input")
+      return el.type || "text";
+    if (tag === "textarea")
+      return "textarea";
+    if (tag === "select")
+      return "select";
+    return el.getAttribute("role") || "unknown";
+  }
+  var delay3 = (ms) => new Promise((r) => setTimeout(r, ms));
+  var oraclecloudAdapter = {
+    type: "oraclecloud",
+    detect(doc) {
+      const signals = [];
+      let conf = 0;
+      const docHref = doc.location?.href;
+      const url = (docHref && docHref !== "about:blank" ? docHref : null) || (typeof window !== "undefined" ? window.location?.href : "") || "";
+      if (/oraclecloud\.com/i.test(url)) {
+        conf += 0.5;
+        signals.push("url:oraclecloud");
+      }
+      if (doc.querySelector('[id*="oj-"]') || doc.querySelector("[data-oj-binding-provider]")) {
+        conf += 0.3;
+        signals.push("oracle-jet-ui");
+      }
+      if (doc.querySelector(".oj-flex") || doc.querySelector("#ojAppRoot")) {
+        conf += 0.2;
+        signals.push("oj-components");
+      }
+      return { type: "oraclecloud", confidence: Math.min(conf, 1), signals };
+    },
+    getFields(doc) {
+      const fields = [];
+      const selectors = [
+        'input:not([type="hidden"]):not([type="submit"]):not([disabled])',
+        "textarea:not([disabled])",
+        "select:not([disabled])",
+        "oj-input-text",
+        "oj-input-password",
+        "oj-select-single",
+        "oj-select-many",
+        "oj-combobox-one",
+        "oj-combobox-many",
+        "oj-text-area",
+        '[role="combobox"]',
+        '[role="listbox"]'
+      ].join(", ");
+      for (const el of doc.querySelectorAll(selectors)) {
+        if (el.offsetParent === null)
+          continue;
+        const signals = extractFieldSignals(el);
+        const ojId = el.getAttribute("id") || "";
+        if (ojId) {
+          const key = ojId.replace(/^oj-/, "").replace(/[\d-]+$/, "");
+          const mapped = FIELD_MAP2[key];
+          if (mapped) {
+            signals.push({ source: "oracle-field-id", value: mapped, weight: 1 });
+          }
+        }
+        const labelHint = el.getAttribute("label-hint");
+        if (labelHint) {
+          signals.push({ source: "oracle-label-hint", value: labelHint, weight: 0.95 });
+        }
+        fields.push({ element: el, type: elType5(el), signals });
+      }
+      return fields;
+    },
+    async fillField(field, value) {
+      try {
+        const tagName = field.tagName.toLowerCase();
+        if (tagName.startsWith("oj-")) {
+          const inp = field.querySelector("input") || field.querySelector("textarea");
+          if (inp) {
+            inp.focus();
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+            if (setter)
+              setter.call(inp, value);
+            else
+              inp.value = value;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+            inp.dispatchEvent(new Event("change", { bubbles: true }));
+            inp.dispatchEvent(new Event("blur", { bubbles: true }));
+            return true;
+          }
+          if (tagName.includes("select") || tagName.includes("combobox")) {
+            field.click();
+            await delay3(300);
+            for (const opt of document.querySelectorAll('[role="option"], oj-option')) {
+              if (opt.textContent?.toLowerCase().includes(value.toLowerCase())) {
+                opt.click();
+                return true;
+              }
+            }
+          }
+          return false;
+        }
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          const setter = Object.getOwnPropertyDescriptor(
+            field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+            "value"
+          )?.set;
+          if (setter)
+            setter.call(field, value);
+          else
+            field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+          field.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const opt = Array.from(field.options).find((o) => o.text.toLowerCase().includes(value.toLowerCase()) || o.value.toLowerCase() === value.toLowerCase());
+          if (opt) {
+            field.value = opt.value;
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }
+        if (field.getAttribute("role") === "combobox" || field.getAttribute("role") === "listbox") {
+          field.click();
+          await delay3(200);
+          const inp = field.querySelector("input");
+          if (inp) {
+            inp.value = value;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          await delay3(300);
+          for (const opt of document.querySelectorAll('[role="option"]')) {
+            if (opt.textContent?.toLowerCase().includes(value.toLowerCase())) {
+              opt.click();
+              return true;
+            }
+          }
+          return false;
+        }
+        if (field.contentEditable === "true") {
+          field.textContent = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  // src/adapters/indeed/index.ts
+  var delay4 = (ms) => new Promise((r) => setTimeout(r, ms));
+  function elType6(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input")
+      return el.type || "text";
+    if (tag === "textarea")
+      return "textarea";
+    if (tag === "select")
+      return "select";
+    return el.getAttribute("role") || "unknown";
+  }
+  var indeedAdapter = {
+    type: "indeed",
+    detect(doc) {
+      const signals = [];
+      let conf = 0;
+      const docHref = doc.location?.href;
+      const url = (docHref && docHref !== "about:blank" ? docHref : null) || (typeof window !== "undefined" ? window.location?.href : "") || "";
+      if (/indeed\.com/i.test(url)) {
+        conf += 0.5;
+        signals.push("url:indeed");
+      }
+      if (/apply\.indeed\.com/i.test(url)) {
+        conf += 0.3;
+        signals.push("url:indeed-apply");
+      }
+      if (doc.querySelector("#ia-container") || doc.querySelector('[data-testid="apply-button"]')) {
+        conf += 0.2;
+        signals.push("indeed-apply-ui");
+      }
+      return { type: "indeed", confidence: Math.min(conf, 1), signals };
+    },
+    getFields(doc) {
+      const fields = [];
+      const container = doc.querySelector("#ia-container") || doc.querySelector(".ia-BasePage") || doc;
+      const els = container.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [role="combobox"], [role="listbox"]'
+      );
+      for (const el of els) {
+        if (el.offsetParent === null)
+          continue;
+        const signals = extractFieldSignals(el);
+        const testId = el.getAttribute("data-testid") || el.closest("[data-testid]")?.getAttribute("data-testid");
+        if (testId) {
+          signals.push({ source: "indeed-testid", value: testId.replace(/[-_]/g, " "), weight: 0.85 });
+        }
+        const questionContainer = el.closest(".ia-Questions-item") || el.closest("[data-testid]");
+        if (questionContainer) {
+          const label = questionContainer.querySelector("label, .ia-Questions-label");
+          if (label?.textContent?.trim()) {
+            signals.push({ source: "indeed-question", value: label.textContent.trim(), weight: 0.95 });
+          }
+        }
+        fields.push({ element: el, type: elType6(el), signals });
+      }
+      return fields;
+    },
+    async fillField(field, value) {
+      try {
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          field.focus();
+          const setter = Object.getOwnPropertyDescriptor(
+            field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+            "value"
+          )?.set;
+          if (setter)
+            setter.call(field, value);
+          else
+            field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+          field.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const opt = Array.from(field.options).find(
+            (o) => o.text.toLowerCase().includes(value.toLowerCase()) || o.value.toLowerCase() === value.toLowerCase()
+          );
+          if (opt) {
+            field.value = opt.value;
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }
+        if (field.getAttribute("role") === "combobox" || field.getAttribute("role") === "listbox") {
+          field.click();
+          await delay4(200);
+          const inp = field.querySelector("input");
+          if (inp) {
+            inp.value = value;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          await delay4(300);
+          for (const opt of document.querySelectorAll('[role="option"]')) {
+            if (opt.textContent?.toLowerCase().includes(value.toLowerCase())) {
+              opt.click();
+              return true;
+            }
+          }
+          return false;
+        }
+        if (field.contentEditable === "true") {
+          field.textContent = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  // src/adapters/linkedin/index.ts
+  var delay5 = (ms) => new Promise((r) => setTimeout(r, ms));
+  function elType7(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input")
+      return el.type || "text";
+    if (tag === "textarea")
+      return "textarea";
+    if (tag === "select")
+      return "select";
+    return el.getAttribute("role") || "unknown";
+  }
+  var linkedinAdapter = {
+    type: "linkedin",
+    detect(doc) {
+      const signals = [];
+      let conf = 0;
+      const docHref = doc.location?.href;
+      const url = (docHref && docHref !== "about:blank" ? docHref : null) || (typeof window !== "undefined" ? window.location?.href : "") || "";
+      if (/linkedin\.com\/jobs/i.test(url)) {
+        conf += 0.5;
+        signals.push("url:linkedin-jobs");
+      }
+      if (doc.querySelector(".jobs-apply-button") || doc.querySelector("[data-job-id]")) {
+        conf += 0.3;
+        signals.push("linkedin-job-ui");
+      }
+      const easyApplyBtn = doc.querySelector(".jobs-apply-button--top-card");
+      if (easyApplyBtn?.textContent?.toLowerCase().includes("easy apply")) {
+        return { type: "linkedin", confidence: 0, signals: ["easy-apply-skipped"] };
+      }
+      return { type: "linkedin", confidence: Math.min(conf, 1), signals };
+    },
+    getFields(doc) {
+      const fields = [];
+      const container = doc.querySelector(".jobs-easy-apply-content") || doc.querySelector(".jobs-apply-form") || doc;
+      const els = container.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [role="combobox"]'
+      );
+      for (const el of els) {
+        if (el.offsetParent === null)
+          continue;
+        const signals = extractFieldSignals(el);
+        const formComponent = el.closest("[data-test-form-element]");
+        if (formComponent) {
+          const testLabel = formComponent.getAttribute("data-test-form-element");
+          if (testLabel)
+            signals.push({ source: "linkedin-form-element", value: testLabel, weight: 0.9 });
+        }
+        fields.push({ element: el, type: elType7(el), signals });
+      }
+      return fields;
+    },
+    async fillField(field, value) {
+      try {
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          field.focus();
+          await delay5(50);
+          const setter = Object.getOwnPropertyDescriptor(
+            field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+            "value"
+          )?.set;
+          if (setter)
+            setter.call(field, value);
+          else
+            field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+          field.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const opt = Array.from(field.options).find(
+            (o) => o.text.toLowerCase().includes(value.toLowerCase()) || o.value.toLowerCase() === value.toLowerCase()
+          );
+          if (opt) {
+            field.value = opt.value;
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }
+        if (field.getAttribute("role") === "combobox") {
+          field.click();
+          await delay5(200);
+          const inp = field.querySelector("input");
+          if (inp) {
+            inp.value = value;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          await delay5(300);
+          for (const opt of document.querySelectorAll('[role="option"]')) {
+            if (opt.textContent?.toLowerCase().includes(value.toLowerCase())) {
+              opt.click();
+              return true;
+            }
+          }
+          return false;
+        }
+        if (field.contentEditable === "true") {
+          field.textContent = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+  };
+
   // src/adapters/generic/index.ts
   var genericAdapter = {
     type: "generic",
@@ -703,6 +1408,11 @@
   var adapters = {
     workday: workdayAdapter,
     greenhouse: greenhouseAdapter,
+    lever: leverAdapter,
+    smartrecruiters: smartrecruitersAdapter,
+    oraclecloud: oraclecloudAdapter,
+    indeed: indeedAdapter,
+    linkedin: linkedinAdapter,
     generic: genericAdapter
   };
   function getAdapter(type) {
@@ -712,8 +1422,14 @@
   // src/content/main.ts
   var isRunning = false;
   var observer = null;
+  var autoApplyJobId = null;
+  var autoSubmitEnabled = false;
+  var autoDetectedPages = /* @__PURE__ */ new Set();
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "START_AUTOFILL") {
+      const payload = msg.payload;
+      autoSubmitEnabled = payload?.autoSubmit || false;
+      autoApplyJobId = payload?.jobId || null;
       startAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
       return true;
     }
@@ -725,6 +1441,10 @@
       const result = detectATS(document);
       sendResponse(result);
     }
+    if (msg.type === "AUTO_DETECT_FILL") {
+      handleAutoDetectFill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+      return true;
+    }
   });
   async function send(msg) {
     return chrome.runtime.sendMessage(msg);
@@ -734,6 +1454,21 @@
     const r = await send({ type: "GET_RESPONSES", payload: { domain } });
     return r?.data || [];
   }
+  async function handleAutoDetectFill() {
+    const pageKey = location.href;
+    if (autoDetectedPages.has(pageKey))
+      return;
+    autoDetectedPages.add(pageKey);
+    const ats = detectATS(document);
+    if (ats.type === "generic" || ats.confidence < 0.3)
+      return;
+    const credits = await send({ type: "CHECK_CREDITS" });
+    if (!credits?.ok || !credits.data?.unlimited && credits.data?.remaining <= 0)
+      return;
+    if (!isRunning) {
+      await startAutofill();
+    }
+  }
   async function startAutofill() {
     if (isRunning)
       return;
@@ -742,7 +1477,7 @@
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
     const responses = await getResponses();
-    await fillPage(adapter, responses, ats.type);
+    const fillResult = await fillPage(adapter, responses, ats.type);
     observer = new MutationObserver(async (mutations) => {
       if (!isRunning)
         return;
@@ -752,6 +1487,9 @@
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
+    if (autoSubmitEnabled && fillResult.filled > 0) {
+      await attemptAutoSubmit(ats.type, fillResult.filled, fillResult.total);
+    }
   }
   function stopAutofill() {
     isRunning = false;
@@ -771,6 +1509,7 @@
         break;
       if (isAlreadyFilled(match.field))
         continue;
+      await randomDelay(50, 200);
       const ok = await adapter.fillField(match.field, match.response.response);
       if (ok) {
         filled++;
@@ -781,6 +1520,73 @@
       }
     }
     updateControlBar(filled, matches.length);
+    return { filled, total: matches.length };
+  }
+  async function attemptAutoSubmit(atsType, filledCount, totalCount) {
+    if (!autoSubmitEnabled)
+      return;
+    await randomDelay(1e3, 2e3);
+    const submitBtn = findSubmitButton();
+    if (!submitBtn) {
+      reportCompletion("needs_input");
+      return;
+    }
+    const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
+    if (resumeInput && !resumeInput.files?.length) {
+      const settingsR = await send({ type: "GET_SETTINGS" });
+      if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
+        updateControlBar(filledCount, totalCount, "Resume required - manual upload needed");
+        reportCompletion("needs_input");
+        return;
+      }
+    }
+    try {
+      submitBtn.click();
+      await randomDelay(500, 1e3);
+      updateControlBar(filledCount, totalCount, "Application submitted!");
+      reportCompletion("applied");
+    } catch {
+      reportCompletion("prefilled");
+    }
+  }
+  function findSubmitButton() {
+    const selectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button[data-automation-id="bottom-navigation-next-button"]',
+      // Workday
+      'button[data-automation-id="submitButton"]',
+      "#submit_app",
+      // Greenhouse
+      ".btn-submit",
+      "button.application-submit",
+      '[data-qa="btn-submit"]',
+      'button[aria-label="Submit application"]',
+      'button[aria-label="Submit"]'
+    ];
+    for (const sel of selectors) {
+      const btn = document.querySelector(sel);
+      if (btn && btn.offsetParent !== null)
+        return btn;
+    }
+    const allButtons = document.querySelectorAll('button, input[type="submit"], a.btn');
+    for (const btn of allButtons) {
+      const text = btn.textContent?.toLowerCase().trim() || "";
+      if ((text.includes("submit") || text.includes("apply") || text.includes("send application")) && !text.includes("cancel") && !text.includes("back") && btn.offsetParent !== null) {
+        return btn;
+      }
+    }
+    return null;
+  }
+  function reportCompletion(status) {
+    send({
+      type: "PAGE_AUTOFILL_COMPLETE",
+      payload: { status, jobId: autoApplyJobId, url: location.href }
+    });
+  }
+  function randomDelay(min, max) {
+    const ms = min + Math.random() * (max - min);
+    return new Promise((r) => setTimeout(r, ms));
   }
   function isAlreadyFilled(el) {
     if (el.classList.contains("ua-filled"))
@@ -808,10 +1614,10 @@
       stopAutofill();
     });
   }
-  function updateControlBar(filled, total) {
+  function updateControlBar(filled, total, message) {
     const el = document.getElementById("ua-fill-status");
     if (el)
-      el.textContent = `${filled}/${total} fields filled`;
+      el.textContent = message || `${filled}/${total} fields filled`;
   }
   function removeControlBar() {
     document.getElementById("ua-control-bar")?.remove();

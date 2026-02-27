@@ -1,20 +1,29 @@
 /**
  * Content script - runs on every page.
- * Handles autofill orchestration, ATS detection, and MutationObserver for dynamic pages.
+ * Handles autofill orchestration, ATS detection, auto-apply,
+ * and MutationObserver for dynamic pages.
  */
 
 import type { ExtMessage, FieldMatchResult, SavedResponse, ATSType } from '../types/index';
-import { detectATS } from '../atsDetector/index';
+import { detectATS, isApplicationPage } from '../atsDetector/index';
 import { getAdapter } from '../adapters/index';
 import { matchFields } from '../fieldMatcher/index';
 import { findMatches } from '../savedResponses/matcher';
 
 let isRunning = false;
 let observer: MutationObserver | null = null;
+let autoApplyJobId: string | null = null;
+let autoSubmitEnabled = false;
+
+// Anti-loop protection: track which pages we've already auto-detected
+const autoDetectedPages = new Set<string>();
 
 // ─── Message handling from background / popup ───
 chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
   if (msg.type === 'START_AUTOFILL') {
+    const payload = msg.payload as any;
+    autoSubmitEnabled = payload?.autoSubmit || false;
+    autoApplyJobId = payload?.jobId || null;
     startAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
@@ -25,6 +34,10 @@ chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) =>
   if (msg.type === 'DETECT_ATS') {
     const result = detectATS(document);
     sendResponse(result);
+  }
+  if (msg.type === 'AUTO_DETECT_FILL') {
+    handleAutoDetectFill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
   }
 });
 
@@ -38,6 +51,30 @@ async function getResponses(): Promise<SavedResponse[]> {
   return r?.data || [];
 }
 
+/**
+ * Auto-detect ATS and immediately start autofill.
+ * Called automatically when the extension detects a supported ATS page.
+ */
+async function handleAutoDetectFill() {
+  const pageKey = location.href;
+
+  // Anti-loop: don't re-detect the same page
+  if (autoDetectedPages.has(pageKey)) return;
+  autoDetectedPages.add(pageKey);
+
+  const ats = detectATS(document);
+  if (ats.type === 'generic' || ats.confidence < 0.3) return;
+
+  // Check credits (always unlimited)
+  const credits = await send({ type: 'CHECK_CREDITS' });
+  if (!credits?.ok || (!credits.data?.unlimited && credits.data?.remaining <= 0)) return;
+
+  // Auto-start autofill
+  if (!isRunning) {
+    await startAutofill();
+  }
+}
+
 async function startAutofill() {
   if (isRunning) return;
   isRunning = true;
@@ -49,12 +86,11 @@ async function startAutofill() {
   const responses = await getResponses();
 
   // Initial fill
-  await fillPage(adapter, responses, ats.type);
+  const fillResult = await fillPage(adapter, responses, ats.type);
 
-  // Watch for dynamic changes
+  // Watch for dynamic changes (multi-step forms)
   observer = new MutationObserver(async (mutations) => {
     if (!isRunning) return;
-    // Only re-fill if new nodes were added
     const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
     if (hasNewNodes) {
       await fillPage(adapter, responses, ats.type);
@@ -62,6 +98,11 @@ async function startAutofill() {
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
+
+  // Auto-submit if enabled and form is fully filled
+  if (autoSubmitEnabled && fillResult.filled > 0) {
+    await attemptAutoSubmit(ats.type, fillResult.filled, fillResult.total);
+  }
 }
 
 function stopAutofill() {
@@ -70,7 +111,7 @@ function stopAutofill() {
   removeControlBar();
 }
 
-async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: SavedResponse[], atsType: ATSType) {
+async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: SavedResponse[], atsType: ATSType): Promise<{ filled: number; total: number }> {
   const fields = adapter.getFields(document);
   const domain = location.hostname;
   const matches = matchFields(fields, responses, { domain, atsType });
@@ -79,6 +120,9 @@ async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: Saved
   for (const match of matches) {
     if (!isRunning) break;
     if (isAlreadyFilled(match.field)) continue;
+
+    // Human-like pacing: small random delay between fields
+    await randomDelay(50, 200);
 
     const ok = await adapter.fillField(match.field, match.response.response);
     if (ok) {
@@ -95,6 +139,97 @@ async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: Saved
   }
 
   updateControlBar(filled, matches.length);
+  return { filled, total: matches.length };
+}
+
+/**
+ * Attempt auto-submit after form is filled.
+ * Safety guards:
+ * - Only submits if auto-submit is explicitly enabled
+ * - Checks for resume upload presence
+ * - Looks for submit/apply buttons
+ * - Sends completion report back to background
+ */
+async function attemptAutoSubmit(atsType: ATSType, filledCount: number, totalCount: number) {
+  if (!autoSubmitEnabled) return;
+
+  // Wait for any dynamic updates to settle
+  await randomDelay(1000, 2000);
+
+  // Find the submit/apply button
+  const submitBtn = findSubmitButton();
+  if (!submitBtn) {
+    reportCompletion('needs_input');
+    return;
+  }
+
+  // Check if resume is required but missing
+  const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
+  if (resumeInput && !(resumeInput as HTMLInputElement).files?.length) {
+    // Check settings - if resume is required, don't submit
+    const settingsR = await send({ type: 'GET_SETTINGS' });
+    if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
+      updateControlBar(filledCount, totalCount, 'Resume required - manual upload needed');
+      reportCompletion('needs_input');
+      return;
+    }
+  }
+
+  // Click the submit button
+  try {
+    submitBtn.click();
+    await randomDelay(500, 1000);
+    updateControlBar(filledCount, totalCount, 'Application submitted!');
+    reportCompletion('applied');
+  } catch {
+    reportCompletion('prefilled');
+  }
+}
+
+function findSubmitButton(): HTMLElement | null {
+  // Priority order of selectors for submit/apply buttons
+  const selectors = [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button[data-automation-id="bottom-navigation-next-button"]', // Workday
+    'button[data-automation-id="submitButton"]',
+    '#submit_app', // Greenhouse
+    '.btn-submit',
+    'button.application-submit',
+    '[data-qa="btn-submit"]',
+    'button[aria-label="Submit application"]',
+    'button[aria-label="Submit"]',
+  ];
+
+  for (const sel of selectors) {
+    const btn = document.querySelector(sel) as HTMLElement;
+    if (btn && btn.offsetParent !== null) return btn;
+  }
+
+  // Fallback: find button with submit/apply text
+  const allButtons = document.querySelectorAll('button, input[type="submit"], a.btn');
+  for (const btn of allButtons) {
+    const text = btn.textContent?.toLowerCase().trim() || '';
+    if ((text.includes('submit') || text.includes('apply') || text.includes('send application')) &&
+        !text.includes('cancel') && !text.includes('back') &&
+        (btn as HTMLElement).offsetParent !== null) {
+      return btn as HTMLElement;
+    }
+  }
+
+  return null;
+}
+
+function reportCompletion(status: string) {
+  send({
+    type: 'PAGE_AUTOFILL_COMPLETE',
+    payload: { status, jobId: autoApplyJobId, url: location.href },
+  });
+}
+
+function randomDelay(min: number, max: number): Promise<void> {
+  const ms = min + Math.random() * (max - min);
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function isAlreadyFilled(el: HTMLElement): boolean {
@@ -127,9 +262,9 @@ function showControlBar() {
   });
 }
 
-function updateControlBar(filled: number, total: number) {
+function updateControlBar(filled: number, total: number, message?: string) {
   const el = document.getElementById('ua-fill-status');
-  if (el) el.textContent = `${filled}/${total} fields filled`;
+  if (el) el.textContent = message || `${filled}/${total} fields filled`;
 }
 
 function removeControlBar() {
@@ -143,7 +278,6 @@ document.addEventListener('focusin', async (e) => {
   const el = e.target as HTMLElement;
   if (!isTextareaLike(el)) return;
 
-  // Get label/question for this field
   const label = getFieldLabel(el);
   if (!label) return;
 
@@ -154,7 +288,6 @@ document.addEventListener('focusin', async (e) => {
 }, true);
 
 document.addEventListener('focusout', (e) => {
-  // Delay removal to allow click on suggestion
   setTimeout(() => {
     const overlay = document.getElementById('ua-suggestion-overlay');
     if (overlay && !overlay.matches(':hover')) overlay.remove();
@@ -165,7 +298,6 @@ function isTextareaLike(el: HTMLElement): boolean {
   if (el instanceof HTMLTextAreaElement) return true;
   if (el.contentEditable === 'true') return true;
   if (el instanceof HTMLInputElement && el.type === 'text') {
-    // Heuristic: if the field seems to expect a long answer
     const label = getFieldLabel(el);
     if (label && label.length > 30) return true;
   }
@@ -173,7 +305,6 @@ function isTextareaLike(el: HTMLElement): boolean {
 }
 
 function getFieldLabel(el: HTMLElement): string | null {
-  // Check label
   if (el.id) {
     const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     if (lbl?.textContent?.trim()) return lbl.textContent.trim();
@@ -188,7 +319,6 @@ function getFieldLabel(el: HTMLElement): string | null {
 }
 
 function showSuggestionOverlay(target: HTMLElement, suggestions: any[], label: string) {
-  // Remove existing
   document.getElementById('ua-suggestion-overlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -219,7 +349,6 @@ function showSuggestionOverlay(target: HTMLElement, suggestions: any[], label: s
   overlay.innerHTML = html;
   document.body.appendChild(overlay);
 
-  // Event handlers
   overlay.querySelector('#ua-close-overlay')?.addEventListener('click', () => overlay.remove());
 
   overlay.querySelectorAll('.ua-suggestion-insert').forEach((btn) => {
