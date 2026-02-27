@@ -35,6 +35,7 @@
 
   /* ── 1b. Intercept "Start Applying" button to check CSV jobs first ── */
   let _startBtnIntercepted = false;
+  let _applyClickCooldown = false; // prevents double-click / multiple tabs
   function interceptStartApplying() {
     if (_startBtnIntercepted) return;
     // Find OptimHire's "Start Applying" button (React-rendered inside #__plasmo)
@@ -45,6 +46,23 @@
         _startBtnIntercepted = true;
         // Add a capture-phase listener that fires BEFORE React's listener
         btn.addEventListener('click', async (e) => {
+          // ── Double-click guard: prevent multiple rapid clicks ──
+          if (_applyClickCooldown) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            console.log('[OH-SidepanelPatch] Start Applying click blocked — cooldown active');
+            return false;
+          }
+          _applyClickCooldown = true;
+          // Disable visually and re-enable after 5s
+          btn.style.opacity = '0.5';
+          btn.style.pointerEvents = 'none';
+          setTimeout(() => {
+            _applyClickCooldown = false;
+            btn.style.opacity = '';
+            btn.style.pointerEvents = '';
+          }, 5000);
+
           // Check if there are pending CSV jobs in our queue
           try {
             const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
