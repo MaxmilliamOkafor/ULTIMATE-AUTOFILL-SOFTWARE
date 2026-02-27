@@ -146,6 +146,8 @@
   const acctEmail = document.getElementById('ohAcctEmail');
   const acctPassword = document.getElementById('ohAcctPassword');
   const acctSaved = document.getElementById('ohAcctSaved');
+  const acctSaveBtn = document.getElementById('ohAcctSaveBtn');
+  const pwToggle = document.getElementById('ohPwToggle');
   let _acctSaveTimer = null;
 
   // Load saved values
@@ -154,23 +156,45 @@
     if (acctPassword && data.appAccountPassword) acctPassword.value = data.appAccountPassword;
   });
 
-  function saveAccountDebounced() {
+  async function saveAccountNow() {
     clearTimeout(_acctSaveTimer);
-    _acctSaveTimer = setTimeout(async () => {
-      const email = acctEmail?.value?.trim() || '';
-      const password = acctPassword?.value || '';
-      await ST.set({ appAccountEmail: email, appAccountPassword: password });
-      // Show "Saved" indicator briefly
-      if (acctSaved) {
-        acctSaved.classList.add('show');
-        setTimeout(() => acctSaved.classList.remove('show'), 2000);
-      }
-      console.log('[OH-SidepanelPatch] Applications Account saved');
-    }, 800);
+    const email = acctEmail?.value?.trim() || '';
+    const password = acctPassword?.value || '';
+    await ST.set({ appAccountEmail: email, appAccountPassword: password });
+    if (acctSaved) {
+      acctSaved.classList.add('show');
+      setTimeout(() => acctSaved.classList.remove('show'), 2500);
+    }
+    console.log('[OH-SidepanelPatch] Applications Account saved');
   }
 
-  if (acctEmail) acctEmail.addEventListener('input', saveAccountDebounced);
-  if (acctPassword) acctPassword.addEventListener('input', saveAccountDebounced);
+  function saveAccountDebounced() {
+    clearTimeout(_acctSaveTimer);
+    _acctSaveTimer = setTimeout(saveAccountNow, 800);
+  }
+
+  // Save on typing (debounced), on blur (immediate), and on Save button click
+  if (acctEmail) {
+    acctEmail.addEventListener('input', saveAccountDebounced);
+    acctEmail.addEventListener('blur', saveAccountNow);
+  }
+  if (acctPassword) {
+    acctPassword.addEventListener('input', saveAccountDebounced);
+    acctPassword.addEventListener('blur', saveAccountNow);
+  }
+  if (acctSaveBtn) {
+    acctSaveBtn.addEventListener('click', saveAccountNow);
+  }
+
+  // Show/hide password toggle
+  if (pwToggle && acctPassword) {
+    pwToggle.addEventListener('click', () => {
+      const isHidden = acctPassword.type === 'password';
+      acctPassword.type = isHidden ? 'text' : 'password';
+      pwToggle.textContent = isHidden ? '\uD83D\uDE48' : '\uD83D\uDC41';
+      pwToggle.title = isHidden ? 'Hide password' : 'Show password';
+    });
+  }
 
   /* ── 3. CSV Import Section ── */
   const csvHeader = document.getElementById('csvToggleHeader');

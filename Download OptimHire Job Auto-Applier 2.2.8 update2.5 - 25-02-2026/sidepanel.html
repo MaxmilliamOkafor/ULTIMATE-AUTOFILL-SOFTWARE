@@ -335,6 +335,53 @@
     .oh-account-saved.show {
       opacity: 1
     }
+
+    .oh-account-pw-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .oh-pw-toggle {
+      background: none;
+      border: 1px solid #2d2f3a;
+      border-radius: 6px;
+      color: #6b7280;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px 7px;
+      line-height: 1;
+      transition: color .15s, border-color .15s;
+    }
+
+    .oh-pw-toggle:hover {
+      color: #a5b4fc;
+      border-color: #6366f1;
+    }
+
+    .oh-account-save-btn {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      padding: 5px 0;
+      border: none;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .oh-account-save-btn:hover {
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .oh-account-save-btn:active {
+      transform: scale(.97);
+    }
   </style>
 </head>
 
@@ -395,10 +442,12 @@
       <div class="oh-account-row">
         <input type="email" class="oh-account-input" id="ohAcctEmail" placeholder="Email for application accounts">
       </div>
-      <div class="oh-account-row">
+      <div class="oh-account-row oh-account-pw-row">
         <input type="password" class="oh-account-input" id="ohAcctPassword"
           placeholder="Password for application accounts">
+        <button type="button" class="oh-pw-toggle" id="ohPwToggle" title="Show/Hide password">👁</button>
       </div>
+      <button type="button" class="oh-account-save-btn" id="ohAcctSaveBtn">💾 Save Credentials</button>
     </div>
 
     <!-- Auto-trigger toggle -->
