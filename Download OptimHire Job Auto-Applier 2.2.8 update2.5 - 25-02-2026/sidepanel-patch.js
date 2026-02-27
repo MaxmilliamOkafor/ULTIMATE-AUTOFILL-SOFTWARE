@@ -127,6 +127,51 @@
     });
   }
 
+  /* ── 2b. Auto-skip countdown banner ── */
+  const skipBanner = document.getElementById('ohAutoSkipBanner');
+  const skipSeconds = document.getElementById('ohSkipSeconds');
+
+  function showSkipCountdown(seconds) {
+    if (!skipBanner || !skipSeconds) return;
+    skipSeconds.textContent = seconds;
+    skipBanner.classList.add('visible');
+  }
+
+  function hideSkipCountdown() {
+    if (!skipBanner) return;
+    skipBanner.classList.remove('visible');
+  }
+
+  /* ── 2c. Applications Account persistence ── */
+  const acctEmail = document.getElementById('ohAcctEmail');
+  const acctPassword = document.getElementById('ohAcctPassword');
+  const acctSaved = document.getElementById('ohAcctSaved');
+  let _acctSaveTimer = null;
+
+  // Load saved values
+  ST.get(['appAccountEmail', 'appAccountPassword']).then(data => {
+    if (acctEmail && data.appAccountEmail) acctEmail.value = data.appAccountEmail;
+    if (acctPassword && data.appAccountPassword) acctPassword.value = data.appAccountPassword;
+  });
+
+  function saveAccountDebounced() {
+    clearTimeout(_acctSaveTimer);
+    _acctSaveTimer = setTimeout(async () => {
+      const email = acctEmail?.value?.trim() || '';
+      const password = acctPassword?.value || '';
+      await ST.set({ appAccountEmail: email, appAccountPassword: password });
+      // Show "Saved" indicator briefly
+      if (acctSaved) {
+        acctSaved.classList.add('show');
+        setTimeout(() => acctSaved.classList.remove('show'), 2000);
+      }
+      console.log('[OH-SidepanelPatch] Applications Account saved');
+    }, 800);
+  }
+
+  if (acctEmail) acctEmail.addEventListener('input', saveAccountDebounced);
+  if (acctPassword) acctPassword.addEventListener('input', saveAccountDebounced);
+
   /* ── 3. CSV Import Section ── */
   const csvHeader = document.getElementById('csvToggleHeader');
   const csvSection = document.getElementById('csvSection');
@@ -394,10 +439,20 @@
       refreshBadge();
       renderJobList();
     }
+    /* ── Auto-skip countdown from content script ── */
+    if (msg?.type === 'SIDEBAR_STATUS' && msg?.event === 'auto_skip_countdown') {
+      const secs = msg.seconds;
+      if (typeof secs === 'number' && secs >= 0) {
+        showSkipCountdown(secs);
+        if (secs <= 0) {
+          setTimeout(hideSkipCountdown, 1500);
+        }
+      }
+    }
   });
 
   // Periodic badge + list refresh
   setInterval(() => { refreshBadge(); renderJobList(); }, 5000);
 
-  console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue)');
+  console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue + auto-skip countdown + app account)');
 })();

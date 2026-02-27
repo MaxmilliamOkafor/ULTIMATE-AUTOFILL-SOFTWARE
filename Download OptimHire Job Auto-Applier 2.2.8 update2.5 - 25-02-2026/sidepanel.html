@@ -229,18 +229,125 @@
       transition: transform .2s
     }
 
-    .csv-section.open~.csv-header .csv-header-arrow,
     .csv-header.expanded .csv-header-arrow {
       transform: rotate(180deg)
+    }
+
+    /* Auto-skip countdown banner */
+    .oh-skip-banner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 999999;
+      padding: 10px 16px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
+      animation: ohSkipPulse 1s ease-in-out infinite;
+    }
+
+    .oh-skip-banner.visible {
+      display: block
+    }
+
+    .oh-skip-banner .oh-skip-seconds {
+      display: inline-block;
+      min-width: 18px;
+      font-size: 18px;
+      font-weight: 900;
+      margin: 0 4px;
+    }
+
+    @keyframes ohSkipPulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.85
+      }
+    }
+
+    /* Application Account settings */
+    .oh-account-section {
+      padding: 8px 14px;
+      border-bottom: 1px solid #1e2030;
+    }
+
+    .oh-account-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #a5b4fc;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .oh-account-desc {
+      font-size: 9.5px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .oh-account-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .oh-account-input {
+      flex: 1;
+      padding: 5px 8px;
+      background: #1a1e2e;
+      border: 1px solid #2d2f3a;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .oh-account-input:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    .oh-account-input::placeholder {
+      color: #4b5563;
+    }
+
+    .oh-account-saved {
+      font-size: 9px;
+      color: #4ade80;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .oh-account-saved.show {
+      opacity: 1
     }
   </style>
 </head>
 
 <body>
+  <!-- Auto-skip countdown banner (shown after successful submission) -->
+  <div class="oh-skip-banner" id="ohAutoSkipBanner" data-oh-patch>
+    ✅ Application submitted! Auto skip in <span class="oh-skip-seconds" id="ohSkipSeconds">5</span>s...
+  </div>
+
   <div id="__plasmo"></div>
   <script src="/sidepanel.b7741352.js" defer></script>
 
-  <!-- ═══ Bottom Bar: CSV Import + Toggle ═══ -->
+  <!-- ═══ Bottom Bar: CSV Import + App Account + Toggle ═══ -->
   <div class="oh-bottom-bar">
     <!-- CSV toggle header -->
     <div class="csv-header" id="csvToggleHeader">
@@ -261,7 +368,7 @@
           📄 CSV File
           <input type="file" accept=".csv,.txt" class="csv-file-input" id="csvFileInput">
         </label>
-        <button class="csv-start-btn" id="csvStartBtn">⚡ Add to Queue & Start</button>
+        <button class="csv-start-btn" id="csvStartBtn">⚡ Add to Queue &amp; Start</button>
       </div>
       <div class="csv-counter" id="csvStatus"></div>
 
@@ -276,6 +383,21 @@
             Delete Selected</button>
         </div>
         <div id="csvJobItems"></div>
+      </div>
+    </div>
+
+    <!-- Applications Account settings -->
+    <div class="oh-account-section">
+      <div class="oh-account-title">🔑 Applications Account <span class="oh-account-saved" id="ohAcctSaved">✓
+          Saved</span></div>
+      <div class="oh-account-desc">This password will be used to create new accounts on application sites. This is not a
+        secure practice but can be used to improve speed and efficiency when filling applications.</div>
+      <div class="oh-account-row">
+        <input type="email" class="oh-account-input" id="ohAcctEmail" placeholder="Email for application accounts">
+      </div>
+      <div class="oh-account-row">
+        <input type="password" class="oh-account-input" id="ohAcctPassword"
+          placeholder="Password for application accounts">
       </div>
     </div>
 

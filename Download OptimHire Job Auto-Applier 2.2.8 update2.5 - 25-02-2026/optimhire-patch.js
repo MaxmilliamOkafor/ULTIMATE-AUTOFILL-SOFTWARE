@@ -949,6 +949,13 @@
     const p = await getProfile();
     const acct = await getAppAccount();
 
+    /* ── Step 0: Apply → Apply Manually flow ─────────────────
+     * On Workday job detail pages, click "Apply" button first,
+     * then "Apply Manually" to start the application form.
+     * This handles the 2-step entry that Workday uses.
+     * ──────────────────────────────────────────────────────── */
+    await workdayApplyButtonFlow();
+
     /* Step 1: Account creation / sign-in flow */
     await workdayAccountFlow(p, acct);
 
@@ -1009,6 +1016,72 @@
       .filter(cb => !cb.checked).forEach(cb => realClick(cb));
 
     LOG('Workday autofill done');
+  }
+
+  /* ── Workday: Apply → Apply Manually button flow ──────────
+   * Detects Workday job detail page and clicks through:
+   * 1. "Apply" button → opens apply options
+   * 2. "Apply Manually" button → starts the application form
+   * This is the standard Workday entry flow.
+   * ────────────────────────────────────────────────────────── */
+  let _wdApplyFlowDone = false;
+  async function workdayApplyButtonFlow() {
+    if (_wdApplyFlowDone) return;
+
+    /* Step 1: Click the primary "Apply" button */
+    const applySelectors = [
+      '[data-automation-id="applyButton"]',
+      '[data-automation-id="jobAction-apply"]',
+      'button[data-automation-id="applyBtn"]',
+      'a[data-automation-id*="apply"]',
+    ];
+    let applyBtn = null;
+    for (const sel of applySelectors) {
+      applyBtn = $(sel);
+      if (applyBtn && isVisible(applyBtn)) break;
+      applyBtn = null;
+    }
+    // Fallback: find button by text content
+    if (!applyBtn) {
+      applyBtn = $$('button, a[role="button"], a').find(el => {
+        if (!isVisible(el)) return false;
+        const t = (el.textContent || '').trim().toLowerCase();
+        return t === 'apply' || t === 'apply now';
+      });
+    }
+    if (applyBtn) {
+      LOG('Workday: Clicking Apply button');
+      realClick(applyBtn);
+      await sleep(2000); // Wait for apply options to appear
+    }
+
+    /* Step 2: Click "Apply Manually" if it appears */
+    const manualSelectors = [
+      '[data-automation-id="applyManually"]',
+      '[data-automation-id="applyManuallyButton"]',
+      '[data-automation-id="manuallyApply"]',
+    ];
+    let manualBtn = null;
+    for (const sel of manualSelectors) {
+      manualBtn = $(sel);
+      if (manualBtn && isVisible(manualBtn)) break;
+      manualBtn = null;
+    }
+    // Fallback: find by text
+    if (!manualBtn) {
+      manualBtn = $$('button, a[role="button"], a').find(el => {
+        if (!isVisible(el)) return false;
+        const t = (el.textContent || '').trim().toLowerCase();
+        return t.includes('apply manually') || t.includes('manual apply');
+      });
+    }
+    if (manualBtn) {
+      LOG('Workday: Clicking Apply Manually');
+      realClick(manualBtn);
+      await sleep(3000); // Wait for application form to load
+    }
+
+    _wdApplyFlowDone = true;
   }
 
   async function workdayAccountFlow(p, acct) {
@@ -1393,40 +1466,108 @@
       '/complete', '/submitted', '/application-submitted',
       '/applied', '/done', '/thank_you',
     ];
+
+    /* ── HARDENED success detection ─────────────────────────────
+     * v4.1 fix: Scope text checks to MAIN PAGE CONTENT only.
+     * Exclude extension UI (sidebar, patch banners) which inject
+     * "application submitted" text and cause false positives.
+     * Also require a minimum 2s after page load before checking text.
+     * ─────────────────────────────────────────────────────────── */
+    const _pageLoadTs = Date.now();
+    let _submitClickedTs = 0; // set when submit is clicked
+    const _initialUrl = location.href;
+
+    function getPageTextExcludingExtension() {
+      // Clone body, remove extension elements, get text
+      const exclusions = '#__plasmo,.oh-bottom-bar,[data-oh-patch],#oh-autofill-banner,#ohAutoSkipBanner';
+      const elements = document.querySelectorAll(
+        'main, article, form, [role="main"], .content, .application, #content, #main, #app'
+      );
+      let text = '';
+      if (elements.length > 0) {
+        // Use main content areas only
+        elements.forEach(el => {
+          const clone = el.cloneNode(true);
+          clone.querySelectorAll(exclusions).forEach(x => x.remove());
+          text += ' ' + clone.textContent;
+        });
+      } else {
+        // Fallback: use body but strip extension elements
+        const clone = document.body.cloneNode(true);
+        clone.querySelectorAll(exclusions).forEach(x => x.remove());
+        text = clone.textContent;
+      }
+      return (text || '').toLowerCase();
+    }
+
     const checkSuccess = () => {
+      if (reported) return;
+      // Don't run checks within first 2s of page load to avoid race conditions
+      if (Date.now() - _pageLoadTs < 2000) return;
+
       const href = location.href.toLowerCase();
-      if (successPatterns.some(p => href.includes(p))) { report('done'); return; }
-      const body = document.body?.textContent?.toLowerCase() || '';
+      // URL-based detection (most reliable)
+      if (successPatterns.some(p => href.includes(p))) {
+        LOG('Success detected via URL pattern:', href);
+        report('done'); return;
+      }
+
+      // Text-based detection — use SCOPED page text (excludes extension UI)
+      const body = getPageTextExcludingExtension();
       if (/application submitted|thank you for applying|application received|we.ve received your|your application has been|successfully submitted|application complete|thanks for applying|we have received|application was submitted/i.test(body)) {
+        LOG('Success detected via page text');
         report('done');
+        return;
       }
       // Greenhouse-specific success
       if (document.querySelector('#application_confirmation,.application-confirmation,.confirmation-text')) {
+        LOG('Success detected via Greenhouse confirmation element');
         report('done');
+        return;
       }
       // Lever-specific success
       if (document.querySelector('.posting-confirmation,.application-confirmation')) {
+        LOG('Success detected via Lever confirmation element');
         report('done');
+        return;
       }
       // Workday: success screen detection
       if (document.querySelector('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"]')) {
+        LOG('Success detected via Workday confirmation element');
         report('done');
+        return;
+      }
+      // URL changed after submit click = likely success (redirect to thank-you)
+      if (_submitClickedTs > 0 && location.href !== _initialUrl && (Date.now() - _submitClickedTs > 2000)) {
+        const newPath = location.pathname.toLowerCase();
+        // Only count as success if the new URL doesn't look like another form page
+        if (!/\/apply|\/step|\/page\d|\/form/i.test(newPath)) {
+          LOG('Success detected via URL change after submit:', location.href);
+          report('done');
+          return;
+        }
       }
       // Already-applied detection — prevents freezing on duplicate jobs
       if (/already applied|already submitted|you.ve applied|you have already|previously applied|duplicate application/i.test(body)) {
+        LOG('Duplicate detected via page text');
         report('duplicate');
       }
     };
     new MutationObserver(checkSuccess).observe(document.body, { childList: true, subtree: true });
-    setInterval(checkSuccess, 5000);
+    setInterval(checkSuccess, 3000);
     checkSuccess();
 
     /* ── Multi-page form loop ──────────────────────────────────
      * Fill all fields → click Submit/Next → if Next, wait for page change → re-fill.
      * Handles Workday multi-step, Greenhouse, Lever, and generic multi-page forms.
      * Up to 10 pages max to prevent infinite loops.
+     *
+     * v4.1 fixes:
+     *   - Initial wait reduced from 8s → 4s
+     *   - Submit wait uses smart polling (1s intervals, 15s timeout) instead of blind 20s
+     *   - Sends auto-skip countdown to sidebar for fast 5s skip after success
      * ─────────────────────────────────────────────────────────── */
-    await sleep(8000); // Initial wait for page DOM to settle (increased from 3s to prevent premature fill)
+    await sleep(4000); // Wait for page DOM to settle (reduced from 8s)
     try {
       chrome.runtime.sendMessage({
         type: 'SIDEBAR_STATUS', event: 'analyzing_form',
@@ -1451,7 +1592,7 @@
       await solveCaptcha();
 
       // 3. Wait and retry for lazy-rendered fields
-      await sleep(5000);
+      await sleep(3000);
       if (reported) break;
       await autoFillPage({ requiredOnly: false });
 
@@ -1461,14 +1602,23 @@
       const action = await tryClickSubmit();
 
       if (action === 'submitted') {
-        LOG('Submit clicked — waiting for success confirmation');
-        // Wait for success detection (checkSuccess watcher will trigger report)
-        await sleep(20000);
+        LOG('Submit clicked — smart-polling for success confirmation');
+        _submitClickedTs = Date.now();
+        // Smart polling: check every 1s for 15s max instead of blind 20s sleep
+        for (let i = 0; i < 15; i++) {
+          await sleep(1000);
+          if (reported) break;
+          checkSuccess(); // Force a check
+        }
+        if (!reported) {
+          LOG('No success confirmation after 15s — reporting done anyway (submit was clicked)');
+          report('done');
+        }
         break;
       } else if (action === 'next_page') {
         LOG('Next/Continue clicked — waiting for page transition');
         // Wait for new page content to load
-        await sleep(5000);
+        await sleep(3000);
         // Re-analyze the new page
         try {
           chrome.runtime.sendMessage({
@@ -1480,12 +1630,46 @@
         continue; // Loop back to fill the next page
       } else {
         LOG('No submit/next button — final fill attempt');
-        await sleep(3000);
+        await sleep(2000);
         await autoFillPage({ requiredOnly: false });
         const retry = await tryClickSubmit();
+        if (retry === 'submitted') {
+          _submitClickedTs = Date.now();
+          for (let i = 0; i < 10; i++) {
+            await sleep(1000);
+            if (reported) break;
+            checkSuccess();
+          }
+          if (!reported) report('done');
+        }
         if (retry) LOG(`Final attempt: ${retry}`);
         break;
       }
+    }
+
+    /* ── T2: Fast auto-skip countdown after success ─────────────
+     * Send a 5-second countdown to the sidebar, then signal completion.
+     * This replaces the old slow wait and gives the user visible feedback.
+     * ─────────────────────────────────────────────────────────── */
+    if (reported) {
+      LOG('Application completed — starting 5s auto-skip countdown');
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SIDEBAR_STATUS', event: 'auto_skip_countdown',
+          seconds: 5, url: location.href,
+        }).catch(() => { });
+      } catch (_) { }
+      // Count down 5s — the sidebar will show the visual countdown
+      for (let s = 5; s > 0; s--) {
+        await sleep(1000);
+        try {
+          chrome.runtime.sendMessage({
+            type: 'SIDEBAR_STATUS', event: 'auto_skip_countdown',
+            seconds: s - 1, url: location.href,
+          }).catch(() => { });
+        } catch (_) { }
+      }
+      LOG('Auto-skip countdown complete — advancing to next job');
     }
   }
 
