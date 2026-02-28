@@ -589,6 +589,19 @@ async function loadSettingsUI() {
   ($('sHumanPacing') as HTMLInputElement).checked = s.autoApply.humanLikePacing;
   ($('sCloseTab') as HTMLInputElement).checked = s.autoApply.closeTabAfterApply;
   ($('sRequireResume') as HTMLInputElement).checked = s.autoApply.requireResumeForSubmit;
+  ($('sUniversalForm') as HTMLInputElement).checked = s.universalFormDetection !== false;
+
+  // Tailoring settings
+  ($('sTailoringEnabled') as HTMLInputElement).checked = s.tailoring?.enabled !== false;
+  const intensitySlider = $<HTMLInputElement>('sTailoringIntensity');
+  intensitySlider.value = String(Math.round((s.tailoring?.intensity ?? 0.8) * 100));
+  $('sTailoringIntensityVal').textContent = `${intensitySlider.value}%`;
+  intensitySlider.addEventListener('input', () => {
+    $('sTailoringIntensityVal').textContent = `${intensitySlider.value}%`;
+  });
+  ($('sTailoringKeywords') as HTMLInputElement).value = (s.tailoring?.profileKeywords || []).join(', ');
+  ($('sTailoringTargetKw') as HTMLInputElement).value = (s.tailoring?.targetKeywords || []).join(', ');
+  ($('sTailoringProfile') as HTMLTextAreaElement).value = s.tailoring?.profileSummary || '';
 
   // Rate limits
   ($('sMaxHour') as HTMLInputElement).value = String(s.autoApply.rateLimit.maxPerHour);
@@ -629,6 +642,7 @@ function renderPlatformList(platforms: Record<string, boolean>) {
     { id: 'oraclecloud', name: 'Oracle Cloud HCM', domains: ['oraclecloud.com'] },
     { id: 'linkedin', name: 'LinkedIn (Non-Easy Apply)', domains: ['linkedin.com'] },
     { id: 'indeed', name: 'Indeed', domains: ['indeed.com'] },
+    { id: 'companysite', name: 'Company Career Sites (Universal)', domains: ['any career/jobs page'] },
   ];
 
   const el = $('platformList');
@@ -654,6 +668,16 @@ $('btnSaveAllSettings').addEventListener('click', async () => {
   s.autoApply.humanLikePacing = ($('sHumanPacing') as HTMLInputElement).checked;
   s.autoApply.closeTabAfterApply = ($('sCloseTab') as HTMLInputElement).checked;
   s.autoApply.requireResumeForSubmit = ($('sRequireResume') as HTMLInputElement).checked;
+  s.universalFormDetection = ($('sUniversalForm') as HTMLInputElement).checked;
+
+  // Tailoring
+  s.tailoring = s.tailoring || { enabled: true, intensity: 0.8, profileKeywords: [], targetKeywords: [], profileSummary: '' };
+  s.tailoring.enabled = ($('sTailoringEnabled') as HTMLInputElement).checked;
+  s.tailoring.intensity = parseInt(($('sTailoringIntensity') as HTMLInputElement).value) / 100;
+  s.tailoring.profileKeywords = ($('sTailoringKeywords') as HTMLInputElement).value.split(',').map((s) => s.trim()).filter(Boolean);
+  s.tailoring.targetKeywords = ($('sTailoringTargetKw') as HTMLInputElement).value.split(',').map((s) => s.trim()).filter(Boolean);
+  s.tailoring.profileSummary = ($('sTailoringProfile') as HTMLTextAreaElement).value.trim();
+
   s.autoApply.rateLimit.maxPerHour = parseInt(($('sMaxHour') as HTMLInputElement).value) || 30;
   s.autoApply.rateLimit.maxPerDay = parseInt(($('sMaxDay') as HTMLInputElement).value) || 200;
   s.autoApply.delayBetweenJobs = (parseInt(($('sDelay') as HTMLInputElement).value) || 3) * 1000;

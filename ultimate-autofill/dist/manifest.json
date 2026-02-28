@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Ultimate Autofill",
-  "version": "2.0.0",
-  "description": "Fully automatic job application autofill across all major ATS platforms. CSV import, auto-apply pipeline, unlimited credits, secure credential storage.",
+  "version": "3.0.0",
+  "description": "Universal job application autofill for ALL ATS platforms and company career sites. AI-powered response tailoring. One-click queue button. Auto-apply pipeline. Unlimited credits.",
   "permissions": [
     "storage",
     "tabs",

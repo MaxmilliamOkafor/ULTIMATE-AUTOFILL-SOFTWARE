@@ -1,14 +1,16 @@
 /**
  * Content script - runs on every page.
- * Handles autofill orchestration, ATS detection, auto-apply,
- * and MutationObserver for dynamic pages.
+ * Handles autofill orchestration, ATS detection, universal form detection,
+ * AI tailoring, one-click queue button, auto-apply, and MutationObserver
+ * for dynamic pages.
  */
 
-import type { ExtMessage, FieldMatchResult, SavedResponse, ATSType } from '../types/index';
-import { detectATS, isApplicationPage } from '../atsDetector/index';
+import type { ExtMessage, FieldMatchResult, SavedResponse, ATSType, TailoringContext } from '../types/index';
+import { detectATS, isApplicationPage, hasApplicationForm } from '../atsDetector/index';
 import { getAdapter } from '../adapters/index';
 import { matchFields } from '../fieldMatcher/index';
 import { findMatches } from '../savedResponses/matcher';
+import { extractJobContext, tailorResponse } from '../autoApply/tailoring';
 
 let isRunning = false;
 let observer: MutationObserver | null = null;
@@ -17,6 +19,9 @@ let autoSubmitEnabled = false;
 
 // Anti-loop protection: track which pages we've already auto-detected
 const autoDetectedPages = new Set<string>();
+
+// One-click button state
+let queueButtonInjected = false;
 
 // ─── Message handling from background / popup ───
 chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
@@ -52,8 +57,8 @@ async function getResponses(): Promise<SavedResponse[]> {
 }
 
 /**
- * Auto-detect ATS and immediately start autofill.
- * Called automatically when the extension detects a supported ATS page.
+ * Auto-detect ATS (or any application form) and immediately start autofill.
+ * Works on ALL supported ATS platforms AND unknown company career sites.
  */
 async function handleAutoDetectFill() {
   const pageKey = location.href;
@@ -63,7 +68,17 @@ async function handleAutoDetectFill() {
   autoDetectedPages.add(pageKey);
 
   const ats = detectATS(document);
-  if (ats.type === 'generic' || ats.confidence < 0.3) return;
+
+  // Accept known ATS, company sites, AND any page with an application form
+  const isKnownATS = ats.type !== 'generic' && ats.confidence >= 0.3;
+  const isCompanySite = ats.type === 'companysite' && ats.confidence >= 0.3;
+  const hasForm = hasApplicationForm(document);
+
+  if (!isKnownATS && !isCompanySite && !hasForm) {
+    // Still inject the one-click button if this looks remotely like a job page
+    maybeInjectQueueButton();
+    return;
+  }
 
   // Check credits (always unlimited)
   const credits = await send({ type: 'CHECK_CREDITS' });
@@ -73,6 +88,9 @@ async function handleAutoDetectFill() {
   if (!isRunning) {
     await startAutofill();
   }
+
+  // Always inject the one-click queue button on job pages
+  maybeInjectQueueButton();
 }
 
 async function startAutofill() {
@@ -85,15 +103,18 @@ async function startAutofill() {
   const adapter = getAdapter(ats.type);
   const responses = await getResponses();
 
-  // Initial fill
-  const fillResult = await fillPage(adapter, responses, ats.type);
+  // Extract job context for AI tailoring
+  const jobContext = extractJobContext(document);
+
+  // Initial fill with tailoring
+  const fillResult = await fillPage(adapter, responses, ats.type, jobContext);
 
   // Watch for dynamic changes (multi-step forms)
   observer = new MutationObserver(async (mutations) => {
     if (!isRunning) return;
     const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
     if (hasNewNodes) {
-      await fillPage(adapter, responses, ats.type);
+      await fillPage(adapter, responses, ats.type, jobContext);
     }
   });
 
@@ -111,10 +132,22 @@ function stopAutofill() {
   removeControlBar();
 }
 
-async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: SavedResponse[], atsType: ATSType): Promise<{ filled: number; total: number }> {
+async function fillPage(
+  adapter: ReturnType<typeof getAdapter>,
+  responses: SavedResponse[],
+  atsType: ATSType,
+  jobContext: TailoringContext,
+): Promise<{ filled: number; total: number }> {
   const fields = adapter.getFields(document);
   const domain = location.hostname;
   const matches = matchFields(fields, responses, { domain, atsType });
+
+  // Load tailoring settings
+  let tailoringSettings: any = null;
+  try {
+    const settingsR = await send({ type: 'GET_SETTINGS' });
+    if (settingsR?.ok) tailoringSettings = settingsR.data?.tailoring;
+  } catch {}
 
   let filled = 0;
   for (const match of matches) {
@@ -124,7 +157,15 @@ async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: Saved
     // Human-like pacing: small random delay between fields
     await randomDelay(50, 200);
 
-    const ok = await adapter.fillField(match.field, match.response.response);
+    // ─── AI Tailoring: tailor the response to fit the job context ───
+    let responseText = match.response.response;
+    if (tailoringSettings?.enabled && jobContext.jobTitle) {
+      const fieldLabel = match.signals.find((s) => s.source === 'label-for' || s.source === 'label-wrap' || s.source === 'aria-label')?.value || '';
+      const tailored = tailorResponse(responseText, fieldLabel, jobContext, tailoringSettings);
+      responseText = tailored.tailoredResponse;
+    }
+
+    const ok = await adapter.fillField(match.field, responseText);
     if (ok) {
       filled++;
       match.field.classList.add('ua-filled');
@@ -199,6 +240,9 @@ function findSubmitButton(): HTMLElement | null {
     '[data-qa="btn-submit"]',
     'button[aria-label="Submit application"]',
     'button[aria-label="Submit"]',
+    'button[aria-label="Apply"]',
+    '[data-testid="submit-button"]',
+    '[data-testid="apply-button"]',
   ];
 
   for (const sel of selectors) {
@@ -269,6 +313,169 @@ function updateControlBar(filled: number, total: number, message?: string) {
 
 function removeControlBar() {
   document.getElementById('ua-control-bar')?.remove();
+}
+
+// ═══════════════════════════════════════════════
+//  ONE-CLICK "ADD TO QUEUE" BUTTON
+//  Injected as a floating button on any job page
+// ═══════════════════════════════════════════════
+
+function maybeInjectQueueButton() {
+  if (queueButtonInjected) return;
+
+  // Check if this page looks like a job listing/posting (not necessarily an application form)
+  const url = location.href.toLowerCase();
+  const title = document.title.toLowerCase();
+  const h1 = document.querySelector('h1')?.textContent?.toLowerCase() || '';
+  const combined = url + ' ' + title + ' ' + h1;
+
+  const isJobPage = /job|career|position|opening|apply|hiring|vacancy|recruit|opportunity/i.test(combined);
+  const isAppPage = isApplicationPage(document);
+
+  if (!isJobPage && !isAppPage) return;
+
+  queueButtonInjected = true;
+  injectQueueButton();
+}
+
+function injectQueueButton() {
+  // Remove if already exists
+  document.getElementById('ua-queue-btn-wrapper')?.remove();
+
+  const wrapper = document.createElement('div');
+  wrapper.id = 'ua-queue-btn-wrapper';
+  wrapper.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 2147483647;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  `;
+
+  // Main "Add to Queue" button
+  const btn = document.createElement('button');
+  btn.id = 'ua-add-queue-btn';
+  btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+  btn.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    transition: all 0.2s ease;
+    font-family: inherit;
+  `;
+  btn.addEventListener('mouseenter', () => {
+    btn.style.transform = 'scale(1.05)';
+    btn.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.transform = 'scale(1)';
+    btn.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)';
+  });
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.innerHTML = '<span style="font-size:14px;">&#8987;</span> Adding...';
+
+    try {
+      // Extract job info from the page
+      const jobContext = extractJobContext(document);
+
+      const r = await send({
+        type: 'ADD_CURRENT_PAGE_TO_QUEUE',
+        payload: {
+          url: location.href,
+          company: jobContext.companyName || undefined,
+          role: jobContext.jobTitle || undefined,
+          source: 'one_click',
+        },
+      });
+
+      if (r?.ok) {
+        btn.innerHTML = '<span style="font-size:16px;">&#10003;</span> Added!';
+        btn.style.background = 'linear-gradient(135deg, #28a745, #20c997)';
+
+        // Show toast
+        showQueueToast(`Added to queue: ${jobContext.jobTitle || location.href.substring(0, 50)}...`);
+
+        // Reset after 3 seconds
+        setTimeout(() => {
+          btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+          btn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+          btn.disabled = false;
+        }, 3000);
+      } else {
+        btn.innerHTML = `<span style="font-size:16px;">&#10007;</span> ${r?.error || 'Already in queue'}`;
+        btn.style.background = '#dc3545';
+        setTimeout(() => {
+          btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+          btn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+          btn.disabled = false;
+        }, 2000);
+      }
+    } catch (e) {
+      btn.innerHTML = `<span style="font-size:16px;">&#10007;</span> Error`;
+      setTimeout(() => {
+        btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+        btn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+        btn.disabled = false;
+      }, 2000);
+    }
+  });
+
+  wrapper.appendChild(btn);
+  document.body.appendChild(wrapper);
+}
+
+function showQueueToast(message: string) {
+  const existing = document.getElementById('ua-queue-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'ua-queue-toast';
+  toast.textContent = message;
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 80px;
+    right: 24px;
+    z-index: 2147483647;
+    padding: 12px 20px;
+    background: #343a40;
+    color: #fff;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+  `;
+  document.body.appendChild(toast);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  });
+
+  // Remove after 3 seconds
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(10px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 // ─── Overlay for textarea / question suggestions ───
@@ -386,3 +593,9 @@ function escapeHtml(s: string): string {
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// ─── Auto-inject queue button on page load for job pages ───
+// Run after a short delay to let the page render
+setTimeout(() => {
+  maybeInjectQueueButton();
+}, 1500);

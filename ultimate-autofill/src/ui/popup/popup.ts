@@ -38,8 +38,18 @@ async function init() {
       if (d.type !== 'generic' && d.confidence > 0.3) {
         const info = $('atsInfo');
         info.style.display = 'block';
-        info.textContent = `Detected ATS: ${d.type} (${(d.confidence * 100).toFixed(0)}% confidence)`;
+        const atsLabel = d.type === 'companysite' ? 'Company Career Site' : d.type;
+        info.textContent = `Detected: ${atsLabel} (${(d.confidence * 100).toFixed(0)}% confidence) — All forms supported`;
       }
+    }
+  } catch {}
+
+  // Show AI tailoring badge
+  try {
+    const tr = await send({ type: 'GET_TAILORING_STATUS' });
+    if (tr?.ok && tr.data?.enabled) {
+      $('tailoringBadge').style.display = 'block';
+      $('tailoringStatus').textContent = `Active — ${Math.round(tr.data.intensity * 100)}% intensity`;
     }
   } catch {}
 

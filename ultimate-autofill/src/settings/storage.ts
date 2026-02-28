@@ -3,7 +3,7 @@
  * Handles all global settings including auto-apply, scraper, and credentials.
  */
 
-import type { ExtensionSettings, AutoApplySettings, ScraperSettings, ApplicationsAccount } from '../types/index';
+import type { ExtensionSettings, AutoApplySettings, ScraperSettings, TailoringSettings, ApplicationsAccount } from '../types/index';
 import { encrypt, decrypt } from '../utils/crypto';
 
 const KEY = 'ua_settings';
@@ -47,17 +47,29 @@ function defaultScraper(): ScraperSettings {
   };
 }
 
+function defaultTailoring(): TailoringSettings {
+  return {
+    enabled: true,
+    intensity: 0.8,               // High tailoring by default
+    profileKeywords: [],
+    targetKeywords: [],
+    profileSummary: '',
+  };
+}
+
 function defaultSettings(): ExtensionSettings {
   return {
     autoApply: defaultAutoApply(),
     scraper: defaultScraper(),
+    tailoring: defaultTailoring(),
     applicationsAccount: null,
     creditsUnlimited: true,      // Unlimited credits by default
     autoDetectAndFill: true,     // Auto-detect ATS and fill on page load
+    universalFormDetection: true, // Detect ALL forms, not just known ATS
     supportedPlatforms: {
       workday: true, greenhouse: true, lever: true, smartrecruiters: true,
       icims: true, taleo: true, ashby: true, bamboohr: true,
-      oraclecloud: true, linkedin: true, indeed: true,
+      oraclecloud: true, linkedin: true, indeed: true, companysite: true,
     },
   };
 }
@@ -73,6 +85,7 @@ export async function loadSettings(): Promise<ExtensionSettings> {
     ...saved,
     autoApply: { ...defaults.autoApply, ...saved.autoApply },
     scraper: { ...defaults.scraper, ...saved.scraper, filters: { ...defaults.scraper.filters, ...(saved.scraper?.filters || {}) } },
+    tailoring: { ...defaults.tailoring, ...(saved.tailoring || {}) },
     supportedPlatforms: { ...defaults.supportedPlatforms, ...saved.supportedPlatforms },
   };
 }

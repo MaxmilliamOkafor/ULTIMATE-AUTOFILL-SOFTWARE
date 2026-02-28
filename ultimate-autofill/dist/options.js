@@ -614,6 +614,17 @@
     $("sHumanPacing").checked = s.autoApply.humanLikePacing;
     $("sCloseTab").checked = s.autoApply.closeTabAfterApply;
     $("sRequireResume").checked = s.autoApply.requireResumeForSubmit;
+    $("sUniversalForm").checked = s.universalFormDetection !== false;
+    $("sTailoringEnabled").checked = s.tailoring?.enabled !== false;
+    const intensitySlider = $("sTailoringIntensity");
+    intensitySlider.value = String(Math.round((s.tailoring?.intensity ?? 0.8) * 100));
+    $("sTailoringIntensityVal").textContent = `${intensitySlider.value}%`;
+    intensitySlider.addEventListener("input", () => {
+      $("sTailoringIntensityVal").textContent = `${intensitySlider.value}%`;
+    });
+    $("sTailoringKeywords").value = (s.tailoring?.profileKeywords || []).join(", ");
+    $("sTailoringTargetKw").value = (s.tailoring?.targetKeywords || []).join(", ");
+    $("sTailoringProfile").value = s.tailoring?.profileSummary || "";
     $("sMaxHour").value = String(s.autoApply.rateLimit.maxPerHour);
     $("sMaxDay").value = String(s.autoApply.rateLimit.maxPerDay);
     $("sDelay").value = String(s.autoApply.delayBetweenJobs / 1e3);
@@ -642,7 +653,8 @@
       { id: "bamboohr", name: "BambooHR", domains: ["bamboohr.com"] },
       { id: "oraclecloud", name: "Oracle Cloud HCM", domains: ["oraclecloud.com"] },
       { id: "linkedin", name: "LinkedIn (Non-Easy Apply)", domains: ["linkedin.com"] },
-      { id: "indeed", name: "Indeed", domains: ["indeed.com"] }
+      { id: "indeed", name: "Indeed", domains: ["indeed.com"] },
+      { id: "companysite", name: "Company Career Sites (Universal)", domains: ["any career/jobs page"] }
     ];
     const el = $("platformList");
     el.innerHTML = platformData.map((p) => `
@@ -664,6 +676,13 @@
     s.autoApply.humanLikePacing = $("sHumanPacing").checked;
     s.autoApply.closeTabAfterApply = $("sCloseTab").checked;
     s.autoApply.requireResumeForSubmit = $("sRequireResume").checked;
+    s.universalFormDetection = $("sUniversalForm").checked;
+    s.tailoring = s.tailoring || { enabled: true, intensity: 0.8, profileKeywords: [], targetKeywords: [], profileSummary: "" };
+    s.tailoring.enabled = $("sTailoringEnabled").checked;
+    s.tailoring.intensity = parseInt($("sTailoringIntensity").value) / 100;
+    s.tailoring.profileKeywords = $("sTailoringKeywords").value.split(",").map((s2) => s2.trim()).filter(Boolean);
+    s.tailoring.targetKeywords = $("sTailoringTargetKw").value.split(",").map((s2) => s2.trim()).filter(Boolean);
+    s.tailoring.profileSummary = $("sTailoringProfile").value.trim();
     s.autoApply.rateLimit.maxPerHour = parseInt($("sMaxHour").value) || 30;
     s.autoApply.rateLimit.maxPerDay = parseInt($("sMaxDay").value) || 200;
     s.autoApply.delayBetweenJobs = (parseInt($("sDelay").value) || 3) * 1e3;

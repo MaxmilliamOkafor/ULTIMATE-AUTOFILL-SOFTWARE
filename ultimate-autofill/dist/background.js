@@ -801,15 +801,28 @@ function defaultScraper() {
     }
   };
 }
+function defaultTailoring() {
+  return {
+    enabled: true,
+    intensity: 0.8,
+    // High tailoring by default
+    profileKeywords: [],
+    targetKeywords: [],
+    profileSummary: ""
+  };
+}
 function defaultSettings() {
   return {
     autoApply: defaultAutoApply(),
     scraper: defaultScraper(),
+    tailoring: defaultTailoring(),
     applicationsAccount: null,
     creditsUnlimited: true,
     // Unlimited credits by default
     autoDetectAndFill: true,
     // Auto-detect ATS and fill on page load
+    universalFormDetection: true,
+    // Detect ALL forms, not just known ATS
     supportedPlatforms: {
       workday: true,
       greenhouse: true,
@@ -821,7 +834,8 @@ function defaultSettings() {
       bamboohr: true,
       oraclecloud: true,
       linkedin: true,
-      indeed: true
+      indeed: true,
+      companysite: true
     }
   };
 }
@@ -836,6 +850,7 @@ async function loadSettings() {
     ...saved,
     autoApply: { ...defaults.autoApply, ...saved.autoApply },
     scraper: { ...defaults.scraper, ...saved.scraper, filters: { ...defaults.scraper.filters, ...saved.scraper?.filters || {} } },
+    tailoring: { ...defaults.tailoring, ...saved.tailoring || {} },
     supportedPlatforms: { ...defaults.supportedPlatforms, ...saved.supportedPlatforms }
   };
 }
@@ -1355,6 +1370,40 @@ async function handleMessage(msg) {
     }
     case "PAGE_AUTOFILL_COMPLETE":
       return { ok: true };
+    case "ADD_CURRENT_PAGE_TO_QUEUE": {
+      const url = p?.url;
+      if (!url)
+        return { ok: false, error: "No URL provided" };
+      const existing = await getItems();
+      const normalized = normalizeUrl(url);
+      const isDuplicate = existing.some((i) => normalizeUrl(i.url) === normalized);
+      if (isDuplicate)
+        return { ok: false, error: "Already in queue" };
+      const added = await addUrls([{
+        url,
+        company: p.company || void 0,
+        role: p.role || void 0
+      }]);
+      if (added > 0 && p.source === "one_click") {
+        const items = await getItems();
+        const item = items.find((i) => normalizeUrl(i.url) === normalized);
+        if (item) {
+          item.source = "one_click";
+          const state = await loadQueue();
+          const stateItem = state.items.find((i) => i.id === item.id);
+          if (stateItem)
+            stateItem.source = "one_click";
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      }
+      return { ok: true, data: { added } };
+    }
+    case "TAILOR_RESPONSE":
+      return { ok: true };
+    case "GET_TAILORING_STATUS": {
+      const s = await loadSettings();
+      return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
+    }
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
@@ -1379,14 +1428,18 @@ chrome.runtime.onInstalled?.addListener(async () => {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete" || !tab.url)
     return;
+  if (tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://"))
+    return;
   try {
     const s = await loadSettings();
     if (!s.autoDetectAndFill)
       return;
     const url = tab.url;
-    const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
-    if (!isSupported)
-      return;
+    if (!s.universalFormDetection) {
+      const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
+      if (!isSupported)
+        return;
+    }
     try {
       await chrome.tabs.sendMessage(tabId, { type: "AUTO_DETECT_FILL" });
     } catch {

@@ -200,7 +200,147 @@
         bestSigs.push(...found);
       }
     }
+    if (best === "generic" || bestConf < 0.3) {
+      const companySiteResult = detectCompanySite(doc, url);
+      if (companySiteResult.confidence > bestConf) {
+        return companySiteResult;
+      }
+    }
     return { type: best, confidence: bestConf, signals: bestSigs };
+  }
+  function detectCompanySite(doc, url) {
+    let conf = 0;
+    const signals = [];
+    const careerPatterns = [
+      /\/careers?\b/i,
+      /\/jobs?\b/i,
+      /\/apply\b/i,
+      /\/openings?\b/i,
+      /\/positions?\b/i,
+      /\/hiring\b/i,
+      /\/opportunities\b/i,
+      /\/recruit/i,
+      /\/talent\b/i,
+      /\/work-with-us/i,
+      /\/join-us/i,
+      /\/join-our-team/i,
+      /\/application\b/i
+    ];
+    for (const p of careerPatterns) {
+      if (p.test(url)) {
+        conf += 0.25;
+        signals.push(`url:career-path`);
+        break;
+      }
+    }
+    const forms = doc.querySelectorAll("form");
+    for (const form of forms) {
+      const formText = (form.textContent || "").toLowerCase();
+      const formHtml = (form.innerHTML || "").toLowerCase();
+      const appFieldCount = countApplicationFields(form);
+      if (appFieldCount >= 3) {
+        conf += 0.3;
+        signals.push(`form:${appFieldCount}-app-fields`);
+        break;
+      }
+      const action = form.getAttribute("action") || "";
+      const cls = form.className || "";
+      if (/apply|application|candidate|submit/i.test(action + " " + cls)) {
+        conf += 0.2;
+        signals.push("form:apply-action");
+      }
+    }
+    const title = doc.title.toLowerCase();
+    const h1 = doc.querySelector("h1")?.textContent?.toLowerCase() || "";
+    if (/apply|application|career|job|position|opening/i.test(title + " " + h1)) {
+      conf += 0.15;
+      signals.push("page:career-title");
+    }
+    const fileInputs = doc.querySelectorAll('input[type="file"]');
+    for (const fi of fileInputs) {
+      const accept = fi.getAttribute("accept") || "";
+      const name = fi.getAttribute("name") || "";
+      const label = getInputLabel(fi, doc);
+      if (/resume|cv|curriculum|cover/i.test(accept + " " + name + " " + label)) {
+        conf += 0.2;
+        signals.push("form:resume-upload");
+        break;
+      }
+    }
+    conf = Math.min(conf, 1);
+    if (conf >= 0.3) {
+      return { type: "companysite", confidence: conf, signals };
+    }
+    return { type: "generic", confidence: 0, signals: [] };
+  }
+  function countApplicationFields(form) {
+    const fields = form.querySelectorAll("input, textarea, select");
+    let count = 0;
+    const appFieldHints = [
+      /name/i,
+      /first/i,
+      /last/i,
+      /email/i,
+      /phone/i,
+      /resume/i,
+      /cv/i,
+      /cover/i,
+      /address/i,
+      /city/i,
+      /state/i,
+      /zip/i,
+      /country/i,
+      /experience/i,
+      /education/i,
+      /skill/i,
+      /linkedin/i,
+      /portfolio/i,
+      /website/i,
+      /salary/i,
+      /start.?date/i,
+      /authorized/i,
+      /sponsor/i,
+      /visa/i,
+      /relocat/i,
+      /referr/i
+    ];
+    for (const field of fields) {
+      const name = field.getAttribute("name") || "";
+      const id = field.getAttribute("id") || "";
+      const placeholder = field.getAttribute("placeholder") || "";
+      const label = getInputLabel(field, form.ownerDocument);
+      const combined = `${name} ${id} ${placeholder} ${label}`.toLowerCase();
+      if (appFieldHints.some((h) => h.test(combined)))
+        count++;
+    }
+    return count;
+  }
+  function getInputLabel(el, doc) {
+    if (el.id) {
+      const lbl = doc.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lbl?.textContent?.trim())
+        return lbl.textContent.trim();
+    }
+    const wrap = el.closest("label");
+    if (wrap?.textContent?.trim())
+      return wrap.textContent.trim();
+    return el.getAttribute("aria-label") || el.getAttribute("placeholder") || "";
+  }
+  function isApplicationPage(doc) {
+    const result = detectATS(doc);
+    return result.type !== "generic" && result.confidence >= 0.3;
+  }
+  function hasApplicationForm(doc) {
+    const result = detectATS(doc);
+    if (result.type !== "generic" && result.confidence >= 0.3)
+      return true;
+    const forms = doc.querySelectorAll("form");
+    for (const form of forms) {
+      const fields = form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select');
+      if (fields.length >= 2)
+        return true;
+    }
+    return false;
   }
 
   // src/utils/fuzzy.ts
@@ -1413,10 +1553,239 @@
     oraclecloud: oraclecloudAdapter,
     indeed: indeedAdapter,
     linkedin: linkedinAdapter,
+    companysite: genericAdapter,
+    // company sites use the universal generic adapter
     generic: genericAdapter
   };
   function getAdapter(type) {
     return adapters[type] || genericAdapter;
+  }
+
+  // src/autoApply/tailoring.ts
+  var SKILL_PATTERNS = [
+    // Programming languages
+    /\b(javascript|typescript|python|java|c\+\+|ruby|go|rust|swift|kotlin|scala|php|perl|r|matlab|sql|html|css)\b/gi,
+    // Frameworks
+    /\b(react|angular|vue|next\.?js|node\.?js|express|django|flask|spring|rails|laravel|\.net|asp\.net|tensorflow|pytorch)\b/gi,
+    // Cloud & DevOps
+    /\b(aws|azure|gcp|docker|kubernetes|terraform|jenkins|ci\/cd|git|github|gitlab|bitbucket)\b/gi,
+    // Databases
+    /\b(postgresql|mysql|mongodb|redis|elasticsearch|dynamodb|cassandra|sqlite|oracle|sql server)\b/gi,
+    // Soft skills & domain
+    /\b(leadership|communication|problem[- ]solving|teamwork|agile|scrum|project management|analytical|critical thinking)\b/gi
+  ];
+  var SENIORITY_PATTERNS = [
+    { pattern: /\b(senior|sr\.?|lead|principal|staff|architect)\b/i, level: "senior" },
+    { pattern: /\b(mid[- ]?level|intermediate|ii|iii)\b/i, level: "mid" },
+    { pattern: /\b(junior|jr\.?|entry[- ]?level|associate|intern|i\b)\b/i, level: "junior" },
+    { pattern: /\b(manager|director|vp|vice president|head of|chief)\b/i, level: "manager" }
+  ];
+  function extractJobContext(doc) {
+    const ctx = {};
+    const titleSelectors = [
+      "h1.job-title",
+      "h1.posting-headline",
+      'h1[class*="title"]',
+      '[data-automation-id="jobPostingHeader"]',
+      ".job-title",
+      ".posting-headline h2",
+      "h1",
+      ".topcard__title",
+      ".jobsearch-JobInfoHeader-title",
+      '[data-testid="job-title"]',
+      ".jobs-unified-top-card__job-title"
+    ];
+    for (const sel of titleSelectors) {
+      const el = doc.querySelector(sel);
+      if (el?.textContent?.trim()) {
+        ctx.jobTitle = el.textContent.trim();
+        break;
+      }
+    }
+    const companySelectors = [
+      ".company-name",
+      '[data-automation-id="company"]',
+      ".posting-categories .sort-by-team",
+      ".employer-name",
+      ".topcard__org-name-link",
+      ".jobsearch-InlineCompanyRating-companyHeader",
+      '[data-testid="company-name"]',
+      ".jobs-unified-top-card__company-name",
+      'a[data-tracking-control-name="public_jobs_topcard-org-name"]'
+    ];
+    for (const sel of companySelectors) {
+      const el = doc.querySelector(sel);
+      if (el?.textContent?.trim()) {
+        ctx.companyName = el.textContent.trim();
+        break;
+      }
+    }
+    const descSelectors = [
+      ".job-description",
+      '[data-automation-id="jobPostingDescription"]',
+      ".posting-page .section-wrapper",
+      "#job-details",
+      ".jobsearch-jobDescriptionText",
+      ".jobs-description__content",
+      '[data-testid="job-description"]',
+      ".description__text",
+      "#job_description"
+    ];
+    let descText = "";
+    for (const sel of descSelectors) {
+      const el = doc.querySelector(sel);
+      if (el?.textContent?.trim() && el.textContent.trim().length > 50) {
+        descText = el.textContent.trim();
+        ctx.jobDescription = descText;
+        break;
+      }
+    }
+    if (descText) {
+      const skills = /* @__PURE__ */ new Set();
+      for (const pat of SKILL_PATTERNS) {
+        const matches = descText.matchAll(pat);
+        for (const m of matches)
+          skills.add(m[0].toLowerCase());
+      }
+      if (skills.size > 0)
+        ctx.requiredSkills = [...skills];
+      for (const s of SENIORITY_PATTERNS) {
+        if (s.pattern.test(descText) || ctx.jobTitle && s.pattern.test(ctx.jobTitle)) {
+          ctx.seniority = s.level;
+          break;
+        }
+      }
+    }
+    const locSelectors = [
+      ".job-location",
+      '[data-automation-id="locations"]',
+      ".posting-categories .sort-by-location",
+      ".location",
+      ".topcard__flavor--bullet",
+      ".jobsearch-JobInfoHeader-subtitle > div",
+      '[data-testid="job-location"]'
+    ];
+    for (const sel of locSelectors) {
+      const el = doc.querySelector(sel);
+      if (el?.textContent?.trim()) {
+        ctx.jobLocation = el.textContent.trim();
+        break;
+      }
+    }
+    return ctx;
+  }
+  function tailorResponse(originalResponse, fieldLabel, context, settings) {
+    if (!settings.enabled || settings.intensity === 0) {
+      return {
+        originalResponse,
+        tailoredResponse: originalResponse,
+        fieldLabel,
+        confidence: 1,
+        reasoning: "Tailoring disabled"
+      };
+    }
+    let tailored = originalResponse;
+    const reasons = [];
+    let confidence = 1;
+    const lowerLabel = fieldLabel.toLowerCase();
+    const lowerResponse = tailored.toLowerCase();
+    const skipFields = ["name", "first name", "last name", "email", "phone", "address", "city", "state", "zip", "country", "salary", "date", "gender", "race", "ethnicity", "veteran", "disability"];
+    if (skipFields.some((f) => lowerLabel.includes(f)) || originalResponse.length < 20) {
+      return {
+        originalResponse,
+        tailoredResponse: originalResponse,
+        fieldLabel,
+        confidence: 1,
+        reasoning: "Field is factual/short \u2014 no tailoring needed"
+      };
+    }
+    if (context.companyName && !lowerResponse.includes(context.companyName.toLowerCase())) {
+      const companyPhrases = [
+        `I am excited about the opportunity at ${context.companyName}`,
+        `at ${context.companyName}`,
+        `with ${context.companyName}`
+      ];
+      if (lowerLabel.includes("why") || lowerLabel.includes("cover") || lowerLabel.includes("interest") || lowerLabel.includes("motivation")) {
+        tailored = tailored.replace(
+          /^(.)/,
+          `I am drawn to ${context.companyName} for its impact in the industry. $1`
+        );
+        reasons.push(`Injected company name: ${context.companyName}`);
+      } else if (lowerLabel.includes("summary") || lowerLabel.includes("about") || lowerLabel.includes("introduction") || lowerLabel.includes("tell us")) {
+        tailored = tailored.replace(/\.?\s*$/, `, and I am eager to bring this expertise to ${context.companyName}.`);
+        reasons.push(`Appended company reference: ${context.companyName}`);
+      }
+    }
+    if (context.jobTitle) {
+      const roleMention = context.jobTitle.replace(/\s*\(.*\)/, "").trim();
+      if (roleMention.length > 3 && !lowerResponse.includes(roleMention.toLowerCase())) {
+        if (lowerLabel.includes("experience") || lowerLabel.includes("background") || lowerLabel.includes("summary") || lowerLabel.includes("qualification")) {
+          tailored = tailored.replace(/\.?\s*$/, `, directly relevant to the ${roleMention} position.`);
+          reasons.push(`Added role reference: ${roleMention}`);
+        }
+      }
+    }
+    if (context.requiredSkills && context.requiredSkills.length > 0) {
+      const profileKeywords = settings.profileKeywords.map((k) => k.toLowerCase());
+      const matchingSkills = context.requiredSkills.filter(
+        (s) => profileKeywords.includes(s) || lowerResponse.includes(s)
+      );
+      const missingSkills = context.requiredSkills.filter(
+        (s) => profileKeywords.includes(s) && !lowerResponse.includes(s)
+      );
+      if (missingSkills.length > 0 && (lowerLabel.includes("skill") || lowerLabel.includes("experience") || lowerLabel.includes("qualification") || lowerLabel.includes("summary") || lowerLabel.includes("why"))) {
+        const skillList = missingSkills.slice(0, 4).join(", ");
+        tailored = tailored.replace(/\.?\s*$/, `. My experience also includes ${skillList}.`);
+        reasons.push(`Added matching skills: ${skillList}`);
+      }
+      if (matchingSkills.length > 0) {
+        reasons.push(`${matchingSkills.length} matching skills detected`);
+      }
+    }
+    if (context.seniority) {
+      const seniorityPhrases = {
+        senior: "extensive experience",
+        mid: "solid hands-on experience",
+        junior: "strong foundation and eagerness to grow",
+        manager: "proven leadership experience"
+      };
+      const phrase = seniorityPhrases[context.seniority];
+      if (phrase && (lowerLabel.includes("experience") || lowerLabel.includes("summary") || lowerLabel.includes("about"))) {
+        if (!lowerResponse.includes(phrase)) {
+          if (tailored.length > 50) {
+            tailored = tailored.replace(/^(.{0,100}?\.)/, `$1 I bring ${phrase} in this domain.`);
+            reasons.push(`Aligned seniority: ${context.seniority}`);
+          }
+        }
+      }
+    }
+    if (settings.targetKeywords.length > 0) {
+      const targetMissing = settings.targetKeywords.filter((k) => !lowerResponse.includes(k.toLowerCase()));
+      if (targetMissing.length > 0 && tailored.length > 40) {
+        const toAdd = targetMissing.slice(0, 3);
+        if (lowerLabel.includes("additional") || lowerLabel.includes("note") || lowerLabel.includes("comment") || lowerLabel.includes("summary")) {
+          tailored = tailored.replace(/\.?\s*$/, `. Key strengths: ${toAdd.join(", ")}.`);
+          reasons.push(`Target keywords added: ${toAdd.join(", ")}`);
+        }
+      }
+    }
+    if (tailored === originalResponse) {
+      return {
+        originalResponse,
+        tailoredResponse: originalResponse,
+        fieldLabel,
+        confidence: 1,
+        reasoning: "No tailoring opportunities for this field"
+      };
+    }
+    confidence = Math.max(0.7, 1 - reasons.length * 0.05);
+    return {
+      originalResponse,
+      tailoredResponse: tailored,
+      fieldLabel,
+      confidence,
+      reasoning: reasons.join("; ") || "Tailored"
+    };
   }
 
   // src/content/main.ts
@@ -1425,6 +1794,7 @@
   var autoApplyJobId = null;
   var autoSubmitEnabled = false;
   var autoDetectedPages = /* @__PURE__ */ new Set();
+  var queueButtonInjected = false;
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "START_AUTOFILL") {
       const payload = msg.payload;
@@ -1460,14 +1830,20 @@
       return;
     autoDetectedPages.add(pageKey);
     const ats = detectATS(document);
-    if (ats.type === "generic" || ats.confidence < 0.3)
+    const isKnownATS = ats.type !== "generic" && ats.confidence >= 0.3;
+    const isCompanySite = ats.type === "companysite" && ats.confidence >= 0.3;
+    const hasForm = hasApplicationForm(document);
+    if (!isKnownATS && !isCompanySite && !hasForm) {
+      maybeInjectQueueButton();
       return;
+    }
     const credits = await send({ type: "CHECK_CREDITS" });
     if (!credits?.ok || !credits.data?.unlimited && credits.data?.remaining <= 0)
       return;
     if (!isRunning) {
       await startAutofill();
     }
+    maybeInjectQueueButton();
   }
   async function startAutofill() {
     if (isRunning)
@@ -1477,13 +1853,14 @@
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
     const responses = await getResponses();
-    const fillResult = await fillPage(adapter, responses, ats.type);
+    const jobContext = extractJobContext(document);
+    const fillResult = await fillPage(adapter, responses, ats.type, jobContext);
     observer = new MutationObserver(async (mutations) => {
       if (!isRunning)
         return;
       const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
       if (hasNewNodes) {
-        await fillPage(adapter, responses, ats.type);
+        await fillPage(adapter, responses, ats.type, jobContext);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -1499,10 +1876,17 @@
     }
     removeControlBar();
   }
-  async function fillPage(adapter, responses, atsType) {
+  async function fillPage(adapter, responses, atsType, jobContext) {
     const fields = adapter.getFields(document);
     const domain = location.hostname;
     const matches = matchFields(fields, responses, { domain, atsType });
+    let tailoringSettings = null;
+    try {
+      const settingsR = await send({ type: "GET_SETTINGS" });
+      if (settingsR?.ok)
+        tailoringSettings = settingsR.data?.tailoring;
+    } catch {
+    }
     let filled = 0;
     for (const match of matches) {
       if (!isRunning)
@@ -1510,7 +1894,13 @@
       if (isAlreadyFilled(match.field))
         continue;
       await randomDelay(50, 200);
-      const ok = await adapter.fillField(match.field, match.response.response);
+      let responseText = match.response.response;
+      if (tailoringSettings?.enabled && jobContext.jobTitle) {
+        const fieldLabel = match.signals.find((s) => s.source === "label-for" || s.source === "label-wrap" || s.source === "aria-label")?.value || "";
+        const tailored = tailorResponse(responseText, fieldLabel, jobContext, tailoringSettings);
+        responseText = tailored.tailoredResponse;
+      }
+      const ok = await adapter.fillField(match.field, responseText);
       if (ok) {
         filled++;
         match.field.classList.add("ua-filled");
@@ -1562,7 +1952,10 @@
       "button.application-submit",
       '[data-qa="btn-submit"]',
       'button[aria-label="Submit application"]',
-      'button[aria-label="Submit"]'
+      'button[aria-label="Submit"]',
+      'button[aria-label="Apply"]',
+      '[data-testid="submit-button"]',
+      '[data-testid="apply-button"]'
     ];
     for (const sel of selectors) {
       const btn = document.querySelector(sel);
@@ -1621,6 +2014,140 @@
   }
   function removeControlBar() {
     document.getElementById("ua-control-bar")?.remove();
+  }
+  function maybeInjectQueueButton() {
+    if (queueButtonInjected)
+      return;
+    const url = location.href.toLowerCase();
+    const title = document.title.toLowerCase();
+    const h1 = document.querySelector("h1")?.textContent?.toLowerCase() || "";
+    const combined = url + " " + title + " " + h1;
+    const isJobPage = /job|career|position|opening|apply|hiring|vacancy|recruit|opportunity/i.test(combined);
+    const isAppPage = isApplicationPage(document);
+    if (!isJobPage && !isAppPage)
+      return;
+    queueButtonInjected = true;
+    injectQueueButton();
+  }
+  function injectQueueButton() {
+    document.getElementById("ua-queue-btn-wrapper")?.remove();
+    const wrapper = document.createElement("div");
+    wrapper.id = "ua-queue-btn-wrapper";
+    wrapper.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 2147483647;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  `;
+    const btn = document.createElement("button");
+    btn.id = "ua-add-queue-btn";
+    btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+    btn.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    transition: all 0.2s ease;
+    font-family: inherit;
+  `;
+    btn.addEventListener("mouseenter", () => {
+      btn.style.transform = "scale(1.05)";
+      btn.style.boxShadow = "0 6px 20px rgba(102, 126, 234, 0.6)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.transform = "scale(1)";
+      btn.style.boxShadow = "0 4px 15px rgba(102, 126, 234, 0.4)";
+    });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.innerHTML = '<span style="font-size:14px;">&#8987;</span> Adding...';
+      try {
+        const jobContext = extractJobContext(document);
+        const r = await send({
+          type: "ADD_CURRENT_PAGE_TO_QUEUE",
+          payload: {
+            url: location.href,
+            company: jobContext.companyName || void 0,
+            role: jobContext.jobTitle || void 0,
+            source: "one_click"
+          }
+        });
+        if (r?.ok) {
+          btn.innerHTML = '<span style="font-size:16px;">&#10003;</span> Added!';
+          btn.style.background = "linear-gradient(135deg, #28a745, #20c997)";
+          showQueueToast(`Added to queue: ${jobContext.jobTitle || location.href.substring(0, 50)}...`);
+          setTimeout(() => {
+            btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+            btn.style.background = "linear-gradient(135deg, #667eea, #764ba2)";
+            btn.disabled = false;
+          }, 3e3);
+        } else {
+          btn.innerHTML = `<span style="font-size:16px;">&#10007;</span> ${r?.error || "Already in queue"}`;
+          btn.style.background = "#dc3545";
+          setTimeout(() => {
+            btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+            btn.style.background = "linear-gradient(135deg, #667eea, #764ba2)";
+            btn.disabled = false;
+          }, 2e3);
+        }
+      } catch (e) {
+        btn.innerHTML = `<span style="font-size:16px;">&#10007;</span> Error`;
+        setTimeout(() => {
+          btn.innerHTML = `<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue`;
+          btn.style.background = "linear-gradient(135deg, #667eea, #764ba2)";
+          btn.disabled = false;
+        }, 2e3);
+      }
+    });
+    wrapper.appendChild(btn);
+    document.body.appendChild(wrapper);
+  }
+  function showQueueToast(message) {
+    const existing = document.getElementById("ua-queue-toast");
+    if (existing)
+      existing.remove();
+    const toast = document.createElement("div");
+    toast.id = "ua-queue-toast";
+    toast.textContent = message;
+    toast.style.cssText = `
+    position: fixed;
+    bottom: 80px;
+    right: 24px;
+    z-index: 2147483647;
+    padding: 12px 20px;
+    background: #343a40;
+    color: #fff;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+  `;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(10px)";
+      setTimeout(() => toast.remove(), 300);
+    }, 3e3);
   }
   document.addEventListener("focusin", async (e) => {
     const el = e.target;
@@ -1732,5 +2259,8 @@
   function escapeAttr(s) {
     return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
+  setTimeout(() => {
+    maybeInjectQueueButton();
+  }, 1500);
 })();
 //# sourceMappingURL=content.js.map

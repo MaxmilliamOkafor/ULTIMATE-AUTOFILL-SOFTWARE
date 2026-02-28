@@ -201,6 +201,44 @@ async function handleMessage(msg: ExtMessage): Promise<ExtResponse> {
       // Content script reports completion - forwarded to auto-apply engine
       return { ok: true };
 
+    // ─── One-click add current page to queue ───
+    case 'ADD_CURRENT_PAGE_TO_QUEUE': {
+      const url = p?.url;
+      if (!url) return { ok: false, error: 'No URL provided' };
+      // Check for duplicates
+      const existing = await queue.getItems();
+      const normalized = queue.normalizeUrl(url);
+      const isDuplicate = existing.some((i) => queue.normalizeUrl(i.url) === normalized);
+      if (isDuplicate) return { ok: false, error: 'Already in queue' };
+      const added = await queue.addUrls([{
+        url,
+        company: p.company || undefined,
+        role: p.role || undefined,
+      }]);
+      // Override source to 'one_click' by updating the just-added item
+      if (added > 0 && p.source === 'one_click') {
+        const items = await queue.getItems();
+        const item = items.find((i) => queue.normalizeUrl(i.url) === normalized);
+        if (item) {
+          item.source = 'one_click';
+          // Save directly since addUrls set it as 'manual'
+          const state = await queue.loadQueue();
+          const stateItem = state.items.find((i) => i.id === item.id);
+          if (stateItem) stateItem.source = 'one_click';
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      }
+      return { ok: true, data: { added } };
+    }
+
+    // ─── AI Tailoring ───
+    case 'TAILOR_RESPONSE':
+      return { ok: true }; // Tailoring is handled in content script
+    case 'GET_TAILORING_STATUS': {
+      const s = await settings.loadSettings();
+      return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
+    }
+
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
@@ -227,17 +265,24 @@ chrome.runtime.onInstalled?.addListener(async () => {
 });
 
 // Auto-detect ATS on tab updates and trigger autofill if enabled
+// Now works universally on ALL pages (not just domain allowlist) when universal mode is on
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete' || !tab.url) return;
+  // Skip chrome:// and extension pages
+  if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
 
   try {
     const s = await settings.loadSettings();
     if (!s.autoDetectAndFill) return;
 
-    // Check if URL matches any supported platform
     const url = tab.url;
-    const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
-    if (!isSupported) return;
+
+    // If universal form detection is enabled, try on ALL pages
+    // Otherwise, only on domain-allowlisted pages
+    if (!s.universalFormDetection) {
+      const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
+      if (!isSupported) return;
+    }
 
     // Send auto-detect-and-fill to the content script
     try {

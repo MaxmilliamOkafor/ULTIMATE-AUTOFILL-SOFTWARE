@@ -59,6 +59,7 @@ export type ATSType =
   | 'workday' | 'greenhouse' | 'lever' | 'smartrecruiters'
   | 'icims' | 'taleo' | 'ashby' | 'bamboohr'
   | 'oraclecloud' | 'linkedin' | 'indeed'
+  | 'companysite'   // any company career site not matching a known ATS
   | 'generic';
 
 export interface ATSDetectionResult {
@@ -110,7 +111,7 @@ export interface JobQueueItem {
   blockedReason?: string;
   failReason?: string;
   retryCount?: number;
-  source?: 'csv_import' | 'manual' | 'scraper';
+  source?: 'csv_import' | 'manual' | 'scraper' | 'one_click';
   appliedAt?: string;
 }
 
@@ -189,9 +190,11 @@ export interface ScrapedJob {
 export interface ExtensionSettings {
   autoApply: AutoApplySettings;
   scraper: ScraperSettings;
+  tailoring: TailoringSettings;
   applicationsAccount: ApplicationsAccount | null;
   creditsUnlimited: boolean;
   autoDetectAndFill: boolean;
+  universalFormDetection: boolean;   // detect ALL forms, not just known ATS
   supportedPlatforms: Record<string, boolean>;
 }
 
@@ -225,7 +228,11 @@ export type MessageType =
   // Auto-detect + fill on page
   | 'AUTO_DETECT_FILL' | 'PAGE_AUTOFILL_COMPLETE'
   // Credits
-  | 'GET_CREDITS' | 'CHECK_CREDITS';
+  | 'GET_CREDITS' | 'CHECK_CREDITS'
+  // One-click add to queue from content script
+  | 'ADD_CURRENT_PAGE_TO_QUEUE'
+  // AI Tailoring
+  | 'TAILOR_RESPONSE' | 'GET_TAILORING_STATUS';
 
 export interface ExtMessage {
   type: MessageType;
@@ -268,4 +275,36 @@ export interface AutoApplyStatus {
   skippedJobs: number;
   startedAt: string | null;
   estimatedRemaining: number;
+}
+
+// ─── AI Tailoring ───
+
+export interface TailoringContext {
+  jobTitle?: string;
+  companyName?: string;
+  jobDescription?: string;
+  requiredSkills?: string[];
+  preferredSkills?: string[];
+  jobLocation?: string;
+  seniority?: string;
+}
+
+export interface TailoredResponse {
+  originalResponse: string;
+  tailoredResponse: string;
+  fieldLabel: string;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface TailoringSettings {
+  enabled: boolean;
+  /** How strongly to tailor (0.0 = no change, 1.0 = maximum tailoring) */
+  intensity: number;
+  /** Keywords to always emphasize from the user's profile */
+  profileKeywords: string[];
+  /** Job-specific keywords extracted from the posting to weave in */
+  targetKeywords: string[];
+  /** The user's summary/headline to use as tailoring context */
+  profileSummary: string;
 }

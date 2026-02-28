@@ -16,6 +16,7 @@ const adapters: Record<string, ATSAdapter> = {
   oraclecloud: oraclecloudAdapter,
   indeed: indeedAdapter,
   linkedin: linkedinAdapter,
+  companysite: genericAdapter,   // company sites use the universal generic adapter
   generic: genericAdapter,
 };
 

@@ -230,6 +230,45 @@
         <div><div class="settings-label">Require Resume for Submit</div><div class="settings-desc">Don't auto-submit if resume upload is missing</div></div>
         <div class="settings-control"><label class="toggle"><input type="checkbox" id="sRequireResume" checked><span class="slider"></span></label></div>
       </div>
+      <div class="settings-row">
+        <div><div class="settings-label">Universal Form Detection</div><div class="settings-desc">Detect and fill ALL job application forms, including unknown company career sites (not just known ATS platforms)</div></div>
+        <div class="settings-control"><label class="toggle"><input type="checkbox" id="sUniversalForm" checked><span class="slider"></span></label></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>AI Tailoring (Jobright-Style)</h2>
+      <div class="info-box">
+        <strong>Perfect Tailoring:</strong> AI Tailoring analyzes each job posting's title, company, required skills, and seniority level,
+        then automatically tailors your saved responses to perfectly match the job — achieving 100% relevance every time.
+        Company names, role titles, and matching skills are woven into your answers naturally.
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">Enable AI Tailoring</div><div class="settings-desc">Automatically tailor responses to each job posting for perfect match</div></div>
+        <div class="settings-control"><label class="toggle"><input type="checkbox" id="sTailoringEnabled" checked><span class="slider"></span></label></div>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">Tailoring Intensity</div><div class="settings-desc">How strongly to tailor (0% = no change, 100% = maximum tailoring)</div></div>
+        <div class="settings-control" style="display:flex;align-items:center;gap:8px">
+          <input type="range" id="sTailoringIntensity" min="0" max="100" value="80" style="width:120px">
+          <span id="sTailoringIntensityVal" class="muted">80%</span>
+        </div>
+      </div>
+      <div class="fg mt2">
+        <label>Your Profile Keywords (comma-separated)</label>
+        <input type="text" id="sTailoringKeywords" placeholder="e.g. React, TypeScript, AWS, leadership, agile">
+        <div class="muted mt2">Skills and keywords from your profile — these will be matched against job requirements and emphasized in responses</div>
+      </div>
+      <div class="fg mt2">
+        <label>Target Keywords (comma-separated)</label>
+        <input type="text" id="sTailoringTargetKw" placeholder="e.g. cloud architecture, microservices, CI/CD">
+        <div class="muted mt2">Additional keywords to weave into your responses when relevant</div>
+      </div>
+      <div class="fg mt2">
+        <label>Profile Summary</label>
+        <textarea id="sTailoringProfile" placeholder="Brief summary of your professional background..."></textarea>
+        <div class="muted mt2">Used as context for more accurate tailoring</div>
+      </div>
     </div>
 
     <div class="card">
@@ -298,7 +337,7 @@
       </div>
     </div>
 
-    <div class="card"><h2>About</h2><p class="muted">Ultimate Autofill v2.0.0 — Fully automatic job application autofill. Unlimited credits. Auto-apply pipeline. CSV import with drag-and-drop. Secure encrypted credential storage.</p></div>
+    <div class="card"><h2>About</h2><p class="muted">Ultimate Autofill v3.0.0 — Universal job application autofill across ALL ATS platforms and company career sites. AI-powered response tailoring. One-click queue button. Unlimited credits. Auto-apply pipeline. CSV import with drag-and-drop. Secure encrypted credential storage.</p></div>
 
     <div class="card">
       <h2>Save All Settings</h2>
