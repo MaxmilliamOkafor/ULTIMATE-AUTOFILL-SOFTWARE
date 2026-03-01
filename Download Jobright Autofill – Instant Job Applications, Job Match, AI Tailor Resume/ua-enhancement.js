@@ -1,6 +1,8 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v5.0 ===
+// === ULTIMATE AUTOFILL ENHANCEMENT v6.0 ===
+// Tailor-first flow, answer-learning, fallback form-fill, auto-submit
 (function () {
   'use strict';
+  const LOG = (...a) => console.log('[UA]', ...a);
 
   // ===================== CREDIT BYPASS =====================
   const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999};
@@ -42,7 +44,7 @@
   };
 
   // ===================== CONFIG =====================
-  const SK = {AA:'ua_aa',Q:'ua_q',QA:'ua_qa',QP:'ua_qp',POS:'ua_pos'};
+  const SK = {AA:'ua_aa',Q:'ua_q',QA:'ua_qa',QP:'ua_qp',POS:'ua_pos',ANS:'ua_answers',PROF:'ua_profile'};
   const ATS = [
     {n:'Workday',p:/myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i},
     {n:'Greenhouse',p:/boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i},
@@ -61,15 +63,257 @@
     {n:'Monster',p:/monster\.com.*job/i},{n:'Glassdoor',p:/glassdoor\.com.*job/i},
     {n:'Dice',p:/dice\.com.*job/i},{n:'Wellfound',p:/wellfound\.com.*\/jobs/i},
     {n:'Paylocity',p:/paylocity\.com.*Recruiting/i},{n:'Phenom',p:/phenom\.com.*\/jobs/i},
-    {n:'Avature',p:/avature\.net.*careers/i},
+    {n:'Avature',p:/avature\.net.*careers/i},{n:'Workable',p:/apply\.workable\.com/i},
     {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i}
   ];
 
   // ===================== STORAGE & STATE =====================
-  const st={get:k=>new Promise(r=>chrome.storage.local.get(k,d=>r(d[k]))),set:(k,v)=>new Promise(r=>chrome.storage.local.set({[k]:v},r))};
+  const st={
+    get:k=>new Promise(r=>chrome.storage.local.get(k,d=>r(d[k]))),
+    set:(k,v)=>new Promise(r=>chrome.storage.local.set({[k]:v},r)),
+    getMulti:keys=>new Promise(r=>chrome.storage.local.get(keys,d=>r(d)))
+  };
   let queue=[],qActive=false,qPaused=false,autoApply=false,selected=new Set();
   async function load(){queue=(await st.get(SK.Q))||[];qActive=(await st.get(SK.QA))||false;qPaused=(await st.get(SK.QP))||false;autoApply=(await st.get(SK.AA))||false;}
   async function saveQ(){await st.set(SK.Q,queue);}
+
+  // ===================== ANSWER LEARNING SYSTEM =====================
+  // Stores answers keyed by normalized field label for future reuse
+  let _answerBank = {};
+  let _answerBankLoaded = false;
+
+  async function loadAnswerBank() {
+    if (_answerBankLoaded) return _answerBank;
+    const saved = await st.get(SK.ANS);
+    _answerBank = saved || {};
+    _answerBankLoaded = true;
+    // Also pull from OptimHire storage if available
+    const ohKeys = ['candidateDetails','userDetails','applicationDetails','questionAnswers','responses'];
+    const ohData = await st.getMulti(ohKeys);
+    for (const val of Object.values(ohData || {})) {
+      if (!val) continue;
+      try {
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        collectEntries(parsed);
+      } catch (_) {}
+    }
+    return _answerBank;
+  }
+
+  function collectEntries(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(collectEntries); return; }
+    const response = node.response || node.answer || node.value || node.selected || node.a || node.text;
+    if (response && typeof response === 'string') {
+      const keys = [node.question, node.key, node.id, node.label, node.name];
+      keys.forEach(k => { if (k && typeof k === 'string') _answerBank[normalizeKey(k)] = response; });
+    }
+    Object.values(node).forEach(collectEntries);
+  }
+
+  function normalizeKey(s) { return (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+  async function learnAnswer(label, value) {
+    if (!label || !value) return;
+    const key = normalizeKey(label);
+    if (!key) return;
+    _answerBank[key] = value;
+    await st.set(SK.ANS, _answerBank);
+  }
+
+  function getLearnedAnswer(label, el) {
+    const candidates = [label, el?.name, el?.id, el?.placeholder, el?.getAttribute?.('aria-label')];
+    for (const c of candidates) {
+      if (!c) continue;
+      const k = normalizeKey(c);
+      if (_answerBank[k]) return _answerBank[k];
+    }
+    // Partial match
+    for (const c of candidates) {
+      if (!c) continue;
+      const k = normalizeKey(c);
+      for (const [bk, bv] of Object.entries(_answerBank)) {
+        if (k.includes(bk) || bk.includes(k)) return bv;
+      }
+    }
+    return '';
+  }
+
+  // ===================== PROFILE =====================
+  const DEFAULTS = {
+    authorized: 'Yes', sponsorship: 'No', relocation: 'Yes', remote: 'Yes',
+    veteran: 'I am not a protected veteran', disability: 'I do not have a disability',
+    gender: 'Prefer not to say', ethnicity: 'Prefer not to say', race: 'Prefer not to say',
+    years: '5', salary: '80000', notice: '2 weeks', availability: 'Immediately',
+    cover: 'I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.',
+    why: 'I admire the company culture and the opportunity to make a meaningful impact.',
+    howHeard: 'LinkedIn',
+  };
+
+  async function getProfile() {
+    let p = (await st.get(SK.PROF)) || {};
+    // Also check OptimHire candidate data
+    const ohData = await st.getMulti(['candidateDetails','userDetails']);
+    try {
+      const cd = typeof ohData.candidateDetails === 'string' ? JSON.parse(ohData.candidateDetails) : (ohData.candidateDetails || {});
+      const ud = typeof ohData.userDetails === 'string' ? JSON.parse(ohData.userDetails) : (ohData.userDetails || {});
+      p = {...ud, ...cd, ...p};
+    } catch (_) {}
+    return p;
+  }
+
+  // ===================== SMART VALUE GUESSER =====================
+  function guessValue(label, p) {
+    const l = (label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
+    if (/first.?name|given.?name|prenom/.test(l)) return p.first_name || p.firstName || '';
+    if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
+    if (/middle.?name/.test(l)) return p.middle_name || '';
+    if (/preferred.?name|nick.?name/.test(l)) return p.preferred_name || p.first_name || '';
+    if (/full.?name|your name|^name$/.test(l) && !/company|last|first|user/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/\bemail\b/.test(l)) return p.email || '';
+    if (/phone|mobile|cell|telephone/.test(l)) return p.phone || '';
+    if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
+    if (/state|province|region/.test(l)) return p.state || '';
+    if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
+    if (/country/.test(l)) return p.country || 'United States';
+    if (/address|street/.test(l)) return p.address || '';
+    if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
+    if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
+    if (/github/.test(l)) return p.github_url || p.github || '';
+    if (/website|portfolio|personal.?url/.test(l)) return p.website_url || p.website || '';
+    if (/twitter|x\.com/.test(l)) return p.twitter_url || p.twitter || '';
+    if (/university|school|college|alma.?mater/.test(l)) return p.school || p.university || '';
+    if (/\bdegree\b|qualification/.test(l)) return p.degree || "Bachelor's";
+    if (/major|field.?of.?study|concentration/.test(l)) return p.major || '';
+    if (/gpa|grade.?point/.test(l)) return p.gpa || '';
+    if (/graduation|grad.?date|grad.?year/.test(l)) return p.graduation_year || p.grad_year || '';
+    if (/title|position|role|current.?title|job.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
+    if (/company|employer|org|current.?company/.test(l)) return p.current_company || p.company || '';
+    if (/salary|compensation|pay|desired.?pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.?info|message.?to/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/summary|about.?(yourself|you|me)|bio|objective/.test(l)) return p.summary || p.cover_letter || DEFAULTS.cover;
+    if (/why.*(compan|role|want|interest|position)/.test(l)) return DEFAULTS.why;
+    if (/how.*hear|where.*(find|learn|discover)|source|referred/.test(l)) return DEFAULTS.howHeard;
+    if (/years.*(exp|work)|exp.*years|total.*experience/.test(l)) return DEFAULTS.years;
+    if (/availab|start.?date|notice|when.*start/.test(l)) return DEFAULTS.availability;
+    if (/authoriz|eligible|work.*right|legal.*right/.test(l)) return DEFAULTS.authorized;
+    if (/sponsor|visa|immigration|work.?permit/.test(l)) return DEFAULTS.sponsorship;
+    if (/relocat|willing.*move/.test(l)) return DEFAULTS.relocation;
+    if (/remote|work.*home|hybrid|on.?site/.test(l)) return DEFAULTS.remote;
+    if (/veteran|military|armed.?forces/.test(l)) return DEFAULTS.veteran;
+    if (/disabilit/.test(l)) return DEFAULTS.disability;
+    if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
+    if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
+    if (/nationality|citizenship/.test(l)) return p.nationality || p.country || 'United States';
+    if (/language|fluency|fluent/.test(l)) return p.languages || 'English';
+    if (/certif|license|credential/.test(l)) return p.certifications || '';
+    if (/commute|travel|willing.*travel/.test(l)) return 'Yes';
+    if (/convicted|criminal|felony|background/.test(l)) return 'No';
+    if (/drug.?test|screening/.test(l)) return 'Yes';
+    if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l)) return 'Yes';
+    if (/agree|acknowledge|certif|attest|confirm|consent/.test(l)) return 'Yes';
+    if (/please.?specify|other.?please/.test(l)) return p.city || p.state || '';
+    return '';
+  }
+
+  function guessFieldValue(label, p, el) {
+    return guessValue(label, p) || getLearnedAnswer(label, el) || '';
+  }
+
+  // ===================== DOM HELPERS =====================
+  const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function isVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+
+  function nativeSet(el, val) {
+    try {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(el, val); else el.value = val;
+    } catch (_) { el.value = val; }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+  }
+
+  function realClick(el) {
+    if (!el) return;
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    el.click();
+  }
+
+  function clickEl(el) { if (!el) return false; el.scrollIntoView?.({behavior:'smooth',block:'center'}); realClick(el); return true; }
+
+  function waitFor(sel, ms, xpath) {
+    return new Promise(res => {
+      const f = () => xpath ? document.evaluate(sel, document, null, 9, null).singleNodeValue : document.querySelector(sel);
+      const e = f(); if (e) { res(e); return; }
+      const o = new MutationObserver(() => { const e = f(); if (e) { o.disconnect(); res(e); } });
+      o.observe(document.body || document.documentElement, {childList:true,subtree:true});
+      setTimeout(() => { o.disconnect(); res(null); }, ms || 10000);
+    });
+  }
+
+  async function findByText(sel, re, to) {
+    const dl = Date.now() + (to || 5000);
+    while (Date.now() < dl) {
+      for (const e of $$(sel)) if (re.test(e.textContent?.trim()) && isVisible(e)) return e;
+      await sleep(500);
+    }
+    return null;
+  }
+
+  // ===================== FIELD LABEL EXTRACTION =====================
+  function getLabel(el) {
+    if (!el) return '';
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+    if (el.id) { const lbl = $(`label[for="${CSS.escape(el.id)}"]`); if (lbl) return lbl.textContent.trim(); }
+    if (el.placeholder) return el.placeholder;
+    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row');
+    if (container) {
+      const lbl = container.querySelector('label,[class*="label"],[class*="Label"]');
+      if (lbl && lbl !== el) return lbl.textContent.trim();
+    }
+    return el.name?.replace(/[_\-]/g, ' ') || '';
+  }
+
+  function isFieldRequired(el) {
+    if (!el) return false;
+    if (el.required || el.getAttribute('aria-required') === 'true') return true;
+    const container = el.closest('.field,.question,[class*="field"],[class*="Field"],[class*="question"],li,div');
+    const label = getLabel(el);
+    if (/\*\s*$|required/i.test(label || '')) return true;
+    if (container) {
+      if (container.classList.contains('required')) return true;
+      if (container.getAttribute('data-required') === 'true') return true;
+      if (container.querySelector('.required,.asterisk,[aria-label*="required" i]')) return true;
+    }
+    return false;
+  }
+
+  function hasFieldValue(el) {
+    if (!el) return false;
+    if (el.tagName === 'SELECT') {
+      const val = (el.value || '').trim();
+      if (!val) return false;
+      const idx = el.selectedIndex;
+      if (idx >= 0) {
+        const txt = (el.options[idx]?.textContent || '').trim().toLowerCase();
+        if (!txt || /^(select|choose|please|--|—)/.test(txt)) return false;
+      }
+      return true;
+    }
+    if (el.type === 'checkbox' || el.type === 'radio') return !!el.checked;
+    return !!el.value?.trim();
+  }
 
   // ===================== QUEUE OPS =====================
   async function addJob(url,title){if(!url||queue.some(j=>j.url===url))return;queue.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),url,title:title||shortUrl(url),status:'pending',addedAt:Date.now()});await saveQ();renderQ();updateCtrl();}
@@ -83,64 +327,435 @@
   function detectATS(){for(const a of ATS)if(a.p.test(location.href))return a.n;return null;}
   function isWorkday(){return/myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href);}
   function isJobright(){return/jobright\.ai/i.test(location.hostname);}
-  function isAppForm(){if(detectATS())return true;for(const s of['input[name*="resume" i]','input[type="file"][accept*=".pdf"]','form[action*="apply" i]','[data-testid*="apply" i]','.application-form']){try{if(document.querySelector(s))return true;}catch{}}return false;}
 
-  // ===================== HELPERS =====================
-  function waitFor(sel,ms,xpath){return new Promise(res=>{const f=()=>xpath?document.evaluate(sel,document,null,9,null).singleNodeValue:document.querySelector(sel);const e=f();if(e){res(e);return;}const o=new MutationObserver(()=>{const e=f();if(e){o.disconnect();res(e);}});o.observe(document.body||document.documentElement,{childList:true,subtree:true});setTimeout(()=>{o.disconnect();res(null);},ms||10000);});}
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  function clickEl(el){if(!el)return false;el.scrollIntoView?.({behavior:'smooth',block:'center'});el.click();return true;}
+  // ===================== FALLBACK FORM FILLER =====================
+  // Fills fields that Jobright autofill missed
+  async function fallbackFill() {
+    LOG('Fallback fill starting — catching missed fields');
+    const p = await getProfile();
+    await loadAnswerBank();
+    let filled = 0;
+
+    // Text inputs & textareas — only unfilled ones
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea')
+      .filter(el => isVisible(el) && !el.value?.trim());
+
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      inp.focus();
+      nativeSet(inp, val);
+      filled++;
+      await sleep(60);
+    }
+
+    // Select dropdowns — only unselected ones
+    const selects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const sel of selects) {
+      const lbl = getLabel(sel);
+      const val = guessFieldValue(lbl, p, sel);
+      if (!val) {
+        // EEO fallback
+        const lblLower = (lbl || '').toLowerCase();
+        if (/gender|disability|veteran|race|ethnicity|sex\b|heritage/i.test(lblLower)) {
+          const opts = $$('option', sel).filter(o => o.value && o.index > 0);
+          const fb = opts.find(o => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
+          if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+        }
+        continue;
+      }
+      const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+      else {
+        // Try first valid option as fallback
+        const opts = $$('option', sel).filter(o => o.value && o.index > 0);
+        if (opts.length) { sel.value = opts[0].value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+      }
+    }
+
+    // Radio buttons — only unselected groups
+    const groups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
+    for (const [, radios] of Object.entries(groups)) {
+      if (radios.some(r => r.checked)) continue;
+      const lbl = getLabel(radios[0]);
+      const guess = guessFieldValue(lbl, {}, radios[0]);
+      const match = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+        return guess && t.includes(guess.toLowerCase());
+      });
+      if (match) { realClick(match); filled++; continue; }
+      // Default: Yes for yes/no
+      const yes = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
+        return ['yes','true','1'].includes(t);
+      });
+      if (yes) { realClick(yes); filled++; }
+    }
+
+    // Required checkboxes
+    $$('input[type=checkbox][required],input[type=checkbox][aria-required="true"]')
+      .filter(el => isVisible(el) && !el.checked)
+      .forEach(cb => { realClick(cb); filled++; });
+
+    LOG(`Fallback fill done: ${filled} fields filled`);
+    return filled;
+  }
+
+  // ===================== LEARN FROM PAGE (capture filled answers) =====================
+  async function learnFromPage() {
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea,select')
+      .filter(el => isVisible(el) && hasFieldValue(el));
+    for (const el of inputs) {
+      const lbl = getLabel(el);
+      if (!lbl) continue;
+      const val = el.tagName === 'SELECT' ? (el.options[el.selectedIndex]?.textContent || el.value) : el.value;
+      if (val) await learnAnswer(lbl, val.trim());
+    }
+    LOG(`Learned answers from ${inputs.length} fields`);
+  }
+
+  // ===================== SUCCESS DETECTION =====================
+  function checkSuccess() {
+    const href = location.href.toLowerCase();
+    if (/\/thanks|\/thank.you|\/success|\/confirmation|\/submitted|\/done|\/complete/i.test(href)) return true;
+    const body = document.body?.innerText || '';
+    if (/application submitted|thank you for applying|application received|we.ve received your|successfully submitted|application complete|thanks for applying/i.test(body)) return true;
+    if ($('#application_confirmation,.application-confirmation,.confirmation-text,.posting-confirmation')) return true;
+    if ($('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"]')) return true;
+    return false;
+  }
+
+  // ===================== AUTO-SUBMIT / NEXT PAGE =====================
+  async function autoSubmitOrNext() {
+    LOG('Attempting auto-submit or next...');
+
+    // First: learn from the filled page before navigating away
+    await learnFromPage();
+
+    // Check if all required fields are filled
+    const missing = getMissingRequired();
+    LOG(`Missing required: ${missing.length}`, missing);
+
+    // Submit selectors (try if no required missing)
+    const submitSels = [
+      'button[type="submit"]','input[type="submit"]',
+      'button[data-automation-id="submit"]',
+      '#submit_app','.postings-btn-submit','button.application-submit',
+      'button[data-qa="btn-submit"]','button[aria-label*="Submit" i]',
+      '[data-testid="submit-application"]','button.btn-submit','#resumeSubmitForm',
+      'div.form-group.submit-button button.btn.btn-primary',
+    ];
+
+    if (missing.length === 0) {
+      // Try submit
+      for (const sel of submitSels) {
+        const btn = $(sel);
+        if (btn && isVisible(btn)) { LOG('Clicking submit:', sel); await sleep(500); realClick(btn); return 'submitted'; }
+      }
+      // Fallback: button by text
+      const btns = $$('button,a[role="button"],input[type="submit"]').filter(isVisible);
+      const submitBtn = btns.find(b => {
+        const t = (b.textContent || b.value || '').trim().toLowerCase();
+        return /^(submit|apply|send|complete|finish)\b/i.test(t) && !/cancel|back|prev|close/i.test(t);
+      });
+      if (submitBtn) { LOG('Clicking submit (text):', submitBtn.textContent?.trim()); await sleep(500); realClick(submitBtn); return 'submitted'; }
+    }
+
+    // Also try Jobright's continue-button
+    const jrContinue = $('.continue-button:not(.continue-button-disabled)');
+    if (jrContinue && isVisible(jrContinue)) {
+      LOG('Clicking Jobright continue button');
+      await sleep(500);
+      realClick(jrContinue);
+      return 'next_page';
+    }
+
+    // Next/Continue selectors
+    const nextSels = [
+      'button[data-automation-id="bottom-navigation-next-button"]',
+      'button[data-automation-id="pageFooterNextButton"]',
+      'button[data-automation-id="next-button"]',
+      'button[aria-label*="Next" i]','button[aria-label*="Continue" i]',
+      '[data-testid="next-step"]','[data-testid="continue"]',
+    ];
+    for (const sel of nextSels) {
+      const btn = $(sel);
+      if (btn && isVisible(btn)) { LOG('Clicking next:', sel); await sleep(500); realClick(btn); return 'next_page'; }
+    }
+    // Fallback: next by text
+    const allBtns = $$('button,a[role="button"]').filter(isVisible);
+    const nextBtn = allBtns.find(b => {
+      const t = (b.textContent || b.value || '').trim().toLowerCase();
+      return /^(next|continue|proceed|save.*continue|review)\b/i.test(t) && !/cancel|back|prev|close/i.test(t);
+    });
+    if (nextBtn) { LOG('Clicking next (text):', nextBtn.textContent?.trim()); await sleep(500); realClick(nextBtn); return 'next_page'; }
+
+    LOG('No submit/next button found');
+    return false;
+  }
+
+  function getMissingRequired() {
+    const required = $$('input:not([type=hidden]),textarea,select').filter(el => isVisible(el) && isFieldRequired(el));
+    const missing = [];
+    for (const el of required) {
+      if (el.type === 'radio' && el.name) {
+        const group = $$(`input[type="radio"][name="${CSS.escape(el.name)}"]`).filter(isVisible);
+        if (group.some(r => r.checked)) continue;
+      } else if (el.type === 'checkbox' && !el.checked) {
+        // required checkbox must be checked
+      } else if (hasFieldValue(el)) continue;
+      const lbl = getLabel(el) || el.name || el.id || 'Required field';
+      if (!missing.includes(lbl)) missing.push(lbl);
+    }
+    return missing;
+  }
+
+  // ===================== TAILOR-FIRST AUTOMATION FLOW =====================
+  // Step 1: Click "Generate Custom Resume" (in Jobright sidebar)
+  // Step 2: Wait for tailoring to complete
+  // Step 3: Click "Continue to Autofill" / continue button
+  // Step 4: Click "Autofill" button
+  // Step 5: Fallback fill missed fields
+  // Step 6: Submit or Next
+
+  async function tailorFirstFlow() {
+    const ats = detectATS();
+    if (!ats) return;
+    LOG(`Tailor-first flow starting for ${ats}...`);
+
+    // Wait for Jobright sidebar to load
+    const sidebar = await waitFor('#jobright-helper-id', 15000);
+    if (!sidebar) { LOG('Jobright sidebar not found — falling back to direct autofill'); await directAutofillFlow(); return; }
+    await sleep(2000);
+
+    // Step 1: Click "Generate Custom Resume" if available
+    const tailorBtn = sidebar.querySelector('.application-dashboard-tailor-resume') ||
+                       sidebar.querySelector('.external-job-generate-resume-button');
+    if (tailorBtn && isVisible(tailorBtn)) {
+      LOG('Step 1: Clicking Generate Custom Resume');
+      realClick(tailorBtn);
+      await sleep(3000);
+
+      // Wait for tailoring to complete (watch for loading to finish)
+      LOG('Waiting for resume tailoring to complete...');
+      const maxWait = 120000; // 2 min max
+      const start = Date.now();
+      while (Date.now() - start < maxWait) {
+        // Check if loading indicator is gone
+        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading');
+        if (!loading || !isVisible(loading)) {
+          // Check if tailored resume is ready (button text changed or autofill button available)
+          const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
+          if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
+        }
+        await sleep(2000);
+      }
+      await sleep(1500);
+    } else {
+      LOG('Step 1: No tailor button found — skipping to autofill');
+    }
+
+    // Step 2-3: Click "Continue to Autofill" / continue button if present
+    const continueBtn = sidebar.querySelector('.continue-button:not(.continue-button-disabled)');
+    if (continueBtn && isVisible(continueBtn)) {
+      LOG('Step 2: Clicking Continue button');
+      realClick(continueBtn);
+      await sleep(2000);
+    }
+
+    // Step 4: Click the Autofill button
+    LOG('Step 3: Triggering Autofill');
+    await triggerAutofill();
+
+    // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
+    LOG('Waiting for Jobright autofill to complete...');
+    await sleep(3000);
+    const fillStart = Date.now();
+    while (Date.now() - fillStart < 60000) {
+      const afBtn = sidebar.querySelector('.auto-fill-button');
+      if (afBtn) {
+        const txt = afBtn.textContent?.trim().toLowerCase() || '';
+        if (txt === 'autofill' || txt === '') break; // Done filling
+      }
+      await sleep(1500);
+    }
+    await sleep(2000);
+
+    // Step 5: Fallback fill to catch missed fields
+    LOG('Step 4: Running fallback fill for missed fields');
+    await fallbackFill();
+    await sleep(1000);
+    // Second pass
+    await fallbackFill();
+    await sleep(1000);
+
+    // Step 6: Auto submit or next
+    LOG('Step 5: Auto-submit/next');
+    const result = await autoSubmitOrNext();
+
+    if (result === 'next_page') {
+      LOG('Navigated to next page — continuing multi-page flow');
+      await sleep(3000);
+      await multiPageLoop();
+    } else if (result === 'submitted') {
+      LOG('Application submitted!');
+      await learnFromPage();
+      await sleep(2000);
+      if (checkSuccess()) LOG('Success confirmed!');
+    }
+  }
+
+  // ===================== MULTI-PAGE FORM LOOP =====================
+  async function multiPageLoop() {
+    const MAX_PAGES = 10;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      if (checkSuccess()) { LOG('Success detected — stopping multi-page loop'); break; }
+      LOG(`Multi-page: processing page ${page}`);
+
+      // Wait for page content
+      await sleep(2000);
+
+      // Try Jobright autofill again
+      await triggerAutofill();
+      await sleep(3000);
+
+      // Fallback fill
+      await fallbackFill();
+      await sleep(1000);
+      await fallbackFill();
+      await sleep(500);
+
+      // Submit or next
+      const action = await autoSubmitOrNext();
+      if (action === 'submitted') {
+        LOG('Submitted on page ' + page);
+        await sleep(3000);
+        if (checkSuccess()) LOG('Success confirmed after submit');
+        break;
+      } else if (action === 'next_page') {
+        LOG('Next page clicked on page ' + page);
+        await sleep(3000);
+        continue;
+      } else {
+        // No button found — try one more fallback+submit
+        await sleep(2000);
+        await fallbackFill();
+        const retry = await autoSubmitOrNext();
+        if (retry) LOG('Retry result:', retry);
+        break;
+      }
+    }
+  }
+
+  // ===================== DIRECT AUTOFILL FLOW (no sidebar) =====================
+  async function directAutofillFlow() {
+    await triggerAutofill();
+    await sleep(5000);
+    await fallbackFill();
+    await sleep(1000);
+    await fallbackFill();
+    await sleep(1000);
+    const result = await autoSubmitOrNext();
+    if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
+  }
 
   // ===================== WORKDAY AUTOMATION =====================
-  async function workdayAutomation(){
-    console.log('[UA] Workday automation starting...');
-    const allBtns=document.querySelectorAll('a, button');
-    for(const b of allBtns){if(/^\s*Apply\s*$/i.test(b.textContent)&&b.offsetParent!==null){clickEl(b);await sleep(2000);break;}}
-    const am=await waitFor("//*[@data-automation-id='applyManually']",8000,true);
-    if(am){await sleep(500);clickEl(am);await sleep(2000);}
-    const fp=await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage']",10000);
-    if(fp){await sleep(1000);await triggerAutofill();workdayAutoNext();}
-  }
-  async function workdayAutoNext(){
-    const ns="button[data-automation-id='bottom-navigation-next-button']:not([disabled]),button[data-automation-id='pageFooterNextButton']:not([disabled])";
-    const go=async()=>{await sleep(3000);const b=document.querySelector(ns);if(b){clickEl(b);await sleep(2000);if(document.querySelector("[data-automation-id='reviewJobApplicationPage'],[data-automation-id='applyFlowReviewPage']"))return;await triggerAutofill();go();}};
-    go();
+  async function workdayAutomation() {
+    LOG('Workday automation starting...');
+    // Click Apply button
+    const allBtns = $$('a, button');
+    for (const b of allBtns) { if (/^\s*Apply\s*$/i.test(b.textContent) && isVisible(b)) { clickEl(b); await sleep(2000); break; } }
+    // Click Apply Manually
+    const am = await waitFor("//*[@data-automation-id='applyManually']", 8000, true);
+    if (am) { await sleep(500); clickEl(am); await sleep(2000); }
+    // Wait for form page
+    const fp = await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage']", 10000);
+    if (fp) {
+      await sleep(1000);
+      // Run tailor-first flow (which includes autofill + fallback + submit)
+      await tailorFirstFlow();
+    }
   }
 
-  // ===================== RESUME TAILORING =====================
-  async function resumeTailoringAutomation(){
-    if(!isJobright()||(!location.href.includes('plugin_tailor=1')&&!location.href.includes('/jobs/info/')))return;
+  // ===================== RESUME TAILORING (on Jobright website) =====================
+  async function resumeTailoringAutomation() {
+    if (!isJobright() || (!location.href.includes('plugin_tailor=1') && !location.href.includes('/jobs/info/'))) return;
     await sleep(3000);
-    let el=await findByText('button,a,div[role="button"]',/improve my resume/i,8000);if(el){clickEl(el);await sleep(2000);}
-    el=await findByText('button,a,div[role="button"],label,span',/full edit/i,5000);if(el){clickEl(el);await sleep(3000);}
-    el=await findByText('button,a,span,div[role="button"],label',/select all/i,5000);if(el){clickEl(el);await sleep(1000);}
-    el=await findByText('button,a,div[role="button"]',/generate (my new )?resume|generate$/i,5000);if(el)clickEl(el);
+    let el = await findByText('button,a,div[role="button"]', /improve my resume/i, 8000); if (el) { clickEl(el); await sleep(2000); }
+    el = await findByText('button,a,div[role="button"],label,span', /full edit/i, 5000); if (el) { clickEl(el); await sleep(3000); }
+    el = await findByText('button,a,span,div[role="button"],label', /select all/i, 5000); if (el) { clickEl(el); await sleep(1000); }
+    el = await findByText('button,a,div[role="button"]', /generate (my new )?resume|generate$/i, 5000); if (el) clickEl(el);
   }
-  async function findByText(sel,re,to){const dl=Date.now()+(to||5000);while(Date.now()<dl){for(const e of document.querySelectorAll(sel))if(re.test(e.textContent?.trim())&&e.offsetParent!==null)return e;await sleep(500);}return null;}
 
   // ===================== AUTOFILL TRIGGER =====================
-  async function triggerAutofill(){await waitFor('#jobright-helper-id',8000);await sleep(1500);let b=document.querySelector('.auto-fill-button');if(b&&!b.disabled){b.click();return true;}await sleep(3000);b=document.querySelector('.auto-fill-button');if(b&&!b.disabled){b.click();return true;}return false;}
+  async function triggerAutofill() {
+    await waitFor('#jobright-helper-id', 8000);
+    await sleep(1500);
+    let b = $('.auto-fill-button');
+    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked'); return true; }
+    await sleep(3000);
+    b = $('.auto-fill-button');
+    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked (retry)'); return true; }
+    LOG('Autofill button not found or disabled');
+    return false;
+  }
 
   // ===================== QUEUE ENGINE =====================
-  async function processQ(){if(!qActive||qPaused||!queue.length)return;const c=queue.find(j=>j.status==='applying');if(c){try{const p=new URL(c.url).pathname;if(location.href.includes(p.slice(0,Math.min(p.length,25)))){if(isWorkday())await workdayAutomation();else await triggerAutofill();c.status='done';await saveQ();renderQ();updateCtrl();await sleep(10000);goNext();return;}}catch{}}goNext();}
-  function goNext(){if(qPaused)return;const n=queue.find(j=>j.status==='pending');if(n){n.status='applying';saveQ().then(()=>{location.href=n.url;});}else{qActive=false;st.set(SK.QA,false);renderQ();updateCtrl();}}
-  async function startQ(){if(!queue.filter(j=>j.status==='pending').length)return;qActive=true;qPaused=false;await st.set(SK.QA,true);await st.set(SK.QP,false);updateCtrl();goNext();}
-  async function stopQ(){qActive=false;qPaused=false;await st.set(SK.QA,false);await st.set(SK.QP,false);queue.forEach(j=>{if(j.status==='applying')j.status='pending';});await saveQ();renderQ();updateCtrl();}
-  async function pauseQ(){qPaused=true;await st.set(SK.QP,true);renderQ();updateCtrl();}
-  async function resumeQ(){qPaused=false;await st.set(SK.QP,false);processQ();renderQ();updateCtrl();}
-  async function skipJob(){const c=queue.find(j=>j.status==='applying');if(c){c.status='failed';await saveQ();}goNext();}
+  async function processQ() {
+    if (!qActive || qPaused || !queue.length) return;
+    const c = queue.find(j => j.status === 'applying');
+    if (c) {
+      try {
+        const p = new URL(c.url).pathname;
+        if (location.href.includes(p.slice(0, Math.min(p.length, 25)))) {
+          // We're on the right page — run tailor-first flow
+          if (isWorkday()) await workdayAutomation();
+          else await tailorFirstFlow();
+
+          // Wait and check success
+          await sleep(5000);
+          if (checkSuccess()) {
+            c.status = 'done';
+            LOG('Queue job completed successfully');
+          } else {
+            c.status = 'done'; // Assume done after full flow
+          }
+          await saveQ(); renderQ(); updateCtrl();
+          await sleep(5000);
+          goNext();
+          return;
+        }
+      } catch {}
+    }
+    goNext();
+  }
+  function goNext() {
+    if (qPaused) return;
+    const n = queue.find(j => j.status === 'pending');
+    if (n) { n.status = 'applying'; saveQ().then(() => { location.href = n.url; }); }
+    else { qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl(); }
+  }
+  async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
+  async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
+  async function pauseQ() { qPaused = true; await st.set(SK.QP, true); renderQ(); updateCtrl(); }
+  async function resumeQ() { qPaused = false; await st.set(SK.QP, false); processQ(); renderQ(); updateCtrl(); }
+  async function skipJob() { const c = queue.find(j => j.status === 'applying'); if (c) { c.status = 'failed'; await saveQ(); } goNext(); }
 
   // ===================== CREDIT HIDE =====================
-  function hideCredits(){
-    document.querySelectorAll('.autofill-credit-row,.payment-entry,.plugin-setting-credits-tip').forEach(e=>e.style.display='none');
-    document.querySelectorAll('.ant-modal-root').forEach(m=>{if(/remaining.*credit|upgrade.*turbo|out of credit|credits.*refill|get unlimited/i.test(m.textContent||''))m.style.display='none';});
-    document.querySelectorAll('*').forEach(el=>{if(el.children.length===0&&/\d+\s*credits?\s*available/i.test(el.textContent||''))el.textContent=el.textContent.replace(/\d+\s*(credits?\s*available)/i,'Unlimited $1');});
+  function hideCredits() {
+    $$('.autofill-credit-row,.payment-entry,.plugin-setting-credits-tip').forEach(e => e.style.display = 'none');
+    $$('.ant-modal-root').forEach(m => { if (/remaining.*credit|upgrade.*turbo|out of credit|credits.*refill|get unlimited/i.test(m.textContent || '')) m.style.display = 'none'; });
+    $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
   }
 
   // ===================== CSS =====================
-  function injectCSS(){
-    if(document.getElementById('ua-css'))return;
-    const s=document.createElement('style');s.id='ua-css';
-    s.textContent=`
+  function injectCSS() {
+    if (document.getElementById('ua-css')) return;
+    const s = document.createElement('style'); s.id = 'ua-css';
+    s.textContent = `
 .autofill-credit-row,.autofill-credit-text,.autofill-credit-text-right,.payment-entry,.plugin-setting-credits-tip{display:none!important}
 .ant-modal-root:has(.popup-modal-actions){display:none!important}
 
@@ -263,61 +878,61 @@
   }
 
   // ===================== SVG (inline, sized) =====================
-  function ico(name,w,h,clr){
-    w=w||16;h=h||16;const c=clr||'currentColor';
-    const paths={
-      bolt:`<path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="${c}"/>`,
-      plus:`<line x1="12" y1="5" x2="12" y2="19" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
-      pause:`<rect x="6" y="4" width="4" height="16" rx="1" fill="${c}"/><rect x="14" y="4" width="4" height="16" rx="1" fill="${c}"/>`,
-      play:`<path d="M8 5v14l11-7z" fill="${c}"/>`,
-      stop:`<rect x="6" y="6" width="12" height="12" rx="2" fill="${c}"/>`,
-      skip:`<path d="M5 4l10 8-10 8V4z" fill="${c}"/><rect x="17" y="4" width="3" height="16" rx="1" fill="${c}"/>`,
-      quit:`<circle cx="12" cy="12" r="9" fill="none" stroke="${c}" stroke-width="2"/><line x1="15" y1="9" x2="9" y2="15" stroke="${c}" stroke-width="2" stroke-linecap="round"/><line x1="9" y1="9" x2="15" y2="15" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`
+  function ico(name, w, h, clr) {
+    w = w || 16; h = h || 16; const c = clr || 'currentColor';
+    const paths = {
+      bolt: `<path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="${c}"/>`,
+      plus: `<line x1="12" y1="5" x2="12" y2="19" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
+      pause: `<rect x="6" y="4" width="4" height="16" rx="1" fill="${c}"/><rect x="14" y="4" width="4" height="16" rx="1" fill="${c}"/>`,
+      play: `<path d="M8 5v14l11-7z" fill="${c}"/>`,
+      stop: `<rect x="6" y="6" width="12" height="12" rx="2" fill="${c}"/>`,
+      skip: `<path d="M5 4l10 8-10 8V4z" fill="${c}"/><rect x="17" y="4" width="3" height="16" rx="1" fill="${c}"/>`,
+      quit: `<circle cx="12" cy="12" r="9" fill="none" stroke="${c}" stroke-width="2"/><line x1="15" y1="9" x2="9" y2="15" stroke="${c}" stroke-width="2" stroke-linecap="round"/><line x1="9" y1="9" x2="15" y2="15" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`
     };
-    return `<svg class="ico" width="${w}" height="${h}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">${paths[name]||''}</svg>`;
+    return `<svg class="ico" width="${w}" height="${h}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">${paths[name] || ''}</svg>`;
   }
 
   // ===================== UI BUILD =====================
-  function buildUI(){
-    if(window.self!==window.top)return;
+  function buildUI() {
+    if (window.self !== window.top) return;
 
     // --- Main FAB (draggable) ---
-    const fab=document.createElement('div');fab.id='ua-fab';
-    fab.innerHTML=ico('bolt',22,22,'#fff')+'<span class="badge" id="ua-badge"></span>';
+    const fab = document.createElement('div'); fab.id = 'ua-fab';
+    fab.innerHTML = ico('bolt', 22, 22, '#fff') + '<span class="badge" id="ua-badge"></span>';
     document.body.appendChild(fab);
     makeDraggable(fab);
-    fab.addEventListener('click',()=>{const d=document.getElementById('ua-drawer');d.classList.toggle('open');positionDrawer();});
+    fab.addEventListener('click', () => { const d = document.getElementById('ua-drawer'); d.classList.toggle('open'); positionDrawer(); });
 
     // --- Add-to-queue mini FAB ---
-    const af=document.createElement('div');af.id='ua-fab-add';
-    af.innerHTML=ico('plus',18,18,'#6ee7b7');
-    af.title='Add this page to queue';
+    const af = document.createElement('div'); af.id = 'ua-fab-add';
+    af.innerHTML = ico('plus', 18, 18, '#6ee7b7');
+    af.title = 'Add this page to queue';
     document.body.appendChild(af);
-    af.addEventListener('click',()=>addJob(location.href,document.title));
+    af.addEventListener('click', () => addJob(location.href, document.title));
 
     // --- Automation control pill ---
-    const ctrl=document.createElement('div');ctrl.id='ua-ctrl';
-    ctrl.innerHTML=`<div id="ua-ctrl-pill">
+    const ctrl = document.createElement('div'); ctrl.id = 'ua-ctrl';
+    ctrl.innerHTML = `<div id="ua-ctrl-pill">
       <div class="uc-seg info"><div><div class="uc-progress" id="uc-prog">0/0</div><div class="uc-lbl">Applied</div></div></div>
       <div class="uc-seg">
-        <button class="uc-btn pause" id="uc-pause" title="Pause">${ico('pause',14,14,'#fbbf24')}</button>
-        <button class="uc-btn skip" id="uc-skip" title="Skip">${ico('skip',14,14,'#60a5fa')}</button>
-        <button class="uc-btn quit" id="uc-quit" title="Quit">${ico('quit',14,14,'#f87171')}</button>
+        <button class="uc-btn pause" id="uc-pause" title="Pause">${ico('pause', 14, 14, '#fbbf24')}</button>
+        <button class="uc-btn skip" id="uc-skip" title="Skip">${ico('skip', 14, 14, '#60a5fa')}</button>
+        <button class="uc-btn quit" id="uc-quit" title="Quit">${ico('quit', 14, 14, '#f87171')}</button>
       </div>
     </div>`;
     document.body.appendChild(ctrl);
-    document.getElementById('uc-pause').addEventListener('click',()=>{if(qPaused)resumeQ();else pauseQ();});
-    document.getElementById('uc-skip').addEventListener('click',skipJob);
-    document.getElementById('uc-quit').addEventListener('click',stopQ);
+    document.getElementById('uc-pause').addEventListener('click', () => { if (qPaused) resumeQ(); else pauseQ(); });
+    document.getElementById('uc-skip').addEventListener('click', skipJob);
+    document.getElementById('uc-quit').addEventListener('click', stopQ);
 
     // --- Drawer ---
-    const dw=document.createElement('div');dw.id='ua-drawer';
-    dw.innerHTML=`
+    const dw = document.createElement('div'); dw.id = 'ua-drawer';
+    dw.innerHTML = `
       <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><span class="ua-hdr-badge">UNLIMITED</span></div>
       <div class="ua-body">
         <div class="ua-sec">
           <div class="ua-sec-t">Auto-Apply</div>
-          <div class="ua-tog"><div><div class="ua-tog-l">Auto-Apply on ATS Pages</div><div class="ua-tog-d">Auto-fill when job form detected</div></div><label class="ua-sw"><input type="checkbox" id="ua-aa"><span class="ua-sw-s"></span></label></div>
+          <div class="ua-tog"><div><div class="ua-tog-l">Auto-Apply on ATS Pages</div><div class="ua-tog-d">Tailor → Autofill → Fill gaps → Submit</div></div><label class="ua-sw"><input type="checkbox" id="ua-aa"><span class="ua-sw-s"></span></label></div>
           <div id="ua-stat" class="ua-stat off"><span class="dot"></span><span id="ua-stat-t">Inactive</span></div>
         </div>
         <div class="ua-sec">
@@ -336,142 +951,155 @@
     document.body.appendChild(dw);
 
     // ATS badge
-    const ab=document.createElement('div');ab.id='ua-ats';
-    ab.innerHTML='<span class="dot"></span><span id="ua-ats-n"></span>';
+    const ab = document.createElement('div'); ab.id = 'ua-ats';
+    ab.innerHTML = '<span class="dot"></span><span id="ua-ats-n"></span>';
     document.body.appendChild(ab);
 
     bindDrawer();
   }
 
-  function positionDrawer(){
-    const d=document.getElementById('ua-drawer');
-    const f=document.getElementById('ua-fab');
-    if(!d||!f)return;
-    const r=f.getBoundingClientRect();
-    d.style.bottom=(window.innerHeight-r.top+8)+'px';
-    d.style.right=(window.innerWidth-r.right)+'px';
+  function positionDrawer() {
+    const d = document.getElementById('ua-drawer');
+    const f = document.getElementById('ua-fab');
+    if (!d || !f) return;
+    const r = f.getBoundingClientRect();
+    d.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+    d.style.right = (window.innerWidth - r.right) + 'px';
   }
 
   // ===================== DRAGGABLE =====================
-  function makeDraggable(el){
-    let sx,sy,ox,oy,dragging=false,moved=false;
-    const onDown=e=>{
+  function makeDraggable(el) {
+    let sx, sy, ox, oy, dragging = false, moved = false;
+    const onDown = e => {
       e.preventDefault();
-      const t=e.touches?e.touches[0]:e;
-      sx=t.clientX;sy=t.clientY;
-      const r=el.getBoundingClientRect();ox=r.left;oy=r.top;
-      dragging=true;moved=false;
-      el.style.transition='none';
-      document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
-      document.addEventListener('touchmove',onMove,{passive:false});document.addEventListener('touchend',onUp);
+      const t = e.touches ? e.touches[0] : e;
+      sx = t.clientX; sy = t.clientY;
+      const r = el.getBoundingClientRect(); ox = r.left; oy = r.top;
+      dragging = true; moved = false;
+      el.style.transition = 'none';
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, {passive: false}); document.addEventListener('touchend', onUp);
     };
-    const onMove=e=>{
-      if(!dragging)return;e.preventDefault();
-      const t=e.touches?e.touches[0]:e;
-      const dx=t.clientX-sx,dy=t.clientY-sy;
-      if(Math.abs(dx)>3||Math.abs(dy)>3)moved=true;
-      const nx=Math.max(0,Math.min(window.innerWidth-el.offsetWidth,ox+dx));
-      const ny=Math.max(0,Math.min(window.innerHeight-el.offsetHeight,oy+dy));
-      el.style.left=nx+'px';el.style.top=ny+'px';el.style.right='auto';el.style.bottom='auto';
+    const onMove = e => {
+      if (!dragging) return; e.preventDefault();
+      const t = e.touches ? e.touches[0] : e;
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      const nx = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, ox + dx));
+      const ny = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, oy + dy));
+      el.style.left = nx + 'px'; el.style.top = ny + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
     };
-    const onUp=()=>{
-      dragging=false;el.style.transition='';
-      document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);
-      document.removeEventListener('touchmove',onMove);document.removeEventListener('touchend',onUp);
-      if(moved){
-        // Save position
-        st.set(SK.POS,{left:el.style.left,top:el.style.top});
-        // Suppress click
-        const suppress=ev=>{ev.stopPropagation();ev.preventDefault();};
-        el.addEventListener('click',suppress,{capture:true,once:true});
+    const onUp = () => {
+      dragging = false; el.style.transition = '';
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp);
+      if (moved) {
+        st.set(SK.POS, {left: el.style.left, top: el.style.top});
+        const suppress = ev => { ev.stopPropagation(); ev.preventDefault(); };
+        el.addEventListener('click', suppress, {capture: true, once: true});
       }
     };
-    el.addEventListener('mousedown',onDown);el.addEventListener('touchstart',onDown,{passive:false});
-    // Restore saved position
-    st.get(SK.POS).then(p=>{if(p?.left){el.style.left=p.left;el.style.top=p.top;el.style.right='auto';el.style.bottom='auto';}});
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive: false});
+    st.get(SK.POS).then(p => { if (p?.left) { el.style.left = p.left; el.style.top = p.top; el.style.right = 'auto'; el.style.bottom = 'auto'; } });
   }
 
   // ===================== DRAWER EVENTS =====================
-  function bindDrawer(){
-    const tog=document.getElementById('ua-aa');tog.checked=autoApply;
-    tog.addEventListener('change',async e=>{autoApply=e.target.checked;await st.set(SK.AA,autoApply);updateStat();if(autoApply&&isAppForm()){if(isWorkday())workdayAutomation();else triggerAutofill();}});
+  function bindDrawer() {
+    const tog = document.getElementById('ua-aa'); tog.checked = autoApply;
+    tog.addEventListener('change', async e => {
+      autoApply = e.target.checked; await st.set(SK.AA, autoApply); updateStat();
+      if (autoApply && detectATS()) {
+        if (isWorkday()) workdayAutomation();
+        else tailorFirstFlow();
+      }
+    });
 
-    const drop=document.getElementById('ua-drop'),csv=document.getElementById('ua-csv');
-    drop.addEventListener('click',()=>csv.click());
-    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
-    drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
-    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);});
-    csv.addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);});
+    const drop = document.getElementById('ua-drop'), csv = document.getElementById('ua-csv');
+    drop.addEventListener('click', () => csv.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+    csv.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
-    document.getElementById('ua-add').addEventListener('click',()=>{const i=document.getElementById('ua-url');if(i.value.trim()){addJob(i.value.trim());i.value='';}});
-    document.getElementById('ua-url').addEventListener('keypress',e=>{if(e.key==='Enter')document.getElementById('ua-add').click();});
-    document.getElementById('ua-selall').addEventListener('change',e=>{if(e.target.checked)queue.forEach(j=>selected.add(j.id));else selected.clear();renderQ();});
-    document.getElementById('ua-del').addEventListener('click',removeSelected);
+    document.getElementById('ua-add').addEventListener('click', () => { const i = document.getElementById('ua-url'); if (i.value.trim()) { addJob(i.value.trim()); i.value = ''; } });
+    document.getElementById('ua-url').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('ua-add').click(); });
+    document.getElementById('ua-selall').addEventListener('change', e => { if (e.target.checked) queue.forEach(j => selected.add(j.id)); else selected.clear(); renderQ(); });
+    document.getElementById('ua-del').addEventListener('click', removeSelected);
   }
 
-  async function handleFile(f){const u=parseCSV(await f.text());if(!u.length){alert('No valid URLs found.');return;}for(const x of u)await addJob(x);document.getElementById('ua-drawer').classList.add('open');positionDrawer();}
+  async function handleFile(f) { const u = parseCSV(await f.text()); if (!u.length) { alert('No valid URLs found.'); return; } for (const x of u) await addJob(x); document.getElementById('ua-drawer').classList.add('open'); positionDrawer(); }
 
   // ===================== RENDER =====================
-  function renderQ(){
-    const list=document.getElementById('ua-qlist'),cnt=document.getElementById('ua-q-cnt'),sum=document.getElementById('ua-qsum'),btns=document.getElementById('ua-qbtns'),badge=document.getElementById('ua-badge'),del=document.getElementById('ua-del'),sa=document.getElementById('ua-selall'),info=document.getElementById('ua-q-info');
-    if(!list)return;
-    cnt.textContent=`(${queue.length})`;
-    badge.textContent=queue.length||'';
-    info.textContent=queue.length?queue.length+' URL'+(queue.length>1?'s':''):'';
-    del.disabled=!selected.size;
-    sa.checked=queue.length>0&&selected.size===queue.length;
+  function renderQ() {
+    const list = document.getElementById('ua-qlist'), cnt = document.getElementById('ua-q-cnt'), sum = document.getElementById('ua-qsum'), btns = document.getElementById('ua-qbtns'), badge = document.getElementById('ua-badge'), del = document.getElementById('ua-del'), sa = document.getElementById('ua-selall'), info = document.getElementById('ua-q-info');
+    if (!list) return;
+    cnt.textContent = `(${queue.length})`;
+    badge.textContent = queue.length || '';
+    info.textContent = queue.length ? queue.length + ' URL' + (queue.length > 1 ? 's' : '') : '';
+    del.disabled = !selected.size;
+    sa.checked = queue.length > 0 && selected.size === queue.length;
 
-    list.innerHTML=queue.map((j,i)=>`<div class="ua-qi"><input type="checkbox" data-id="${j.id}" class="qcb" ${selected.has(j.id)?'checked':''}><span class="num">${i+1}</span><span class="url" title="${j.url}">${j.title||j.url}</span><span class="st ${j.status}">${j.status}</span><button class="rm" data-id="${j.id}">&times;</button></div>`).join('');
+    list.innerHTML = queue.map((j, i) => `<div class="ua-qi"><input type="checkbox" data-id="${j.id}" class="qcb" ${selected.has(j.id) ? 'checked' : ''}><span class="num">${i + 1}</span><span class="url" title="${j.url}">${j.title || j.url}</span><span class="st ${j.status}">${j.status}</span><button class="rm" data-id="${j.id}">&times;</button></div>`).join('');
 
-    list.querySelectorAll('.qcb').forEach(c=>c.addEventListener('change',e=>{if(e.target.checked)selected.add(e.target.dataset.id);else selected.delete(e.target.dataset.id);renderQ();}));
-    list.querySelectorAll('.rm').forEach(b=>b.addEventListener('click',e=>removeJob(e.currentTarget.dataset.id)));
+    list.querySelectorAll('.qcb').forEach(c => c.addEventListener('change', e => { if (e.target.checked) selected.add(e.target.dataset.id); else selected.delete(e.target.dataset.id); renderQ(); }));
+    list.querySelectorAll('.rm').forEach(b => b.addEventListener('click', e => removeJob(e.currentTarget.dataset.id)));
 
-    const pn=queue.filter(j=>j.status==='pending').length,dn=queue.filter(j=>j.status==='done').length,fl=queue.filter(j=>j.status==='failed').length,ap=queue.filter(j=>j.status==='applying').length;
-    sum.innerHTML=queue.length?`<span><i style="background:#f59e0b"></i>${pn} pending</span><span><i style="background:#3b82f6"></i>${ap} active</span><span><i style="background:#10b981"></i>${dn} done</span>${fl?`<span><i style="background:#ef4444"></i>${fl} failed</span>`:''}` :'';
+    const pn = queue.filter(j => j.status === 'pending').length, dn = queue.filter(j => j.status === 'done').length, fl = queue.filter(j => j.status === 'failed').length, ap = queue.filter(j => j.status === 'applying').length;
+    sum.innerHTML = queue.length ? `<span><i style="background:#f59e0b"></i>${pn} pending</span><span><i style="background:#3b82f6"></i>${ap} active</span><span><i style="background:#10b981"></i>${dn} done</span>${fl ? `<span><i style="background:#ef4444"></i>${fl} failed</span>` : ''}` : '';
 
-    if(!queue.length){btns.innerHTML='';return;}
-    if(!qActive){btns.innerHTML=`<button class="pri" id="uq-start" ${pn?'':'disabled'}>Start Applying</button><button class="sec" id="uq-clear">Clear All</button>`;}
-    else{btns.innerHTML=`<button class="dan" id="uq-stop">Stop</button>`;}
-    document.getElementById('uq-start')?.addEventListener('click',startQ);
-    document.getElementById('uq-stop')?.addEventListener('click',stopQ);
-    document.getElementById('uq-clear')?.addEventListener('click',clearQ);
+    if (!queue.length) { btns.innerHTML = ''; return; }
+    if (!qActive) { btns.innerHTML = `<button class="pri" id="uq-start" ${pn ? '' : 'disabled'}>Start Applying</button><button class="sec" id="uq-clear">Clear All</button>`; }
+    else { btns.innerHTML = `<button class="dan" id="uq-stop">Stop</button>`; }
+    document.getElementById('uq-start')?.addEventListener('click', startQ);
+    document.getElementById('uq-stop')?.addEventListener('click', stopQ);
+    document.getElementById('uq-clear')?.addEventListener('click', clearQ);
   }
 
-  function updateCtrl(){
-    const ctrl=document.getElementById('ua-ctrl');
-    const prog=document.getElementById('uc-prog');
-    const pauseBtn=document.getElementById('uc-pause');
-    if(!ctrl)return;
-    if(qActive){
+  function updateCtrl() {
+    const ctrl = document.getElementById('ua-ctrl');
+    const prog = document.getElementById('uc-prog');
+    const pauseBtn = document.getElementById('uc-pause');
+    if (!ctrl) return;
+    if (qActive) {
       ctrl.classList.add('show');
-      const dn=queue.filter(j=>j.status==='done').length;
-      prog.textContent=dn+'/'+queue.length;
-      if(qPaused){pauseBtn.innerHTML=ico('play',14,14,'#34d399');pauseBtn.className='uc-btn resume';pauseBtn.title='Resume';}
-      else{pauseBtn.innerHTML=ico('pause',14,14,'#fbbf24');pauseBtn.className='uc-btn pause';pauseBtn.title='Pause';}
-    }else{ctrl.classList.remove('show');}
+      const dn = queue.filter(j => j.status === 'done').length;
+      prog.textContent = dn + '/' + queue.length;
+      if (qPaused) { pauseBtn.innerHTML = ico('play', 14, 14, '#34d399'); pauseBtn.className = 'uc-btn resume'; pauseBtn.title = 'Resume'; }
+      else { pauseBtn.innerHTML = ico('pause', 14, 14, '#fbbf24'); pauseBtn.className = 'uc-btn pause'; pauseBtn.title = 'Pause'; }
+    } else { ctrl.classList.remove('show'); }
   }
 
-  function updateStat(){
-    const el=document.getElementById('ua-stat'),t=document.getElementById('ua-stat-t');if(!el)return;
-    const ats=detectATS();
-    if(autoApply){el.className='ua-stat on';t.textContent=ats?'Active - '+ats+' detected':'Active - monitoring';}
-    else{el.className='ua-stat off';t.textContent='Inactive';}
+  function updateStat() {
+    const el = document.getElementById('ua-stat'), t = document.getElementById('ua-stat-t'); if (!el) return;
+    const ats = detectATS();
+    if (autoApply) { el.className = 'ua-stat on'; t.textContent = ats ? 'Active - ' + ats + ' detected' : 'Active - monitoring'; }
+    else { el.className = 'ua-stat off'; t.textContent = 'Inactive'; }
   }
 
-  function showATSBadge(){const a=detectATS();if(a){document.getElementById('ua-ats-n').textContent=a+' Detected';document.getElementById('ua-ats').classList.add('show');}}
+  function showATSBadge() { const a = detectATS(); if (a) { document.getElementById('ua-ats-n').textContent = a + ' Detected'; document.getElementById('ua-ats').classList.add('show'); } }
 
   // ===================== OBSERVER =====================
-  function observe(){const o=new MutationObserver(()=>hideCredits());o.observe(document.body||document.documentElement,{childList:true,subtree:true});}
+  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, {childList: true, subtree: true}); }
 
   // ===================== INIT =====================
-  async function init(){
-    if(window.self!==window.top)return;
-    await load();injectCSS();buildUI();
-    [500,1500,3000,5000,8000].forEach(ms=>setTimeout(hideCredits,ms));
-    observe();showATSBadge();renderQ();updateStat();updateCtrl();
-    if(autoApply&&isAppForm()){await sleep(2000);if(isWorkday())await workdayAutomation();else await triggerAutofill();}
-    if(qActive){await sleep(2000);processQ();}
-    if(isJobright()){await sleep(2000);resumeTailoringAutomation();}
+  async function init() {
+    if (window.self !== window.top) return;
+    await load(); await loadAnswerBank(); injectCSS(); buildUI();
+    [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
+    observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
+
+    const ats = detectATS();
+    if (ats) {
+      LOG(`ATS detected: ${ats}`);
+      // Auto-start tailor-first flow when ATS is detected and auto-apply is on
+      if (autoApply) {
+        await sleep(2000);
+        if (isWorkday()) await workdayAutomation();
+        else await tailorFirstFlow();
+      }
+    }
+    if (qActive) { await sleep(2000); processQ(); }
+    if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
