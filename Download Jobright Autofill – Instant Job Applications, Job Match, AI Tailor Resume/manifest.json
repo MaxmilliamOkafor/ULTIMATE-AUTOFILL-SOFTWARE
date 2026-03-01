@@ -35,6 +35,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "js": ["ua-enhancement.js"],
+      "css": [],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": ["constants.90d51f50.js"],
       "css": []
     },
@@ -60,13 +67,6 @@
         "https://crcldu.com/*"
       ],
       "run_at": "document_idle"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["ua-enhancement.js"],
-      "css": [],
-      "run_at": "document_idle",
-      "all_frames": false
     }
   ],
   "host_permissions": [

@@ -1,552 +1,577 @@
-/**
- * Ultimate Enhancement: Universal Form Autofill + AI Tailoring + One-Click Queue
- * Extends the Jobright Autofill extension to support:
- * 1. ALL ATS platforms and company career site job application forms
- * 2. AI-powered response tailoring (perfect 100% match every time)
- * 3. One-click "Add to Queue" floating button on any job page
- * 4. Auto-detect and auto-fill on page load
- * 5. Auto-submit with safety guards
- */
-
+// === ULTIMATE AUTOFILL ENHANCEMENT v3.0 ===
+// Features: Unlimited credits bypass, CSV import queue, auto-apply toggle,
+// universal ATS detection, one-click queue button, auto-apply engine
 (function () {
-  "use strict";
+  'use strict';
 
-  // ═══════════════════════════════════════════════
-  //  STORAGE KEYS
-  // ═══════════════════════════════════════════════
+  // ==================== CONFIGURATION ====================
   const STORAGE_KEYS = {
-    SETTINGS: "ua_enhanced_settings",
-    QUEUE: "ua_job_queue",
-    PROFILE: "ua_user_profile",
-    RESPONSES: "ua_saved_responses",
+    AUTO_APPLY: 'ua_auto_apply_enabled',
+    JOB_QUEUE: 'ua_job_queue',
+    QUEUE_ACTIVE: 'ua_queue_active'
   };
 
-  // ═══════════════════════════════════════════════
-  //  DEFAULT SETTINGS
-  // ═══════════════════════════════════════════════
-  const DEFAULT_SETTINGS = {
-    universalFormDetection: true,
-    autoDetectAndFill: true,
-    autoSubmit: false,
-    humanLikePacing: true,
-    aiTailoring: {
-      enabled: true,
-      intensity: 0.8,
-      profileKeywords: [],
-      targetKeywords: [],
-      profileSummary: "",
-    },
-    creditsUnlimited: true,
-    rateLimit: { maxPerHour: 30, maxPerDay: 200 },
-    delayBetweenJobs: 3000,
-  };
-
-  // ═══════════════════════════════════════════════
-  //  COMPREHENSIVE ATS PLATFORM REGISTRY
-  //  Covers ALL major ATS + company career sites
-  // ═══════════════════════════════════════════════
-  const ATS_PLATFORMS = [
-    // ─── Major ATS Platforms ───
-    { id: "workday", name: "Workday", domains: ["myworkdayjobs.com", "myworkday.com", "myworkdaysite.com", "wd1.myworkdayjobs.com", "wd3.myworkdayjobs.com", "wd5.myworkdayjobs.com"], urlPatterns: [/myworkday(jobs|site)?\.com/i], domSignals: ['[data-automation-id="jobPostingPage"]', '[data-automation-id="questionnaireContainer"]', "[data-automation-id]"], supportsAutoSubmit: true },
-    { id: "greenhouse", name: "Greenhouse", domains: ["greenhouse.io", "boards.greenhouse.io"], urlPatterns: [/greenhouse\.io/i, /boards\.greenhouse\.io/i], domSignals: ["#app_body", "#application", ".application-form", "#greenhouse_application"], supportsAutoSubmit: true },
-    { id: "lever", name: "Lever", domains: ["lever.co", "jobs.lever.co"], urlPatterns: [/lever\.co/i, /jobs\.lever\.co/i], domSignals: [".lever-application-form", '[data-qa="application-form"]', ".posting-apply"], supportsAutoSubmit: true },
-    { id: "smartrecruiters", name: "SmartRecruiters", domains: ["smartrecruiters.com", "jobs.smartrecruiters.com"], urlPatterns: [/smartrecruiters\.com/i], domSignals: ['[class*="smartrecruiters"]', ".st-apply-form", "[data-test]"], supportsAutoSubmit: true },
-    { id: "icims", name: "iCIMS", domains: ["icims.com"], urlPatterns: [/icims\.com/i], domSignals: [".iCIMS_MainWrapper", "#iCIMS_Content", "[class*='icims']"], supportsAutoSubmit: true },
-    { id: "taleo", name: "Taleo", domains: ["taleo.net", "oracle.taleo.net"], urlPatterns: [/taleo\.net/i], domSignals: ["#requisitionDescriptionInterface", "#page", ".taleo-form"], supportsAutoSubmit: true },
-    { id: "ashby", name: "Ashby", domains: ["ashbyhq.com", "jobs.ashbyhq.com"], urlPatterns: [/ashbyhq\.com/i], domSignals: ["[data-testid='ashby-application-form']", ".ashby-application-form-field-entry", "ashby-job-posting-widget"], supportsAutoSubmit: true },
-    { id: "bamboohr", name: "BambooHR", domains: ["bamboohr.com"], urlPatterns: [/bamboohr\.com/i], domSignals: [".BambooHR-ATS-board", "#ApplicationForm", "[data-bamboohr]"], supportsAutoSubmit: true },
-    { id: "oraclecloud", name: "Oracle Cloud HCM", domains: ["oraclecloud.com", "fa-ext.oraclecloud.com"], urlPatterns: [/oraclecloud\.com/i], domSignals: ["[data-oj-binding-provider]", "#ojAppRoot", ".oj-flex", "oj-input-text"], supportsAutoSubmit: true },
-    { id: "linkedin", name: "LinkedIn", domains: ["linkedin.com"], urlPatterns: [/linkedin\.com\/jobs/i], domSignals: [".jobs-apply-button", ".jobs-unified-top-card", "[data-test-form-element]"], supportsAutoSubmit: false },
-    { id: "indeed", name: "Indeed", domains: ["indeed.com", "apply.indeed.com"], urlPatterns: [/indeed\.com/i, /apply\.indeed\.com/i], domSignals: ["#ia-container", ".ia-BasePage", "[data-testid='ia-Questions']"], supportsAutoSubmit: true },
-    // ─── Additional ATS Platforms (from Jobright's supported list) ───
-    { id: "ultipro", name: "UltiPro/UKG", domains: ["ultipro.com", "recruiting.ultipro.com"], urlPatterns: [/ultipro\.com/i], domSignals: ["#opportunity-page", ".opportunity-details"], supportsAutoSubmit: true },
-    { id: "jobvite", name: "Jobvite", domains: ["jobvite.com", "jobs.jobvite.com"], urlPatterns: [/jobvite\.com/i], domSignals: [".jv-page-body", "#jv-application-form"], supportsAutoSubmit: true },
-    { id: "breezy", name: "Breezy HR", domains: ["breezy.hr"], urlPatterns: [/breezy\.hr/i], domSignals: [".breezy-application", ".application-form"], supportsAutoSubmit: true },
-    { id: "recruitee", name: "Recruitee", domains: ["recruitee.com", "careers.recruitee.com"], urlPatterns: [/recruitee\.com/i], domSignals: [".recruitee-career", ".apply-form"], supportsAutoSubmit: true },
-    { id: "adp", name: "ADP", domains: ["adp.com"], urlPatterns: [/adp\.com/i], domSignals: ["adp-form-group", "[data-name]"], supportsAutoSubmit: true },
-    { id: "rippling", name: "Rippling", domains: ["ats.rippling.com"], urlPatterns: [/ats\.rippling\.com/i], domSignals: [".rippling-ats", "[data-rpl]"], supportsAutoSubmit: true },
-    { id: "dover", name: "Dover", domains: ["dover.com", "app.dover.com"], urlPatterns: [/dover\.com/i], domSignals: [".dover-application"], supportsAutoSubmit: true },
-    { id: "dayforce", name: "Dayforce/Ceridian", domains: ["dayforce.com", "ceridian.com"], urlPatterns: [/dayforce\.com|ceridian\.com/i], domSignals: [".dayforce-apply"], supportsAutoSubmit: true },
-    { id: "successfactors", name: "SAP SuccessFactors", domains: ["successfactors.com"], urlPatterns: [/successfactors\.com/i], domSignals: ["[data-sap-ui]", ".sapUiBody"], supportsAutoSubmit: true },
-    { id: "paylocity", name: "Paylocity", domains: ["paylocity.com"], urlPatterns: [/paylocity\.com/i], domSignals: [], supportsAutoSubmit: true },
-    { id: "paycom", name: "Paycom", domains: ["paycom.com", "paycomonline.com"], urlPatterns: [/paycom(online)?\.com/i], domSignals: [], supportsAutoSubmit: true },
-    { id: "jazzhr", name: "JazzHR", domains: ["jazzhr.com", "app.jazz.co"], urlPatterns: [/jazzhr\.com|jazz\.co/i], domSignals: [".jazz-apply", "#apply-form"], supportsAutoSubmit: true },
-    { id: "fountain", name: "Fountain", domains: ["fountain.com"], urlPatterns: [/fountain\.com/i], domSignals: [], supportsAutoSubmit: true },
-    { id: "pinpoint", name: "Pinpoint", domains: ["pinpointhq.com"], urlPatterns: [/pinpointhq\.com/i], domSignals: [], supportsAutoSubmit: true },
-    { id: "comeet", name: "Comeet", domains: ["comeet.com", "comeet.co"], urlPatterns: [/comeet\.(com|co)/i], domSignals: [".comeet-form"], supportsAutoSubmit: true },
-    { id: "personio", name: "Personio", domains: ["personio.de", "jobs.personio.de"], urlPatterns: [/personio\.de/i], domSignals: [], supportsAutoSubmit: true },
-    { id: "ziprecruiter", name: "ZipRecruiter", domains: ["ziprecruiter.com"], urlPatterns: [/ziprecruiter\.com/i], domSignals: [".apply_form"], supportsAutoSubmit: false },
-    { id: "monster", name: "Monster", domains: ["monster.com"], urlPatterns: [/monster\.com/i], domSignals: [], supportsAutoSubmit: false },
-    { id: "glassdoor", name: "Glassdoor", domains: ["glassdoor.com"], urlPatterns: [/glassdoor\.com/i], domSignals: [".applyButton"], supportsAutoSubmit: false },
-    { id: "dice", name: "Dice", domains: ["dice.com"], urlPatterns: [/dice\.com/i], domSignals: [], supportsAutoSubmit: false },
-    { id: "wellfound", name: "Wellfound (AngelList)", domains: ["wellfound.com", "angel.co"], urlPatterns: [/wellfound\.com|angel\.co/i], domSignals: [], supportsAutoSubmit: false },
+  const ATS_PATTERNS = [
+    { name: 'Workday', pattern: /myworkdayjobs\.com|workday\.com\/.*\/job/i },
+    { name: 'Greenhouse', pattern: /boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i },
+    { name: 'Lever', pattern: /jobs\.lever\.co|lever\.co\/.*\/apply/i },
+    { name: 'SmartRecruiters', pattern: /jobs\.smartrecruiters\.com/i },
+    { name: 'iCIMS', pattern: /icims\.com/i },
+    { name: 'Taleo', pattern: /taleo\.net|oraclecloud\.com.*CandidateExperience/i },
+    { name: 'Ashby', pattern: /jobs\.ashbyhq\.com/i },
+    { name: 'BambooHR', pattern: /bamboohr\.com.*\/jobs/i },
+    { name: 'Oracle', pattern: /oraclecloud\.com.*recruit/i },
+    { name: 'LinkedIn', pattern: /linkedin\.com\/jobs\/(view|application)/i },
+    { name: 'Indeed', pattern: /indeed\.com.*(viewjob|apply)/i },
+    { name: 'UltiPro', pattern: /ultipro\.com|recruiting\.ultipro/i },
+    { name: 'Jobvite', pattern: /jobs\.jobvite\.com/i },
+    { name: 'Breezy', pattern: /breezy\.hr|breezyhr\.com/i },
+    { name: 'Recruitee', pattern: /recruitee\.com\/o\//i },
+    { name: 'ADP', pattern: /adp\.com.*\/job|workforcenow\.adp/i },
+    { name: 'Rippling', pattern: /ats\.rippling\.com/i },
+    { name: 'Dover', pattern: /app\.dover\.com|dover\.com\/apply/i },
+    { name: 'Dayforce', pattern: /dayforce\.com.*candidateportal/i },
+    { name: 'SuccessFactors', pattern: /successfactors\.com/i },
+    { name: 'JazzHR', pattern: /app\.jazz\.co|applytojob\.com/i },
+    { name: 'Fountain', pattern: /fountain\.com.*\/apply/i },
+    { name: 'Pinpoint', pattern: /pinpointhq\.com.*\/jobs/i },
+    { name: 'Comeet', pattern: /comeet\.com.*\/jobs/i },
+    { name: 'Personio', pattern: /personio\.de.*\/job/i },
+    { name: 'ZipRecruiter', pattern: /ziprecruiter\.com.*(jobs|apply)/i },
+    { name: 'Monster', pattern: /monster\.com.*job/i },
+    { name: 'Glassdoor', pattern: /glassdoor\.com.*job/i },
+    { name: 'Dice', pattern: /dice\.com.*job/i },
+    { name: 'Wellfound', pattern: /wellfound\.com.*\/jobs/i },
+    { name: 'Paylocity', pattern: /paylocity\.com.*Recruiting/i },
+    { name: 'Paycom', pattern: /paycomonline\.com.*careers/i },
+    { name: 'Phenom', pattern: /phenom\.com.*\/jobs/i },
+    { name: 'Avature', pattern: /avature\.net.*careers/i },
+    { name: 'CareerSite', pattern: /\/careers?\/?|\/jobs?\/?|\/apply|\/positions?\//i }
   ];
 
-  // ═══════════════════════════════════════════════
-  //  ATS DETECTION ENGINE
-  // ═══════════════════════════════════════════════
+  // ==================== CREDIT BYPASS (Content Script) ====================
+  const _fetch = window.fetch;
+  window.fetch = async function () {
+    const url = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url) || '';
+    if (url.includes('/swan/credit/balance-v2')) {
+      return new Response(JSON.stringify({ code: 200, result: { credit: { autofill: 99999 }, dailyFill: { autofill: 99999 } } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/swan/payment/subscription')) {
+      return new Response(JSON.stringify({ code: 200, result: { status: 'ACTIVE', plan: 'turbo', subscriptionId: 'unlimited' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/swan/autofill/cost-credit')) {
+      return new Response(JSON.stringify({ code: 200, result: false }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/swan/credit/free')) {
+      return new Response(JSON.stringify({ code: 200, result: { dailyFill: { autofill: 99999 }, credit: { autofill: 99999 } } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/swan/payment/price')) {
+      return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return _fetch.apply(window, arguments);
+  };
+
+  // ==================== CSS ====================
+  function injectStyles() {
+    if (document.getElementById('ua-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'ua-styles';
+    s.textContent = `
+      /* Hide credit UI from original extension */
+      .autofill-credit-row,
+      .autofill-credit-text,
+      .autofill-credit-text-right,
+      .payment-entry,
+      .plugin-setting-credits-tip { display:none!important; }
+      .ant-modal-root:has(.popup-modal-actions) { display:none!important; }
+
+      /* Panel */
+      #ua-panel{position:fixed;bottom:80px;right:20px;z-index:2147483647;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+      #ua-fab{width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#00f0a0,#00d090);border:none;cursor:pointer;box-shadow:0 4px 14px rgba(0,240,160,.4);display:flex;align-items:center;justify-content:center;color:#000;font-size:18px;font-weight:800;transition:.3s}
+      #ua-fab:hover{transform:scale(1.1);box-shadow:0 6px 22px rgba(0,240,160,.5)}
+      #ua-drawer{display:none;position:absolute;bottom:62px;right:0;width:370px;max-height:530px;background:#fff;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.16);flex-direction:column;overflow:hidden}
+      #ua-drawer.open{display:flex}
+      .ua-hdr{background:linear-gradient(135deg,#00f0a0,#00d090);padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+      .ua-hdr h3{margin:0;font-size:15px;font-weight:700;color:#000}
+      .ua-hdr small{font-size:10px;color:#00000070}
+      .ua-badge{background:#000;color:#00f0a0;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+      .ua-body{padding:14px 18px;overflow-y:auto;max-height:420px;flex:1}
+      .ua-sec{margin-bottom:14px}
+      .ua-sec-title{font-size:11px;font-weight:700;text-transform:uppercase;color:#00000050;margin-bottom:6px;letter-spacing:.5px}
+
+      /* Toggle */
+      .ua-tog{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:6px}
+      .ua-tog-label{font-size:13px;font-weight:600}
+      .ua-tog-desc{font-size:10px;color:#00000060;margin-top:1px}
+      .ua-sw{position:relative;width:42px;height:22px;flex-shrink:0}
+      .ua-sw input{opacity:0;width:0;height:0}
+      .ua-sw-sl{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:22px;transition:.3s}
+      .ua-sw-sl:before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+      .ua-sw input:checked+.ua-sw-sl{background:#00f0a0}
+      .ua-sw input:checked+.ua-sw-sl:before{transform:translateX(20px)}
+
+      /* CSV */
+      .ua-drop{border:2px dashed #ddd;border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:.3s;background:#fafafa}
+      .ua-drop:hover,.ua-drop.over{border-color:#00f0a0;background:#f0fff8}
+      .ua-drop-ico{font-size:22px}
+      .ua-drop-txt{font-size:11px;color:#00000060;margin-top:2px}
+      .ua-csv-in{display:none}
+      .ua-url-row{display:flex;gap:6px;margin-top:8px}
+      .ua-url-inp{flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:12px;outline:none}
+      .ua-url-inp:focus{border-color:#00f0a0}
+      .ua-url-add{background:#00f0a0;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+
+      /* Queue */
+      .ua-q-list{max-height:180px;overflow-y:auto;margin-top:6px}
+      .ua-q-item{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:#f8f9fa;border-radius:8px;margin-bottom:3px;font-size:11px}
+      .ua-q-url{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;color:#333}
+      .ua-q-st{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600;margin-left:6px;flex-shrink:0}
+      .ua-q-st.pending{background:#fff3cd;color:#856404}
+      .ua-q-st.applying{background:#cce5ff;color:#004085}
+      .ua-q-st.done{background:#d4edda;color:#155724}
+      .ua-q-st.failed{background:#f8d7da;color:#721c24}
+      .ua-q-rm{cursor:pointer;color:#dc3545;font-size:14px;margin-left:6px;background:none;border:none;padding:0;line-height:1}
+      .ua-q-sum{font-size:11px;color:#666;text-align:center;margin-top:6px}
+      .ua-btn{width:100%;padding:9px 14px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:.2s;text-transform:uppercase;letter-spacing:.5px;margin-top:6px}
+      .ua-btn-p{background:#00f0a0;color:#000}
+      .ua-btn-p:hover{background:#00d090}
+      .ua-btn-p:disabled{background:#e0e0e0;color:#999;cursor:not-allowed}
+      .ua-btn-d{background:#fff;color:#dc3545;border:1px solid #dc3545}
+      .ua-btn-d:hover{background:#dc3545;color:#fff}
+
+      /* Status */
+      .ua-status{text-align:center;padding:6px;border-radius:8px;font-size:11px;font-weight:600;margin-top:6px}
+      .ua-status.on{background:#d4edda;color:#155724}
+      .ua-status.off{background:#f8f9fa;color:#666}
+
+      /* ATS badge */
+      #ua-ats{position:fixed;top:10px;right:10px;z-index:2147483646;background:#000;color:#00f0a0;padding:5px 12px;border-radius:20px;font-family:Inter,sans-serif;font-size:11px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.2);display:none;align-items:center;gap:5px}
+      #ua-ats.show{display:flex}
+      #ua-ats .dot{width:7px;height:7px;background:#00f0a0;border-radius:50%;animation:ua-p 1.5s infinite}
+      @keyframes ua-p{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.3)}}
+
+      /* Float add btn */
+      #ua-add-float{position:fixed;bottom:142px;right:20px;z-index:2147483646;background:#000;color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:20px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;transition:.3s}
+      #ua-add-float:hover{transform:scale(1.1);background:#333}
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ==================== STORAGE ====================
+  const store = {
+    get: k => new Promise(r => chrome.storage.local.get(k, d => r(d[k]))),
+    set: (k, v) => new Promise(r => chrome.storage.local.set({ [k]: v }, r))
+  };
+
+  // ==================== STATE ====================
+  let queue = [];
+  let queueActive = false;
+  let autoApply = false;
+
+  async function loadState() {
+    queue = (await store.get(STORAGE_KEYS.JOB_QUEUE)) || [];
+    queueActive = (await store.get(STORAGE_KEYS.QUEUE_ACTIVE)) || false;
+    autoApply = (await store.get(STORAGE_KEYS.AUTO_APPLY)) || false;
+  }
+
+  async function saveQueue() {
+    await store.set(STORAGE_KEYS.JOB_QUEUE, queue);
+  }
+
+  // ==================== QUEUE MANAGEMENT ====================
+  async function addJob(url, title) {
+    if (!url || queue.some(j => j.url === url)) return;
+    queue.push({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      url, title: title || shortUrl(url),
+      status: 'pending', addedAt: Date.now()
+    });
+    await saveQueue();
+    renderQueue();
+  }
+
+  async function removeJob(id) {
+    queue = queue.filter(j => j.id !== id);
+    await saveQueue();
+    renderQueue();
+  }
+
+  async function clearQueue() {
+    queue = [];
+    await saveQueue();
+    renderQueue();
+  }
+
+  function shortUrl(u) {
+    try { const p = new URL(u); return p.hostname.replace('www.', '') + p.pathname.slice(0, 30); }
+    catch { return u.slice(0, 40); }
+  }
+
+  // ==================== CSV PARSER ====================
+  function parseCSV(text) {
+    const urls = [];
+    for (const line of text.split(/[\r\n]+/)) {
+      const t = line.trim();
+      if (!t || /^(url|link|job)/i.test(t)) continue;
+      for (const col of t.split(/[,\t]/)) {
+        const c = col.trim().replace(/^["']|["']$/g, '');
+        if (/^https?:\/\//i.test(c)) { urls.push(c); break; }
+      }
+      if (/^https?:\/\//i.test(t) && !urls.includes(t)) urls.push(t);
+    }
+    return [...new Set(urls)];
+  }
+
+  // ==================== ATS DETECTION ====================
   function detectATS() {
     const url = window.location.href;
-    let best = { id: "generic", name: "Unknown", confidence: 0 };
-
-    for (const ats of ATS_PLATFORMS) {
-      let conf = 0;
-      for (const p of ats.urlPatterns) {
-        if (p.test(url)) { conf += 0.5; break; }
-      }
-      for (const sel of (ats.domSignals || [])) {
-        try { if (document.querySelector(sel)) { conf += 0.2; if (conf >= 0.9) break; } } catch (e) {}
-      }
-      conf = Math.min(conf, 1);
-      if (conf > best.confidence) {
-        best = { id: ats.id, name: ats.name, confidence: conf };
-      }
+    for (const a of ATS_PATTERNS) {
+      if (a.pattern.test(url)) return a.name;
     }
-
-    // Universal: detect company career sites with forms
-    if (best.confidence < 0.3) {
-      const companySite = detectCompanySite();
-      if (companySite.confidence > best.confidence) return companySite;
-    }
-
-    return best;
+    return null;
   }
 
-  function detectCompanySite() {
-    let conf = 0;
-    const url = window.location.href;
-
-    // URL path signals
-    if (/\/(careers?|jobs?|apply|openings?|positions?|hiring|opportunities|recruit|talent|work-with-us|join-us|application)\b/i.test(url)) conf += 0.25;
-
-    // Form with application fields
-    const forms = document.querySelectorAll("form");
-    for (const form of forms) {
-      let fieldCount = 0;
-      const fields = form.querySelectorAll("input, textarea, select");
-      const hints = [/name/i, /first/i, /last/i, /email/i, /phone/i, /resume/i, /cv/i, /cover/i, /experience/i, /education/i, /skill/i, /linkedin/i, /portfolio/i, /salary/i, /sponsor/i, /visa/i, /relocat/i];
-      for (const f of fields) {
-        const combined = [f.name, f.id, f.placeholder, f.getAttribute("aria-label")].join(" ").toLowerCase();
-        if (hints.some(h => h.test(combined))) fieldCount++;
-      }
-      if (fieldCount >= 3) { conf += 0.3; break; }
-    }
-
-    // Page title
-    const title = (document.title + " " + (document.querySelector("h1")?.textContent || "")).toLowerCase();
-    if (/apply|application|career|job|position|opening/i.test(title)) conf += 0.15;
-
-    // Resume upload
-    const fileInputs = document.querySelectorAll('input[type="file"]');
-    for (const fi of fileInputs) {
-      const combined = [fi.getAttribute("accept"), fi.name, fi.getAttribute("aria-label")].join(" ");
-      if (/resume|cv|curriculum|cover/i.test(combined)) { conf += 0.2; break; }
-    }
-
-    return { id: "companysite", name: "Company Career Site", confidence: Math.min(conf, 1) };
+  function isAppForm() {
+    if (detectATS()) return true;
+    const sels = [
+      'input[name*="resume" i]', 'input[type="file"][accept*=".pdf"]',
+      'form[action*="apply" i]', '[data-testid*="apply" i]',
+      '.application-form', '#application-form'
+    ];
+    for (const s of sels) { try { if (document.querySelector(s)) return true; } catch {} }
+    const txt = (document.body?.innerText || '').slice(0, 5000);
+    return /apply\s+(now|for|to|here)/i.test(txt) && /resume|cover letter|experience/i.test(txt);
   }
 
-  // ═══════════════════════════════════════════════
-  //  AI TAILORING ENGINE
-  //  Analyzes job context and tailors responses
-  // ═══════════════════════════════════════════════
-  function extractJobContext() {
-    const ctx = {};
-
-    // Job title
-    const titleSels = ['h1.job-title', 'h1.posting-headline', 'h1[class*="title"]', '[data-automation-id="jobPostingHeader"]', '.job-title', '.posting-headline h2', 'h1', '.topcard__title', '.jobsearch-JobInfoHeader-title', '[data-testid="job-title"]', '.jobs-unified-top-card__job-title'];
-    for (const sel of titleSels) {
+  // ==================== AUTO-APPLY ENGINE ====================
+  function waitFor(sel, ms) {
+    return new Promise(resolve => {
       const el = document.querySelector(sel);
-      if (el?.textContent?.trim()) { ctx.jobTitle = el.textContent.trim(); break; }
-    }
-
-    // Company name
-    const companySels = ['.company-name', '[data-automation-id="company"]', '.posting-categories .sort-by-team', '.employer-name', '.topcard__org-name-link', '.jobsearch-InlineCompanyRating-companyHeader', '[data-testid="company-name"]', '.jobs-unified-top-card__company-name'];
-    for (const sel of companySels) {
-      const el = document.querySelector(sel);
-      if (el?.textContent?.trim()) { ctx.companyName = el.textContent.trim(); break; }
-    }
-
-    // Job description for skill extraction
-    const descSels = ['.job-description', '[data-automation-id="jobPostingDescription"]', '.posting-page .section-wrapper', '#job-details', '.jobsearch-jobDescriptionText', '.jobs-description__content', '[data-testid="job-description"]', '.description__text', '#job_description'];
-    let descText = "";
-    for (const sel of descSels) {
-      const el = document.querySelector(sel);
-      if (el?.textContent?.trim()?.length > 50) { descText = el.textContent.trim(); ctx.jobDescription = descText; break; }
-    }
-
-    // Extract skills
-    if (descText) {
-      const skillPatterns = [
-        /\b(javascript|typescript|python|java|c\+\+|ruby|go|rust|swift|kotlin|scala|php|sql|html|css|react|angular|vue|next\.?js|node\.?js|express|django|flask|spring|rails|\.net|tensorflow|pytorch|aws|azure|gcp|docker|kubernetes|terraform|jenkins|git|postgresql|mysql|mongodb|redis|elasticsearch|agile|scrum|leadership|communication|problem[- ]solving|teamwork|project management)\b/gi,
-      ];
-      const skills = new Set();
-      for (const pat of skillPatterns) {
-        const matches = descText.matchAll(pat);
-        for (const m of matches) skills.add(m[0].toLowerCase());
-      }
-      if (skills.size > 0) ctx.requiredSkills = [...skills];
-    }
-
-    return ctx;
-  }
-
-  function tailorResponse(response, fieldLabel, jobContext, settings) {
-    if (!settings?.enabled || settings.intensity === 0) return response;
-    if (response.length < 20) return response; // Skip short responses
-
-    const lowerLabel = (fieldLabel || "").toLowerCase();
-    const lowerResponse = response.toLowerCase();
-
-    // Don't tailor factual fields
-    const skipFields = ["name", "first name", "last name", "email", "phone", "address", "city", "state", "zip", "country", "salary", "date", "gender", "race", "ethnicity", "veteran", "disability"];
-    if (skipFields.some(f => lowerLabel.includes(f))) return response;
-
-    let tailored = response;
-
-    // Company name injection
-    if (jobContext.companyName && !lowerResponse.includes(jobContext.companyName.toLowerCase())) {
-      if (/why|cover|interest|motivation/i.test(lowerLabel)) {
-        tailored = `I am drawn to ${jobContext.companyName} for its impact in the industry. ${tailored}`;
-      } else if (/summary|about|introduction|tell us/i.test(lowerLabel)) {
-        tailored = tailored.replace(/\.?\s*$/, `, and I am eager to bring this expertise to ${jobContext.companyName}.`);
-      }
-    }
-
-    // Role title alignment
-    if (jobContext.jobTitle) {
-      const role = jobContext.jobTitle.replace(/\s*\(.*\)/, "").trim();
-      if (role.length > 3 && !lowerResponse.includes(role.toLowerCase())) {
-        if (/experience|background|summary|qualification/i.test(lowerLabel)) {
-          tailored = tailored.replace(/\.?\s*$/, `, directly relevant to the ${role} position.`);
-        }
-      }
-    }
-
-    // Skill emphasis
-    if (jobContext.requiredSkills?.length > 0 && settings.profileKeywords?.length > 0) {
-      const profileKw = settings.profileKeywords.map(k => k.toLowerCase());
-      const missing = jobContext.requiredSkills.filter(s => profileKw.includes(s) && !lowerResponse.includes(s));
-      if (missing.length > 0 && /skill|experience|qualification|summary|why/i.test(lowerLabel)) {
-        tailored = tailored.replace(/\.?\s*$/, `. My experience also includes ${missing.slice(0, 4).join(", ")}.`);
-      }
-    }
-
-    return tailored;
-  }
-
-  // ═══════════════════════════════════════════════
-  //  UNIVERSAL FORM FILLER
-  //  Fills ALL forms — any ATS or company site
-  // ═══════════════════════════════════════════════
-  async function getSettings() {
-    return new Promise(resolve => {
-      chrome.storage.local.get(STORAGE_KEYS.SETTINGS, r => {
-        resolve({ ...DEFAULT_SETTINGS, ...(r[STORAGE_KEYS.SETTINGS] || {}) });
+      if (el) { resolve(el); return; }
+      const obs = new MutationObserver(() => {
+        const e = document.querySelector(sel);
+        if (e) { obs.disconnect(); resolve(e); }
       });
+      obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => { obs.disconnect(); resolve(null); }, ms || 10000);
     });
   }
 
-  async function getSavedResponses() {
-    return new Promise(resolve => {
-      chrome.storage.local.get(STORAGE_KEYS.RESPONSES, r => {
-        resolve(r[STORAGE_KEYS.RESPONSES] || []);
-      });
-    });
-  }
-
-  async function getQueue() {
-    return new Promise(resolve => {
-      chrome.storage.local.get(STORAGE_KEYS.QUEUE, r => {
-        resolve(r[STORAGE_KEYS.QUEUE] || []);
-      });
-    });
-  }
-
-  async function saveQueue(queue) {
-    return new Promise(resolve => {
-      chrome.storage.local.set({ [STORAGE_KEYS.QUEUE]: queue }, resolve);
-    });
-  }
-
-  function getFieldLabel(el) {
-    if (el.id) {
-      const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (lbl?.textContent?.trim()) return lbl.textContent.trim();
+  async function triggerAutofill() {
+    // Wait for Jobright extension to inject its UI
+    await waitFor('#jobright-helper-id', 8000);
+    // Small delay for rendering
+    await new Promise(r => setTimeout(r, 1500));
+    // Find and click the Autofill button
+    const btn = document.querySelector('.auto-fill-button');
+    if (btn && !btn.disabled) {
+      console.log('[UA] Auto-triggering autofill...');
+      btn.click();
+      return true;
     }
-    const wrap = el.closest("label");
-    if (wrap?.textContent?.trim()) return wrap.textContent.trim();
-    return el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || "";
-  }
-
-  function setFieldValue(el, value) {
-    if (el instanceof HTMLSelectElement) {
-      // Try to match option by text
-      for (const opt of el.options) {
-        if (opt.text.toLowerCase().includes(value.toLowerCase()) || opt.value.toLowerCase() === value.toLowerCase()) {
-          el.value = opt.value;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return true;
-        }
-      }
-      return false;
+    // Try again after a delay (sometimes button loads late)
+    await new Promise(r => setTimeout(r, 3000));
+    const btn2 = document.querySelector('.auto-fill-button');
+    if (btn2 && !btn2.disabled) {
+      console.log('[UA] Auto-triggering autofill (retry)...');
+      btn2.click();
+      return true;
     }
-
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    if (setter) setter.call(el, value);
-    else el.value = value;
-
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    // React compatibility
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
-    return true;
-  }
-
-  function matchResponse(label, responses) {
-    if (!label || !responses.length) return null;
-    const lowerLabel = label.toLowerCase().trim();
-    let bestMatch = null;
-    let bestScore = 0;
-
-    for (const resp of responses) {
-      let score = 0;
-      const q = (resp.question || "").toLowerCase();
-      const kw = (resp.keywords || []).map(k => k.toLowerCase());
-
-      // Exact question match
-      if (q === lowerLabel) score = 1.0;
-      // Partial question match
-      else if (q.includes(lowerLabel) || lowerLabel.includes(q)) score = 0.7;
-      // Keyword match
-      else {
-        const labelWords = lowerLabel.split(/\s+/);
-        let hits = 0;
-        for (const w of labelWords) {
-          if (kw.some(k => k.includes(w) || w.includes(k))) hits++;
-        }
-        if (labelWords.length > 0) score = (hits / labelWords.length) * 0.6;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = resp;
-      }
-    }
-
-    return bestScore >= 0.25 ? bestMatch : null;
-  }
-
-  function isAlreadyFilled(el) {
-    if (el.classList.contains("ua-enhanced-filled")) return true;
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value.trim().length > 0;
-    if (el instanceof HTMLSelectElement) return el.selectedIndex > 0;
+    console.log('[UA] Autofill button not found or disabled');
     return false;
   }
 
-  async function fillAllForms() {
-    const settings = await getSettings();
-    const responses = await getSavedResponses();
-    if (!responses.length) return { filled: 0, total: 0 };
-
-    const jobContext = extractJobContext();
-    const forms = document.querySelectorAll("form");
-    let filled = 0;
-    let total = 0;
-
-    // Also find standalone fields not in forms
-    const allFields = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea, select');
-
-    for (const field of allFields) {
-      if (isAlreadyFilled(field)) continue;
-      total++;
-
-      const label = getFieldLabel(field);
-      if (!label) continue;
-
-      const match = matchResponse(label, responses);
-      if (!match) continue;
-
-      // AI Tailoring
-      let value = match.response || match.value || "";
-      if (settings.aiTailoring?.enabled && jobContext.jobTitle) {
-        value = tailorResponse(value, label, jobContext, settings.aiTailoring);
-      }
-
-      // Human-like pacing
-      if (settings.humanLikePacing) {
-        await new Promise(r => setTimeout(r, 50 + Math.random() * 150));
-      }
-
-      if (setFieldValue(field, value)) {
-        filled++;
-        field.classList.add("ua-enhanced-filled");
-        field.style.boxShadow = "0 0 0 2px rgba(102, 126, 234, 0.3)";
-        setTimeout(() => { field.style.boxShadow = ""; }, 1500);
-      }
-    }
-
-    return { filled, total };
-  }
-
-  // ═══════════════════════════════════════════════
-  //  ONE-CLICK "ADD TO QUEUE" BUTTON
-  // ═══════════════════════════════════════════════
-  let queueButtonInjected = false;
-
-  function isJobPage() {
-    const url = window.location.href.toLowerCase();
-    const title = document.title.toLowerCase();
-    const h1 = (document.querySelector("h1")?.textContent || "").toLowerCase();
-    return /job|career|position|opening|apply|hiring|vacancy|recruit|opportunity/i.test(url + " " + title + " " + h1);
-  }
-
-  function injectQueueButton() {
-    if (queueButtonInjected) return;
-    if (!isJobPage() && detectATS().confidence < 0.3) return;
-    queueButtonInjected = true;
-
-    const wrapper = document.createElement("div");
-    wrapper.id = "ua-queue-btn-wrapper";
-    wrapper.style.cssText = "position:fixed;bottom:24px;right:24px;z-index:2147483647;display:flex;flex-direction:column;gap:8px;align-items:flex-end;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
-
-    const btn = document.createElement("button");
-    btn.id = "ua-add-queue-btn";
-    btn.innerHTML = '<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue';
-    btn.style.cssText = "display:flex;align-items:center;gap:4px;padding:12px 20px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:50px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 15px rgba(102,126,234,0.4);transition:all 0.2s ease;font-family:inherit;";
-
-    btn.addEventListener("mouseenter", () => { btn.style.transform = "scale(1.05)"; btn.style.boxShadow = "0 6px 20px rgba(102,126,234,0.6)"; });
-    btn.addEventListener("mouseleave", () => { btn.style.transform = "scale(1)"; btn.style.boxShadow = "0 4px 15px rgba(102,126,234,0.4)"; });
-
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      btn.innerHTML = '<span style="font-size:14px;">&#8987;</span> Adding...';
-
-      const jobContext = extractJobContext();
-      const url = window.location.href;
-
+  async function processQueue() {
+    if (!queueActive || queue.length === 0) return;
+    const cur = queue.find(j => j.status === 'applying');
+    if (cur) {
       try {
-        const queue = await getQueue();
-        const normalized = url.toLowerCase().replace(/[?#].*$/, "").replace(/\/+$/, "");
-        const isDuplicate = queue.some(j => j.normalizedUrl === normalized);
-
-        if (isDuplicate) {
-          btn.innerHTML = '<span style="font-size:16px;">&#10007;</span> Already in queue';
-          btn.style.background = "#dc3545";
-        } else {
-          queue.push({
-            id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2),
-            url: url,
-            normalizedUrl: normalized,
-            company: jobContext.companyName || "",
-            role: jobContext.jobTitle || "",
-            status: "not_started",
-            source: "one_click",
-            createdAt: new Date().toISOString(),
-          });
-          await saveQueue(queue);
-          btn.innerHTML = '<span style="font-size:16px;">&#10003;</span> Added!';
-          btn.style.background = "linear-gradient(135deg,#28a745,#20c997)";
-          showToast("Added to queue: " + (jobContext.jobTitle || url.substring(0, 50)));
+        const curPath = new URL(cur.url).pathname;
+        if (window.location.href.includes(curPath.slice(0, 20))) {
+          const ok = await triggerAutofill();
+          cur.status = ok ? 'done' : 'failed';
+          await saveQueue();
+          renderQueue();
+          setTimeout(goNext, 12000);
+          return;
         }
-      } catch (e) {
-        btn.innerHTML = '<span style="font-size:16px;">&#10007;</span> Error';
-        btn.style.background = "#dc3545";
-      }
+      } catch {}
+    }
+    goNext();
+  }
 
-      setTimeout(() => {
-        btn.innerHTML = '<span style="font-size:16px;margin-right:6px;">+</span> Add to Queue';
-        btn.style.background = "linear-gradient(135deg,#667eea,#764ba2)";
-        btn.disabled = false;
-      }, 2500);
+  function goNext() {
+    const next = queue.find(j => j.status === 'pending');
+    if (next) {
+      next.status = 'applying';
+      saveQueue().then(() => { window.location.href = next.url; });
+    } else {
+      queueActive = false;
+      store.set(STORAGE_KEYS.QUEUE_ACTIVE, false);
+      renderQueue();
+    }
+  }
+
+  async function startQueue() {
+    if (queue.filter(j => j.status === 'pending').length === 0) return;
+    queueActive = true;
+    await store.set(STORAGE_KEYS.QUEUE_ACTIVE, true);
+    goNext();
+  }
+
+  async function stopQueue() {
+    queueActive = false;
+    await store.set(STORAGE_KEYS.QUEUE_ACTIVE, false);
+    queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; });
+    await saveQueue();
+    renderQueue();
+  }
+
+  // ==================== CREDIT UI HIDING ====================
+  function hideCredits() {
+    document.querySelectorAll('.autofill-credit-row').forEach(e => e.style.display = 'none');
+    document.querySelectorAll('.payment-entry').forEach(e => e.style.display = 'none');
+    document.querySelectorAll('.ant-modal-root').forEach(m => {
+      const t = m.textContent || '';
+      if (/remaining.*credit|upgrade.*turbo|out of credit|credits.*refill|get unlimited/i.test(t)) {
+        m.style.display = 'none';
+      }
+    });
+    document.querySelectorAll('[class*="turbo"], [class*="upgrade"], [class*="payment"], [class*="credit"]').forEach(e => {
+      const t = e.textContent || '';
+      if (/upgrade|turbo|get unlimited|remaining credit/i.test(t) && e.offsetHeight < 200) {
+        e.style.display = 'none';
+      }
+    });
+  }
+
+  // ==================== UI ====================
+  function buildUI() {
+    if (window.self !== window.top) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'ua-panel';
+    panel.innerHTML = `
+      <div id="ua-drawer">
+        <div class="ua-hdr">
+          <div>
+            <h3>Ultimate Autofill</h3>
+            <small>AI-Powered Job Applications</small>
+          </div>
+          <span class="ua-badge">UNLIMITED</span>
+        </div>
+        <div class="ua-body">
+          <div class="ua-sec">
+            <div class="ua-sec-title">Auto-Apply</div>
+            <div class="ua-tog">
+              <div>
+                <div class="ua-tog-label">Auto-Apply on ATS Pages</div>
+                <div class="ua-tog-desc">Automatically fill &amp; apply when ATS detected</div>
+              </div>
+              <label class="ua-sw">
+                <input type="checkbox" id="ua-aa-tog">
+                <span class="ua-sw-sl"></span>
+              </label>
+            </div>
+            <div id="ua-st" class="ua-status off">Auto-apply: Inactive</div>
+          </div>
+          <div class="ua-sec">
+            <div class="ua-sec-title">Import Jobs (CSV / URLs)</div>
+            <div id="ua-drop" class="ua-drop">
+              <div class="ua-drop-ico">&#128194;</div>
+              <div>Drop CSV here or click to browse</div>
+              <div class="ua-drop-txt">Supports .csv and .txt with job URLs</div>
+              <input type="file" id="ua-csv" class="ua-csv-in" accept=".csv,.txt,.tsv">
+            </div>
+            <div class="ua-url-row">
+              <input type="text" id="ua-url-inp" class="ua-url-inp" placeholder="Paste job URL...">
+              <button id="ua-url-add" class="ua-url-add">+ Add</button>
+            </div>
+          </div>
+          <div class="ua-sec">
+            <div class="ua-sec-title">Queue (<span id="ua-q-cnt">0</span> jobs)</div>
+            <div id="ua-q-list" class="ua-q-list"></div>
+            <div id="ua-q-sum" class="ua-q-sum"></div>
+            <button id="ua-start" class="ua-btn ua-btn-p" disabled>Start Applying to All Jobs</button>
+            <button id="ua-stop" class="ua-btn ua-btn-d" style="display:none">Stop Queue</button>
+            <button id="ua-clear" class="ua-btn ua-btn-d" style="display:none">Clear Queue</button>
+          </div>
+        </div>
+      </div>
+      <button id="ua-fab" title="Ultimate Autofill">UA</button>
+    `;
+    document.body.appendChild(panel);
+
+    // ATS badge
+    const badge = document.createElement('div');
+    badge.id = 'ua-ats';
+    badge.innerHTML = '<span class="dot"></span><span id="ua-ats-n"></span>';
+    document.body.appendChild(badge);
+
+    // Float add button
+    const fab2 = document.createElement('button');
+    fab2.id = 'ua-add-float';
+    fab2.innerHTML = '+';
+    fab2.title = 'Add this page to queue';
+    document.body.appendChild(fab2);
+
+    bindEvents();
+  }
+
+  function bindEvents() {
+    document.getElementById('ua-fab').addEventListener('click', () => {
+      document.getElementById('ua-drawer').classList.toggle('open');
     });
 
-    wrapper.appendChild(btn);
-    document.body.appendChild(wrapper);
+    const tog = document.getElementById('ua-aa-tog');
+    tog.checked = autoApply;
+    tog.addEventListener('change', async e => {
+      autoApply = e.target.checked;
+      await store.set(STORAGE_KEYS.AUTO_APPLY, autoApply);
+      updateStatus();
+      if (autoApply && isAppForm()) triggerAutofill();
+    });
+
+    const drop = document.getElementById('ua-drop');
+    const csv = document.getElementById('ua-csv');
+    drop.addEventListener('click', () => csv.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('over');
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+    csv.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+    const urlBtn = document.getElementById('ua-url-add');
+    const urlInp = document.getElementById('ua-url-inp');
+    urlBtn.addEventListener('click', () => {
+      const u = urlInp.value.trim();
+      if (u) { addJob(u); urlInp.value = ''; }
+    });
+    urlInp.addEventListener('keypress', e => { if (e.key === 'Enter') urlBtn.click(); });
+
+    document.getElementById('ua-start').addEventListener('click', startQueue);
+    document.getElementById('ua-stop').addEventListener('click', stopQueue);
+    document.getElementById('ua-clear').addEventListener('click', clearQueue);
+
+    document.getElementById('ua-add-float').addEventListener('click', () => {
+      addJob(window.location.href, document.title);
+    });
   }
 
-  function showToast(message) {
-    const existing = document.getElementById("ua-enhanced-toast");
-    if (existing) existing.remove();
-
-    const toast = document.createElement("div");
-    toast.id = "ua-enhanced-toast";
-    toast.textContent = message;
-    toast.style.cssText = "position:fixed;bottom:80px;right:24px;z-index:2147483647;padding:12px 20px;background:#343a40;color:#fff;border-radius:8px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;box-shadow:0 4px 15px rgba(0,0,0,0.2);opacity:0;transform:translateY(10px);transition:all 0.3s ease;";
-    document.body.appendChild(toast);
-
-    requestAnimationFrame(() => { toast.style.opacity = "1"; toast.style.transform = "translateY(0)"; });
-    setTimeout(() => { toast.style.opacity = "0"; toast.style.transform = "translateY(10px)"; setTimeout(() => toast.remove(), 300); }, 3000);
-  }
-
-  // ═══════════════════════════════════════════════
-  //  AUTO-DETECT AND AUTO-FILL ON PAGE LOAD
-  // ═══════════════════════════════════════════════
-  const detectedPages = new Set();
-
-  async function autoDetectAndFill() {
-    const pageKey = window.location.href;
-    if (detectedPages.has(pageKey)) return;
-    detectedPages.add(pageKey);
-
-    const settings = await getSettings();
-    if (!settings.autoDetectAndFill && !settings.universalFormDetection) return;
-
-    const ats = detectATS();
-    const hasForm = ats.confidence >= 0.3 || document.querySelectorAll("form").length > 0;
-    if (!hasForm) {
-      injectQueueButton();
+  async function handleFile(file) {
+    const text = await file.text();
+    const urls = parseCSV(text);
+    if (urls.length === 0) {
+      alert('No valid URLs found. File should contain job application URLs (https://...)');
       return;
     }
+    for (const u of urls) await addJob(u);
+    document.getElementById('ua-drawer').classList.add('open');
+  }
 
-    // Auto-fill
-    const result = await fillAllForms();
-    if (result.filled > 0) {
-      showToast(`Filled ${result.filled}/${result.total} fields (${ats.name})`);
-    }
+  function renderQueue() {
+    const list = document.getElementById('ua-q-list');
+    const cnt = document.getElementById('ua-q-cnt');
+    const sum = document.getElementById('ua-q-sum');
+    const startBtn = document.getElementById('ua-start');
+    const stopBtn = document.getElementById('ua-stop');
+    const clearBtn = document.getElementById('ua-clear');
+    if (!list) return;
 
-    injectQueueButton();
+    cnt.textContent = queue.length;
 
-    // Watch for dynamic form changes (multi-step forms)
-    const observer = new MutationObserver(async (mutations) => {
-      const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
-      if (hasNewNodes) {
-        await new Promise(r => setTimeout(r, 500));
-        const r = await fillAllForms();
-        if (r.filled > 0) showToast(`Filled ${r.filled} more fields`);
+    if (queue.length === 0) {
+      list.innerHTML = '<div style="text-align:center;color:#999;padding:10px;font-size:11px">No jobs in queue. Import CSV or add URLs above.</div>';
+      sum.textContent = '';
+      startBtn.disabled = true;
+      startBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
+      clearBtn.style.display = 'none';
+    } else {
+      list.innerHTML = queue.map(j => `
+        <div class="ua-q-item">
+          <span class="ua-q-url" title="${j.url}">${j.title || j.url}</span>
+          <span class="ua-q-st ${j.status}">${j.status}</span>
+          <button class="ua-q-rm" data-id="${j.id}">&times;</button>
+        </div>`).join('');
+
+      const pend = queue.filter(j => j.status === 'pending').length;
+      const done = queue.filter(j => j.status === 'done').length;
+      sum.textContent = `${done}/${queue.length} completed, ${pend} pending`;
+      startBtn.disabled = pend === 0;
+
+      if (queueActive) {
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+      } else {
+        startBtn.style.display = 'block';
+        stopBtn.style.display = 'none';
       }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+      clearBtn.style.display = 'block';
+
+      list.querySelectorAll('.ua-q-rm').forEach(b => {
+        b.addEventListener('click', e => removeJob(e.target.dataset.id));
+      });
+    }
   }
 
-  // ═══════════════════════════════════════════════
-  //  INITIALIZATION
-  // ═══════════════════════════════════════════════
+  function updateStatus() {
+    const st = document.getElementById('ua-st');
+    if (!st) return;
+    const ats = detectATS();
+    if (autoApply) {
+      st.className = 'ua-status on';
+      st.textContent = ats ? `Auto-apply ACTIVE - ${ats} detected` : 'Auto-apply ACTIVE - Monitoring';
+    } else {
+      st.className = 'ua-status off';
+      st.textContent = 'Auto-apply: Inactive';
+    }
+  }
 
-  // Skip non-http pages
-  if (!window.location.href.startsWith("http")) return;
+  function showATSBadge() {
+    const ats = detectATS();
+    const badge = document.getElementById('ua-ats');
+    if (ats && badge) {
+      document.getElementById('ua-ats-n').textContent = `${ats} Detected`;
+      badge.classList.add('show');
+    }
+  }
 
-  // Wait for page to be ready, then auto-detect
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    setTimeout(autoDetectAndFill, 1500);
+  // ==================== MUTATION OBSERVER ====================
+  function setupObserver() {
+    const obs = new MutationObserver(() => hideCredits());
+    obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
+
+  // ==================== INIT ====================
+  async function init() {
+    if (window.self !== window.top) return;
+    await loadState();
+    injectStyles();
+    buildUI();
+    [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
+    setupObserver();
+    showATSBadge();
+    renderQueue();
+    updateStatus();
+
+    if (autoApply && isAppForm()) {
+      console.log('[UA] ATS page detected, auto-applying in 3s...');
+      setTimeout(() => triggerAutofill(), 3000);
+    }
+
+    if (queueActive) {
+      setTimeout(() => processQueue(), 2000);
+    }
+
+    console.log('[UA] Enhancement initialized');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
   } else {
-    window.addEventListener("DOMContentLoaded", () => setTimeout(autoDetectAndFill, 1500));
+    init();
   }
-
-  // Listen for messages from background
-  chrome.runtime.onMessage?.addListener((msg, sender, sendResponse) => {
-    if (msg.type === "UA_FILL_NOW") {
-      fillAllForms().then(r => sendResponse(r)).catch(e => sendResponse({ error: String(e) }));
-      return true;
-    }
-    if (msg.type === "UA_DETECT_ATS") {
-      sendResponse(detectATS());
-    }
-    if (msg.type === "UA_GET_JOB_CONTEXT") {
-      sendResponse(extractJobContext());
-    }
-  });
-
-  console.log("[Ultimate Autofill Enhancement] Loaded — Universal form support, AI tailoring, one-click queue");
 })();
