@@ -142,9 +142,18 @@
 
   // ===================== PROFILE =====================
   const DEFAULTS = {
+    // === KNOCKOUT / SCREENING — passing answers ===
     authorized: 'Yes', sponsorship: 'No', relocation: 'Yes', remote: 'Yes',
+    commute: 'Yes', travel: 'Yes', overtime: 'Yes', shiftWork: 'Yes',
+    backgroundCheck: 'Yes', drugTest: 'Yes', ageVerify: 'Yes',
+    nonCompete: 'No', nda: 'Yes', legalAgreement: 'Yes',
+    securityClearance: 'No', cdl: 'No',
+    convicted: 'No', criminalRecord: 'No',
+    // === EEO / VOLUNTARY — opt-out answers ===
     veteran: 'I am not a protected veteran', disability: 'I do not have a disability',
     gender: 'Prefer not to say', ethnicity: 'Prefer not to say', race: 'Prefer not to say',
+    sexualOrientation: 'Prefer not to say', pronouns: 'Prefer not to say',
+    // === GENERAL DEFAULTS ===
     years: '5', salary: '80000', notice: '2 weeks', availability: 'Immediately',
     cover: 'I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.',
     why: 'I admire the company culture and the opportunity to make a meaningful impact.',
@@ -166,6 +175,8 @@
   // ===================== SMART VALUE GUESSER =====================
   function guessValue(label, p) {
     const l = (label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
+
+    // === PERSONAL INFO ===
     if (/first.?name|given.?name|prenom/.test(l)) return p.first_name || p.firstName || '';
     if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
     if (/middle.?name/.test(l)) return p.middle_name || '';
@@ -179,41 +190,122 @@
     if (/country/.test(l)) return p.country || 'United States';
     if (/address|street/.test(l)) return p.address || '';
     if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
+
+    // === SOCIAL / LINKS ===
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
     if (/github/.test(l)) return p.github_url || p.github || '';
     if (/website|portfolio|personal.?url/.test(l)) return p.website_url || p.website || '';
     if (/twitter|x\.com/.test(l)) return p.twitter_url || p.twitter || '';
+
+    // === EDUCATION ===
     if (/university|school|college|alma.?mater/.test(l)) return p.school || p.university || '';
-    if (/\bdegree\b|qualification/.test(l)) return p.degree || "Bachelor's";
-    if (/major|field.?of.?study|concentration/.test(l)) return p.major || '';
+    if (/\bdegree\b|qualification|education.?level|highest.?level.?of.?education/.test(l)) return p.degree || "Bachelor's";
+    if (/major|field.?of.?study|concentration|area.?of.?study/.test(l)) return p.major || '';
     if (/gpa|grade.?point/.test(l)) return p.gpa || '';
     if (/graduation|grad.?date|grad.?year/.test(l)) return p.graduation_year || p.grad_year || '';
+
+    // === WORK EXPERIENCE ===
     if (/title|position|role|current.?title|job.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
     if (/company|employer|org|current.?company/.test(l)) return p.current_company || p.company || '';
-    if (/salary|compensation|pay|desired.?pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/salary|compensation|pay|desired.?pay|expected.?salary|minimum.?salary|annual.?salary/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/years.*(exp|work)|exp.*years|total.*experience|how many years|professional experience/.test(l)) return DEFAULTS.years;
+
+    // === COVER LETTER / WRITTEN RESPONSES ===
     if (/cover.?letter|motivation|additional.?info|message.?to/.test(l)) return p.cover_letter || DEFAULTS.cover;
     if (/summary|about.?(yourself|you|me)|bio|objective/.test(l)) return p.summary || p.cover_letter || DEFAULTS.cover;
-    if (/why.*(compan|role|want|interest|position)/.test(l)) return DEFAULTS.why;
-    if (/how.*hear|where.*(find|learn|discover)|source|referred/.test(l)) return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years|total.*experience/.test(l)) return DEFAULTS.years;
-    if (/availab|start.?date|notice|when.*start/.test(l)) return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right|legal.*right/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa|immigration|work.?permit/.test(l)) return DEFAULTS.sponsorship;
-    if (/relocat|willing.*move/.test(l)) return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid|on.?site/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military|armed.?forces/.test(l)) return DEFAULTS.veteran;
-    if (/disabilit/.test(l)) return DEFAULTS.disability;
-    if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
-    if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
-    if (/nationality|citizenship/.test(l)) return p.nationality || p.country || 'United States';
-    if (/language|fluency|fluent/.test(l)) return p.languages || 'English';
-    if (/certif|license|credential/.test(l)) return p.certifications || '';
-    if (/commute|travel|willing.*travel/.test(l)) return 'Yes';
-    if (/convicted|criminal|felony|background/.test(l)) return 'No';
-    if (/drug.?test|screening/.test(l)) return 'Yes';
-    if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l)) return 'Yes';
-    if (/agree|acknowledge|certif|attest|confirm|consent/.test(l)) return 'Yes';
-    if (/please.?specify|other.?please/.test(l)) return p.city || p.state || '';
+    if (/why.*(compan|role|want|interest|position)|what.*(interest|attract|excit).*you/.test(l)) return DEFAULTS.why;
+
+    // === REFERRAL / SOURCE ===
+    if (/how.*hear|where.*(find|learn|discover)|source|referred|learn about|find.*(this|us|our)|job.?board|application.?source/.test(l)) return DEFAULTS.howHeard;
+
+    // === AVAILABILITY / TIMING ===
+    if (/availab|start.?date|notice|when.*start|earliest.*start|how soon|notice.?period/.test(l)) return DEFAULTS.availability;
+    if (/desired.?start|preferred.?start/.test(l)) return DEFAULTS.availability;
+
+    // ====== KNOCKOUT QUESTIONS — MUST PASS ======
+
+    // --- Work Authorization (answer: Yes) ---
+    if (/authoriz|eligible.*work|work.*right|legal.*right|legally.*work|right to work|permitted to work|lawful|employment eligib/.test(l)) return DEFAULTS.authorized;
+    if (/are you.*authorized|do you have.*authorization|can you.*legally|are you.*legally/.test(l)) return 'Yes';
+    if (/eligible.*employment|employment.*authorization|work.*authorization/.test(l)) return 'Yes';
+    if (/united states.*work|work.*united states|u\.?s\.?.*authorized|authorized.*u\.?s/.test(l)) return 'Yes';
+    if (/canada.*work|work.*canada|authorized.*canad/.test(l)) return 'Yes';
+    if (/proof of.*eligib|i.?9|e.?verify/.test(l)) return 'Yes';
+
+    // --- Visa Sponsorship (answer: No = I don't need sponsorship) ---
+    if (/sponsor|visa|immigration|work.?permit|require.*(sponsor|visa)|need.*(sponsor|visa)/.test(l)) return DEFAULTS.sponsorship;
+    if (/will you.*require|do you.*require.*sponsor|do you.*need.*sponsor/.test(l)) return 'No';
+    if (/now or in the future.*sponsor/.test(l)) return 'No';
+    if (/require.*employment.*visa|h.?1b|h1.?b|opt|cpt|ead/.test(l)) return 'No';
+
+    // --- Relocation (answer: Yes) ---
+    if (/relocat|willing.*move|open.*relocation|able.*relocat|move to|willing.*relocat/.test(l)) return DEFAULTS.relocation;
+
+    // --- Remote / On-site / Hybrid (answer: Yes) ---
+    if (/remote|work.*home|hybrid|on.?site|in.?office|in.?person|work.*location|comfortable.*office/.test(l)) return DEFAULTS.remote;
+
+    // --- Travel / Commute (answer: Yes) ---
+    if (/commute|travel|willing.*travel|percent.*travel|travel.*required|business.?trip|overnight.?travel/.test(l)) return 'Yes';
+    if (/how.*often.*travel|frequency.*travel/.test(l)) return 'As needed';
+    if (/\d+.*travel|travel.*\d+/.test(l)) return 'Yes';
+
+    // --- Shift / Schedule (answer: Yes) ---
+    if (/shift|weekend|night|evening|flexible.?schedule|overtime|work.*hours|available.*(shifts|weekends|nights|evenings)/.test(l)) return 'Yes';
+    if (/on.?call|standby|rotating|variable.?hours|non.?traditional/.test(l)) return 'Yes';
+
+    // --- Background Check (answer: Yes = I agree/consent) ---
+    if (/background.?check|background.?screen|background.?investigation|background.?verification/.test(l)) return 'Yes';
+    if (/consent.*background|agree.*background|submit.*background|willing.*background/.test(l)) return 'Yes';
+
+    // --- Criminal Record (answer: No = I was not convicted) ---
+    if (/convicted|criminal|felony|misdemeanor|criminal.?record|criminal.?history|pending.?charge/.test(l)) return 'No';
+    if (/have you.*convicted|have you.*been.*arrested|charged with/.test(l)) return 'No';
+    if (/plead.*guilty|plead.*no contest|nolo/.test(l)) return 'No';
+
+    // --- Drug Test (answer: Yes = I agree to a drug test) ---
+    if (/drug.?test|drug.?screen|substance|pre.?employment.*test|urinalysis/.test(l)) return 'Yes';
+
+    // --- Age Verification (answer: Yes) ---
+    if (/\bage\b|18.*years|over.*18|at.*least.*18|are you.*18|21.*years|over.*21|legal.?age|of.?age/.test(l)) return 'Yes';
+    if (/minor|under.*18/.test(l)) return 'No';
+
+    // --- Non-compete / NDA (answer: No = I'm not bound / Yes = I agree) ---
+    if (/non.?compete|non.?solicitation|restrictive.?covenant|currently.?bound/.test(l)) return 'No';
+    if (/non.?disclosure|nda|confidential.*agree|willing.*sign/.test(l)) return 'Yes';
+
+    // --- Security Clearance ---
+    if (/security.?clearance|clearance.?level|active.*clearance|do you.*hold.*clearance/.test(l)) return p.security_clearance || DEFAULTS.securityClearance;
+    if (/able.*obtain.*clearance|eligible.*clearance|willing.*obtain.*clearance/.test(l)) return 'Yes';
+
+    // --- CDL / Driver's License ---
+    if (/cdl|commercial.?driver|driver.?s?.?licen|valid.*licen|do you.*drive/.test(l)) return p.has_cdl || DEFAULTS.cdl;
+    if (/reliable.*transport|own.*vehicle|access.*vehicle|means.*transport/.test(l)) return 'Yes';
+
+    // --- Physical Requirements ---
+    if (/lift.*pounds|lift.*lbs|physical.*demand|stand.*hours|physically.*able|able.*perform.*essential/.test(l)) return 'Yes';
+    if (/accommodat|reasonable.*accommodat|ada/.test(l)) return 'No';
+
+    // --- Certifications / Licenses ---
+    if (/certif|license|credential|professional.*licen/.test(l)) return p.certifications || '';
+
+    // --- Agreement / Consent / Legal (answer: Yes) ---
+    if (/agree|acknowledge|certif|attest|confirm|consent|i understand|i accept|terms|accurate.*true|truthful|authorize/.test(l)) return 'Yes';
+    if (/opt.?in|subscribe|receive.*(email|sms|text|notification|communication)/.test(l)) return 'Yes';
+
+    // --- EEO / Voluntary Self-ID (prefer not to say) ---
+    if (/veteran|military|armed.?forces|protected.?veteran/.test(l)) return DEFAULTS.veteran;
+    if (/disabilit|handicap/.test(l)) return DEFAULTS.disability;
+    if (/gender|sex\b|pronouns|gender.?identity/.test(l)) return DEFAULTS.gender;
+    if (/ethnic|race|racial|heritage|demographic/.test(l)) return DEFAULTS.ethnicity;
+    if (/sexual.?orient|lgbtq|lgbt/.test(l)) return DEFAULTS.sexualOrientation;
+
+    // --- Nationality / Citizenship ---
+    if (/nationality|citizenship|citizen of/.test(l)) return p.nationality || p.country || 'United States';
+    if (/language|fluency|fluent|proficien/.test(l)) return p.languages || 'English';
+
+    // --- Catch-all: "Please Specify" / "Other" ---
+    if (/please.?specify|other.?please|if.?other|if.?yes.*explain|if.?no.*explain|please.?explain|provide.?details/.test(l)) return p.city || p.state || 'N/A';
+    if (/additional.?comment|anything.?else|is there anything/.test(l)) return '';
     return '';
   }
 
