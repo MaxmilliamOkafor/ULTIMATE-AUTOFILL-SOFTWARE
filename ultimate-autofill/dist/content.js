@@ -34,8 +34,8 @@
     },
     {
       type: "taleo",
-      urls: [/taleo\.net/i],
-      dom: ['[class*="taleo"]', "#requisitionDescriptionInterface"],
+      urls: [/taleo\.net/i, /oraclecloud\.com/i, /fa\.oraclecloud\.com/i],
+      dom: ['[class*="taleo"]', "#requisitionDescriptionInterface", "#OracleFusionApp", "oracle-apply-flow"],
       meta: [{ name: "generator", pat: /taleo/i }]
     },
     {
@@ -48,6 +48,66 @@
       type: "bamboohr",
       urls: [/bamboohr\.com/i],
       dom: [".BambooHR-ATS-board", '[class*="BambooHR"]'],
+      meta: []
+    },
+    {
+      type: "indeed",
+      urls: [/indeed\.com/i],
+      dom: ["#jobsearch-ViewJobButtons-container", ".jobsearch-IndeedApplyButton"],
+      meta: []
+    },
+    {
+      type: "linkedin",
+      urls: [/linkedin\.com\/jobs/i],
+      dom: [".jobs-apply-button", '[data-control-name*="apply"]'],
+      meta: []
+    },
+    {
+      type: "hiringcafe",
+      urls: [/hiring\.cafe/i],
+      dom: [],
+      meta: []
+    },
+    {
+      type: "jobvite",
+      urls: [/jobvite\.com/i],
+      dom: ['[class*="jobvite"]', ".jv-page-body"],
+      meta: []
+    },
+    {
+      type: "workable",
+      urls: [/apply\.workable\.com/i],
+      dom: ['[data-ui="application"]'],
+      meta: []
+    },
+    {
+      type: "paylocity",
+      urls: [/paylocity\.com/i],
+      dom: [],
+      meta: []
+    },
+    {
+      type: "jazzhr",
+      urls: [/jazzhr\.com/i],
+      dom: ["#jazz-apply-form"],
+      meta: []
+    },
+    {
+      type: "ziprecruiter",
+      urls: [/ziprecruiter\.com/i],
+      dom: [],
+      meta: []
+    },
+    {
+      type: "dice",
+      urls: [/dice\.com/i],
+      dom: [],
+      meta: []
+    },
+    {
+      type: "ukg",
+      urls: [/recruiting\.ultipro\.com/i],
+      dom: [],
       meta: []
     }
   ];
@@ -1398,6 +1458,39 @@
   function guessFieldValue(label, profile, el, responseEntries = []) {
     return guessValue(label, profile) || getResponseValue(label, el, responseEntries) || "";
   }
+  function getMissingRequiredFields() {
+    const required = Array.from(document.querySelectorAll(
+      "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select"
+    )).filter((el) => isVisible(el) && isFieldRequired(el));
+    const missing = [];
+    for (const el of required) {
+      if (el.type === "radio" && el.name) {
+        const group = Array.from(document.querySelectorAll(
+          `input[type="radio"][name="${CSS.escape(el.name)}"]`
+        )).filter(isVisible);
+        if (group.some((r) => r.checked))
+          continue;
+      } else if (el.type === "checkbox" && !el.checked) {
+      } else if (hasFieldValue(el)) {
+        continue;
+      }
+      const lbl = getFieldLabel(el) || el.name || el.id || "Required field";
+      if (!missing.includes(lbl))
+        missing.push(lbl);
+    }
+    return missing;
+  }
+  function reportFieldFilled(fieldName, status) {
+    try {
+      chrome.runtime.sendMessage({
+        type: "SIDEBAR_FIELD_UPDATE",
+        fieldName,
+        status
+      }).catch(() => {
+      });
+    } catch {
+    }
+  }
   if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local")
@@ -1656,10 +1749,413 @@
     });
   }
 
-  // src/content/main.ts
-  var LOG3 = (...a) => console.log("[UA]", ...a);
+  // src/content/atsNavigator.ts
+  var LOG3 = (...a) => console.log("[UA-Nav]", ...a);
   var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
-  var $$ = (s) => Array.from(document.querySelectorAll(s));
+  var $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
+  function isVisible3(el) {
+    if (!el)
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+  function realClick2(el) {
+    if (!el)
+      return;
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.click();
+  }
+  function handleIndeed() {
+    if (!location.hostname.includes("indeed.com"))
+      return;
+    const click = () => {
+      const btn = $$("button,a").find(
+        (el) => /apply on company site|apply externally|apply now/i.test(el.textContent || "") || el.getAttribute("data-testid") === "company-site-apply-button"
+      );
+      if (btn && isVisible3(btn)) {
+        LOG3("Indeed: clicking Apply on company site");
+        realClick2(btn);
+      }
+      const confirm = $$("button").find(
+        (el) => /continue|proceed|yes|ok/i.test(el.textContent || "") && !!el.closest('[class*="modal"],[class*="dialog"],[role="dialog"]')
+      );
+      if (confirm)
+        realClick2(confirm);
+    };
+    setTimeout(click, 1500);
+    new MutationObserver(click).observe(document.body, { childList: true, subtree: true });
+  }
+  function handleLinkedIn() {
+    if (!location.hostname.includes("linkedin.com"))
+      return;
+    if (!location.pathname.startsWith("/jobs"))
+      return;
+    let acting = false;
+    const act = async () => {
+      if (acting)
+        return;
+      acting = true;
+      try {
+        const direct = $$('.jobs-apply-button,.apply-button,[data-control-name*="apply"]').find((el) => {
+          const t = (el.textContent || "").trim().toLowerCase();
+          return t.includes("apply") && !t.includes("easy");
+        });
+        if (direct && isVisible3(direct)) {
+          LOG3("LinkedIn: direct apply");
+          realClick2(direct);
+          return;
+        }
+        const easy = $$('.jobs-apply-button,[aria-label*="Easy Apply"]').find((el) => /easy apply/i.test(el.textContent || ""));
+        if (easy && isVisible3(easy)) {
+          LOG3("LinkedIn: Easy Apply");
+          realClick2(easy);
+          await sleep2(1500);
+        }
+      } finally {
+        setTimeout(() => {
+          acting = false;
+        }, 3e3);
+      }
+    };
+    setTimeout(act, 2e3);
+    new MutationObserver(act).observe(document.body, { childList: true, subtree: false });
+  }
+  var GOOD_SIZES = [
+    "51-200",
+    "201-500",
+    "501-1000",
+    "501-1,000",
+    "1001-2000",
+    "1,001-2,000",
+    "2001-5000",
+    "2,001-5,000",
+    "5001-10000",
+    "5,001-10,000",
+    "10001+",
+    "10,001+",
+    "51 to 200",
+    "201 to 500",
+    "501 to 1000"
+  ];
+  function handleHiringCafe() {
+    if (!location.hostname.includes("hiring.cafe"))
+      return;
+    const sizeEl = $$('[class*="size"],[class*="employees"],[data-field*="size"]').find((el) => /\d/.test(el.textContent || ""));
+    if (sizeEl) {
+      const txt = (sizeEl.textContent || "").replace(/\s/g, "");
+      const ok = GOOD_SIZES.some((s) => txt.includes(s.replace(/\s/g, "")));
+      if (!ok) {
+        LOG3("HiringCafe: company size not preferred \u2014 skipping");
+        try {
+          chrome.runtime.sendMessage({ type: "JOB_SKIPPED", reason: "company_size" }).catch(() => {
+          });
+        } catch {
+        }
+        return;
+      }
+    }
+    const tryClick = () => {
+      const btn = $$("a,button").find(
+        (el) => /apply directly|apply now|apply for this/i.test(el.textContent || "")
+      );
+      if (btn && isVisible3(btn)) {
+        LOG3("HiringCafe: Apply Directly");
+        realClick2(btn);
+      }
+    };
+    setTimeout(tryClick, 2e3);
+    new MutationObserver(tryClick).observe(document.body, { childList: true, subtree: true });
+  }
+  var _wdApplyFlowDone = false;
+  async function workdayApplyButtonFlow() {
+    if (_wdApplyFlowDone)
+      return;
+    const host = location.hostname.toLowerCase();
+    if (!host.includes("myworkdayjobs.com") && !host.includes("workday.com"))
+      return;
+    const applySelectors = [
+      '[data-automation-id="applyButton"]',
+      '[data-automation-id="jobAction-apply"]',
+      'button[data-automation-id="applyBtn"]',
+      'a[data-automation-id*="apply"]'
+    ];
+    let applyBtn = null;
+    for (const sel of applySelectors) {
+      const el = document.querySelector(sel);
+      if (el && isVisible3(el)) {
+        applyBtn = el;
+        break;
+      }
+    }
+    if (!applyBtn) {
+      applyBtn = $$('button, a[role="button"], a').find((el) => {
+        if (!isVisible3(el))
+          return false;
+        const t = (el.textContent || "").trim().toLowerCase();
+        return t === "apply" || t === "apply now";
+      }) || null;
+    }
+    if (applyBtn) {
+      LOG3("Workday: Clicking Apply button");
+      realClick2(applyBtn);
+      await sleep2(2e3);
+    }
+    const manualSelectors = [
+      '[data-automation-id="applyManually"]',
+      '[data-automation-id="applyManuallyButton"]',
+      '[data-automation-id="manuallyApply"]'
+    ];
+    let manualBtn = null;
+    for (const sel of manualSelectors) {
+      const el = document.querySelector(sel);
+      if (el && isVisible3(el)) {
+        manualBtn = el;
+        break;
+      }
+    }
+    if (!manualBtn) {
+      manualBtn = $$('button, a[role="button"], a').find((el) => {
+        if (!isVisible3(el))
+          return false;
+        const t = (el.textContent || "").trim().toLowerCase();
+        return t.includes("apply manually") || t.includes("manual apply");
+      }) || null;
+    }
+    if (manualBtn) {
+      LOG3("Workday: Clicking Apply Manually");
+      realClick2(manualBtn);
+      await sleep2(3e3);
+    }
+    _wdApplyFlowDone = true;
+  }
+  async function clickApplyButton() {
+    const applyPatterns = [
+      "apply",
+      "apply now",
+      "apply directly",
+      "easy apply",
+      "apply for this job",
+      "submit application",
+      "start application"
+    ];
+    const candidates = $$('a, button, [role="button"], input[type="submit"]');
+    for (const el of candidates) {
+      if (!isVisible3(el))
+        continue;
+      const text = (el.textContent || el.value || "").trim().toLowerCase();
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      const combined = text + " " + aria;
+      if (applyPatterns.some((p) => combined === p || combined.startsWith(p + " ") || combined.includes(p))) {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 40 && r.height >= 20) {
+          LOG3("Generic page: Clicking Apply button");
+          realClick2(el);
+          await sleep2(3e3);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  async function runAtsNavigation(atsType) {
+    switch (atsType) {
+      case "indeed":
+        handleIndeed();
+        break;
+      case "linkedin":
+        handleLinkedIn();
+        break;
+      case "hiringcafe":
+        handleHiringCafe();
+        break;
+      case "workday":
+        await workdayApplyButtonFlow();
+        break;
+      default:
+        if (atsType === "generic")
+          await clickApplyButton();
+        break;
+    }
+  }
+
+  // src/content/tailoringOrchestrator.ts
+  var LOG4 = (...a) => console.log("[UA-Tailor]", ...a);
+  var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
+  function isVisible4(el) {
+    if (!el)
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function realClick3(el) {
+    if (!el)
+      return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.click();
+  }
+  function findButtonByText(pattern, scope = document) {
+    const candidates = Array.from(scope.querySelectorAll(
+      'button, a, [role="button"], div[class*="btn"], span[class*="btn"]'
+    ));
+    return candidates.find((el) => isVisible4(el) && pattern.test((el.textContent || "").trim())) || null;
+  }
+  async function waitForButton(pattern, timeoutMs = 6e4) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const btn = findButtonByText(pattern);
+      if (btn)
+        return btn;
+      await sleep3(1e3);
+    }
+    return null;
+  }
+  function detectJobrightSidebar() {
+    const selectors = [
+      "#jobright-sidebar",
+      '[class*="jobright"]',
+      "[data-jobright]",
+      '[id*="jobright"]',
+      // The sidebar may also use a container with specific classes
+      ".jr-sidebar",
+      "#jr-extension-root"
+    ];
+    for (const s of selectors) {
+      const el = document.querySelector(s);
+      if (el)
+        return el;
+    }
+    const iframes = document.querySelectorAll("iframe");
+    for (const iframe of iframes) {
+      const src = iframe.src || "";
+      if (/jobright/i.test(src))
+        return iframe;
+    }
+    return null;
+  }
+  function isTailoringAvailable() {
+    return !!(findButtonByText(/generate.*custom.*resume|tailor.*resume|improve.*resume/i) || findButtonByText(/continue.*auto\s*fill/i) || document.querySelector('[class*="tailor"],[class*="resume-tailor"],[data-testid*="tailor"]'));
+  }
+  async function runTailoringSteps() {
+    LOG4("Starting tailoring workflow...");
+    let genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor.*resume/i);
+    if (!genBtn) {
+      genBtn = findButtonByText(/autofill|auto\s*fill/i);
+      if (genBtn) {
+        LOG4("Found Autofill button \u2014 clicking to start");
+        realClick3(genBtn);
+        await sleep3(2e3);
+        genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor/i);
+      }
+    }
+    if (genBtn) {
+      LOG4("Step 1: Clicking Generate Custom Resume");
+      realClick3(genBtn);
+      await sleep3(3e3);
+    } else {
+      LOG4("No tailoring trigger found \u2014 checking if already in tailoring flow");
+    }
+    const improveBtn = await waitForButton(/improve.*resume.*this.*job|improve.*my.*resume/i, 3e4);
+    if (improveBtn) {
+      LOG4("Step 2: Clicking Improve My Resume");
+      realClick3(improveBtn);
+      await sleep3(2e3);
+    } else {
+      LOG4('Step 2: No "Improve My Resume" button found \u2014 continuing');
+    }
+    const fullEditBtn = await waitForButton(/full.*edit|all.*experiences/i, 15e3);
+    if (fullEditBtn) {
+      LOG4("Step 3: Selecting Full Edit");
+      realClick3(fullEditBtn);
+      await sleep3(2e3);
+    } else {
+      LOG4("Step 3: No Full Edit option \u2014 continuing");
+    }
+    const selectAllBtn = await waitForButton(/select\s*(all|everything)/i, 15e3);
+    if (selectAllBtn) {
+      LOG4("Step 4: Clicking Select All for skills");
+      realClick3(selectAllBtn);
+      await sleep3(1e3);
+    } else {
+      const skillChecks = Array.from(document.querySelectorAll(
+        'input[type="checkbox"]:not(:checked)'
+      )).filter((cb) => {
+        const container = cb.closest('[class*="skill"],[class*="keyword"]');
+        return container && isVisible4(cb);
+      });
+      if (skillChecks.length > 0) {
+        LOG4(`Step 4: Clicking ${skillChecks.length} individual skill checkboxes`);
+        for (const cb of skillChecks) {
+          realClick3(cb);
+          await sleep3(100);
+        }
+      } else {
+        LOG4("Step 4: No skill checkboxes found \u2014 continuing");
+      }
+    }
+    const generateBtn = await waitForButton(/generate.*new.*resume|generate.*resume|create.*resume/i, 15e3);
+    if (generateBtn) {
+      LOG4("Step 5: Clicking Generate My New Resume");
+      realClick3(generateBtn);
+      LOG4("Step 5: Waiting for resume generation...");
+      await waitForGenerationComplete(12e4);
+    } else {
+      LOG4("Step 5: No Generate button found \u2014 continuing");
+    }
+    const continueBtn = await waitForButton(/continue.*auto\s*fill|continue.*to.*auto/i, 6e4);
+    if (continueBtn) {
+      LOG4("Step 6: Clicking Continue to Autofill");
+      realClick3(continueBtn);
+      await sleep3(2e3);
+      LOG4("Tailoring workflow complete!");
+      return true;
+    }
+    const downloadBtn = findButtonByText(/download.*resume/i);
+    if (downloadBtn) {
+      LOG4("Step 6: Resume generated (Download available) \u2014 looking for Continue");
+      await sleep3(3e3);
+      const retry = findButtonByText(/continue.*auto\s*fill|continue.*to.*auto/i);
+      if (retry) {
+        realClick3(retry);
+        await sleep3(2e3);
+        return true;
+      }
+    }
+    LOG4("Tailoring workflow: could not complete all steps \u2014 proceeding to autofill anyway");
+    return false;
+  }
+  async function waitForGenerationComplete(timeoutMs) {
+    const start = Date.now();
+    let spinnerSeen = false;
+    while (Date.now() - start < timeoutMs) {
+      const spinner = document.querySelector(
+        '[class*="loading"],[class*="spinner"],[class*="progress"],[class*="generating"],[role="progressbar"],.animate-spin,[class*="pulse"]'
+      );
+      const isLoading = spinner && isVisible4(spinner);
+      if (isLoading) {
+        spinnerSeen = true;
+      } else if (spinnerSeen) {
+        LOG4("Resume generation complete (spinner disappeared)");
+        await sleep3(1e3);
+        return;
+      }
+      if (findButtonByText(/continue.*auto\s*fill|download.*resume/i)) {
+        LOG4("Resume generation complete (action buttons appeared)");
+        return;
+      }
+      await sleep3(1e3);
+    }
+    LOG4("Resume generation: timeout reached");
+  }
+
+  // src/content/main.ts
+  var LOG5 = (...a) => console.log("[UA]", ...a);
+  var sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
+  var $$2 = (s) => Array.from(document.querySelectorAll(s));
   var isRunning = false;
   var observer = null;
   var _autoTriggered = false;
@@ -1683,6 +2179,10 @@
     }
     if (msg.type === "FILL_COMPLEX_FORM") {
       runFullAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+      return true;
+    }
+    if (msg.type === "TRIGGER_TAILORING") {
+      runTailoringSteps().then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
       return true;
     }
     if (msg.type === "PING") {
@@ -1713,6 +2213,8 @@
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
     const responses = await getResponses();
+    await runAtsNavigation(ats.type);
+    await atsSpecificFill(ats.type);
     await fillPage(adapter, responses, ats.type);
     await enhancedFillPass();
     observer = new MutationObserver(async (mutations) => {
@@ -1755,11 +2257,261 @@
     }
     updateControlBar(filled, matches.length);
   }
+  var WD_FIELDS = {
+    legalNameSection_firstName: "first_name",
+    legalNameSection_lastName: "last_name",
+    legalNameSection_middleName: "middle_name",
+    infoFirstName: "first_name",
+    infoLastName: "last_name",
+    infoEmail: "email",
+    infoCellPhone: "phone",
+    infoLinkedIn: "linkedin_profile_url",
+    email: "email",
+    phone: "phone",
+    addressSection_addressLine1: "address",
+    addressSection_addressLine2: "address2",
+    addressSection_city: "city",
+    addressSection_postalCode: "postal_code",
+    workHistoryCompanyName: "current_company",
+    workHistoryPosition: "current_title",
+    educationHistoryName: "school",
+    degree: "degree",
+    linkedIn: "linkedin_profile_url",
+    website: "website_url",
+    github: "github_url",
+    jobTitle: "current_title",
+    company: "current_company",
+    school: "school",
+    major: "major",
+    postalCode: "postal_code",
+    city: "city",
+    state: "state",
+    country: "country",
+    yearsOfExperience: "years_of_experience",
+    salary: "expected_salary",
+    coverLetter: "cover_letter",
+    howDidYouHear: "how_did_you_hear"
+  };
+  var WD_TEXTAREA_AIDS = /* @__PURE__ */ new Set([
+    "formField-roleDescription",
+    "formField-summary",
+    "formField-coverLetter",
+    "formField-additionalInfo"
+  ]);
+  async function atsSpecificFill(atsType) {
+    const host = location.hostname.toLowerCase();
+    const profile = await loadProfile();
+    if (atsType === "workday" || host.includes("myworkdayjobs.com") || host.includes("workday.com")) {
+      await workdayFill(profile);
+    } else if (atsType === "greenhouse" || host.includes("greenhouse.io")) {
+      await greenhouseFill(profile);
+    } else if (atsType === "taleo" || host.includes("oraclecloud.com") || host.includes("taleo.net")) {
+      await oracleFill(profile);
+    } else if (atsType === "smartrecruiters" || host.includes("smartrecruiters.com")) {
+      await smartRecruitersFill(profile);
+    }
+  }
+  async function workdayFill(p) {
+    LOG5("Running Workday-specific fill");
+    const responseEntries = await getResponseBank();
+    await workdayAccountFlow(p);
+    const containers = $$2('[data-automation-id]:not([data-automation-id=""])');
+    for (const el of containers) {
+      const aid = el.getAttribute("data-automation-id") || "";
+      if (WD_TEXTAREA_AIDS.has(aid)) {
+        const ta = el.querySelector("textarea") || (el.tagName === "TEXTAREA" ? el : null);
+        if (ta && !ta.value?.trim()) {
+          const val2 = p.cover_letter || guessValue("cover letter", p);
+          if (val2) {
+            ta.focus();
+            nativeSet(ta, val2);
+          }
+        }
+        continue;
+      }
+      const profileKey = WD_FIELDS[aid];
+      if (!profileKey)
+        continue;
+      const val = p[profileKey];
+      if (!val)
+        continue;
+      const input = el.querySelector("input:not([type=hidden]):not([type=file]),textarea");
+      if (input && !input.value?.trim()) {
+        input.focus();
+        nativeSet(input, val);
+        await sleep4(80);
+        continue;
+      }
+      const combo = el.querySelector('[role=combobox],[data-automation-id*="combobox"]');
+      if (combo) {
+        realClick(combo);
+        await sleep4(400);
+        const si = combo.querySelector("input");
+        if (si) {
+          nativeSet(si, val);
+          await sleep4(700);
+        }
+        const opt = document.querySelector("[role=option]");
+        if (opt)
+          realClick(opt);
+        continue;
+      }
+      $$2("input[type=radio]").forEach((r) => {
+        const t = (document.querySelector(`label[for="${CSS.escape(r.id)}"]`)?.textContent || "").toLowerCase();
+        if (t.includes(val.toLowerCase()))
+          realClick(r);
+      });
+    }
+    await workdayEeoFields();
+    $$2('[data-automation-id="agreementCheckbox"] input[type=checkbox]').filter((cb) => !cb.checked).forEach((cb) => realClick(cb));
+    LOG5("Workday fill done");
+  }
+  async function workdayAccountFlow(p) {
+    const { appAccountEmail, appAccountPassword } = await chrome.storage.local.get(["appAccountEmail", "appAccountPassword"]);
+    const acctEmail = appAccountEmail || p.email || "";
+    const acctPassword = appAccountPassword || "";
+    const createCb = document.querySelector(
+      '[data-automation-id="createAccountCheckbox"] input[type=checkbox],input[data-automation-id="createAccountCheckbox"]'
+    );
+    if (createCb && !createCb.checked) {
+      realClick(createCb);
+      await sleep4(600);
+    }
+    const emailField = document.querySelector(
+      '[data-automation-id="createAccountEmail"] input,[data-automation-id="accountCreationEmail"] input,input[data-automation-id="email"],input[name="email"][type="email"]'
+    );
+    if (emailField && !emailField.value?.trim() && acctEmail) {
+      emailField.focus();
+      nativeSet(emailField, acctEmail);
+      await sleep4(200);
+    }
+    if (acctPassword) {
+      const pwFields = Array.from(document.querySelectorAll("input[type=password]")).filter((el) => isVisible(el));
+      for (const pw of pwFields) {
+        if (!pw.value?.trim()) {
+          pw.focus();
+          nativeSet(pw, acctPassword);
+          await sleep4(200);
+        }
+      }
+    }
+    const createBtn = document.querySelector('[data-automation-id="createAccountSubmitButton"]');
+    if (createBtn && isVisible(createBtn)) {
+      await sleep4(400);
+      realClick(createBtn);
+      await sleep4(1500);
+      return;
+    }
+    const signInBtn = document.querySelector('[data-automation-id="signInSubmitButton"]');
+    if (signInBtn && isVisible(signInBtn)) {
+      await sleep4(400);
+      realClick(signInBtn);
+      await sleep4(1500);
+    }
+  }
+  async function workdayEeoFields() {
+    const eeoSelectors = [
+      ['[data-automation-id="gender"] select,select[data-automation-id="gender"]', /decline|prefer not|not to say/i],
+      ['[data-automation-id="veteranStatus"] select,select[data-automation-id="veteranStatus"]', /not a protected|i am not|decline|prefer not/i],
+      ['[data-automation-id="disability"] select,select[data-automation-id="disability"]', /do not have|decline|prefer not/i],
+      ['[data-automation-id="ethnicityDropdown"] select,select[data-automation-id="ethnicityDropdown"]', /decline|prefer not|not to say/i]
+    ];
+    for (const [sel, pat] of eeoSelectors) {
+      const el = document.querySelector(sel);
+      if (el && !el.value) {
+        const opt = Array.from(el.options).find((o) => pat.test(o.textContent || ""));
+        if (opt) {
+          el.value = opt.value;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+    }
+  }
+  async function greenhouseFill(p) {
+    LOG5("Running Greenhouse-specific fill");
+    const responseEntries = await getResponseBank();
+    const GH_MAP = [
+      ['#first_name,input[id*="first_name"],input[name*="first_name"]', p.first_name || ""],
+      ['#last_name,input[id*="last_name"],input[name*="last_name"]', p.last_name || ""],
+      ['#email,input[type="email"],input[id*="email"]', p.email || ""],
+      ['#phone,input[type="tel"],input[id*="phone"]', p.phone || ""],
+      ['input[id*="location"],input[name*="location"]', p.city || ""],
+      ['input[id*="linkedin"],input[name*="linkedin"]', p.linkedin_profile_url || ""],
+      ['input[id*="website"],input[name*="website"],input[id*="portfolio"]', p.website_url || ""],
+      ['input[id*="github"],input[name*="github"]', p.github_url || ""],
+      ['textarea[id*="cover"],textarea[name*="cover"]', p.cover_letter || guessValue("cover letter", p)]
+    ];
+    for (const [sel, val] of GH_MAP) {
+      if (!val)
+        continue;
+      const el = document.querySelector(sel);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        el.focus();
+        nativeSet(el, val);
+        await sleep4(50);
+      }
+    }
+    $$2('select[id*="gender"],select[id*="disability"],select[id*="veteran"],select[id*="race"],select[id*="ethnicity"]').filter((sel) => isVisible(sel) && !sel.value).forEach((sel) => {
+      const opt = Array.from(sel.options).find(
+        (o) => /decline|prefer not|not to say|not a protected|do not have/i.test(o.textContent || "")
+      );
+      if (opt) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    LOG5("Greenhouse fill done");
+  }
+  async function oracleFill(p) {
+    LOG5("Running Oracle/Taleo-specific fill");
+    const fields = [
+      ['#firstName,input[id*="firstName"],input[name*="firstName"]', p.first_name || ""],
+      ['#lastName,input[id*="lastName"],input[name*="lastName"]', p.last_name || ""],
+      ['input[type="email"],input[id*="email"]', p.email || ""],
+      ['input[type="tel"],input[id*="phone"],input[name*="phone"]', p.phone || ""],
+      ['input[id*="city"],input[name*="city"]', p.city || ""],
+      ['input[id*="zip"],input[name*="postal"]', p.postal_code || ""]
+    ];
+    for (const [sel, val] of fields) {
+      if (!val)
+        continue;
+      const el = document.querySelector(sel);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        el.focus();
+        nativeSet(el, val);
+        await sleep4(60);
+      }
+    }
+    LOG5("Oracle fill done");
+  }
+  async function smartRecruitersFill(p) {
+    LOG5("Running SmartRecruiters-specific fill");
+    const fields = [
+      ['input[name="first_name"],#firstName', p.first_name || ""],
+      ['input[name="last_name"],#lastName', p.last_name || ""],
+      ['input[name="email"],input[type="email"]', p.email || ""],
+      ['input[name="phone"],input[type="tel"]', p.phone || ""],
+      ['input[name="city"]', p.city || ""],
+      ['input[name="web"],input[name="website"]', p.website_url || ""],
+      ['textarea[name="message"],textarea[name="cover_letter"]', p.cover_letter || guessValue("cover letter", p)]
+    ];
+    for (const [sel, val] of fields) {
+      if (!val)
+        continue;
+      const el = document.querySelector(sel);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        el.focus();
+        nativeSet(el, val);
+        await sleep4(60);
+      }
+    }
+    LOG5("SmartRecruiters fill done");
+  }
   async function enhancedFillPass() {
     const profile = await loadProfile();
     const responseEntries = await getResponseBank();
     let filled = 0;
-    $$(
+    $$2(
       "input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=checkbox]):not([type=radio]),textarea"
     ).forEach((el) => {
       if (!isVisible(el) || hasFieldValue(el) || el.classList.contains("ua-filled"))
@@ -1769,39 +2521,49 @@
         return;
       const val = guessFieldValue(label, profile, el, responseEntries);
       if (val) {
+        el.focus();
         nativeSet(el, val);
         el.classList.add("ua-filled");
+        reportFieldFilled(label, "filled");
         filled++;
       }
     });
-    $$("select").forEach((sel) => {
+    $$2("select").forEach((sel) => {
       if (!isVisible(sel) || hasFieldValue(sel) || sel.classList.contains("ua-filled"))
         return;
       const label = getFieldLabel(sel);
       if (!label)
         return;
       const val = guessValue(label, profile);
-      if (!val)
-        return;
       const opts = Array.from(sel.options);
-      let match = opts.find((o) => (o.textContent || "").trim().toLowerCase() === val.toLowerCase());
-      if (!match)
-        match = opts.find((o) => (o.textContent || "").trim().toLowerCase().includes(val.toLowerCase()));
+      let match;
+      if (val) {
+        match = opts.find((o) => (o.textContent || "").trim().toLowerCase() === val.toLowerCase());
+        if (!match)
+          match = opts.find((o) => (o.textContent || "").trim().toLowerCase().includes(val.toLowerCase()));
+      }
       if (!match) {
         const l = label.toLowerCase();
-        if (/gender|ethnic|race|veteran|disabil/i.test(l)) {
-          match = opts.find((o) => /prefer not|decline|not (wish|want)|choose not/i.test(o.textContent || ""));
+        if (/gender|ethnic|race|veteran|disabil|sex\b|heritage/i.test(l)) {
+          match = opts.find((o) => /prefer not|decline|not (wish|want)|choose not|do not have|i am not/i.test(o.textContent || ""));
+        }
+      }
+      if (!match) {
+        const validOpts = opts.filter((o) => o.value && o.value !== "" && o.index > 0 && !/select|choose|please|--/i.test((o.textContent || "").trim()));
+        if (validOpts.length > 0 && isFieldRequired(sel)) {
+          match = validOpts[0];
         }
       }
       if (match) {
         sel.value = match.value;
         sel.dispatchEvent(new Event("change", { bubbles: true }));
         sel.classList.add("ua-filled");
+        reportFieldFilled(label, "filled");
         filled++;
       }
     });
     const radioGroups = /* @__PURE__ */ new Map();
-    $$("input[type=radio]").forEach((r) => {
+    $$2("input[type=radio]").forEach((r) => {
       if (!isVisible(r))
         return;
       const name = r.name;
@@ -1816,32 +2578,49 @@
         continue;
       const label = getFieldLabel(radios[0]) || name;
       const val = guessValue(label, profile);
-      if (!val)
-        continue;
-      for (const radio of radios) {
-        const radioLabel = (radio.closest("label")?.textContent || radio.value || "").trim().toLowerCase();
-        if (radioLabel.includes(val.toLowerCase()) || val.toLowerCase() === "yes" && /yes|true|accept/i.test(radioLabel)) {
-          radio.checked = true;
-          radio.dispatchEvent(new Event("change", { bubbles: true }));
+      let matched = false;
+      if (val) {
+        for (const radio of radios) {
+          const radioLabel = (radio.closest("label")?.textContent || document.querySelector(`label[for="${CSS.escape(radio.id)}"]`)?.textContent || radio.value || "").trim().toLowerCase();
+          if (radioLabel.includes(val.toLowerCase()) || val.toLowerCase() === "yes" && /yes|true|accept/i.test(radioLabel)) {
+            realClick(radio);
+            reportFieldFilled(label, "filled");
+            filled++;
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (!matched) {
+        const yesRadio = radios.find((r) => {
+          const t = (r.closest("label")?.textContent || document.querySelector(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || "").trim().toLowerCase();
+          return ["yes", "true", "1"].includes(t);
+        });
+        if (yesRadio) {
+          realClick(yesRadio);
+          reportFieldFilled(label, "filled");
           filled++;
-          break;
         }
       }
     }
-    $$("input[type=checkbox]").forEach((cb) => {
+    $$2("input[type=checkbox]").forEach((cb) => {
       if (cb.checked || !isVisible(cb))
         return;
       const label = getFieldLabel(cb);
       if (/agree|acknowledge|certif|attest|confirm|consent|accept|terms|privacy/i.test(label)) {
-        cb.checked = true;
-        cb.dispatchEvent(new Event("change", { bubbles: true }));
+        realClick(cb);
+        reportFieldFilled(label, "filled");
         filled++;
       }
+    });
+    $$2('input[type=checkbox][required],input[type=checkbox][aria-required="true"]').filter((cb) => isVisible(cb) && !cb.checked).forEach((cb) => {
+      realClick(cb);
+      filled++;
     });
     return filled;
   }
   async function runFullAutofill() {
-    LOG3("Starting full autofill pipeline");
+    LOG5("Starting full autofill pipeline");
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
     const responses = await getResponses();
@@ -1857,65 +2636,73 @@
         reported = true;
         markApplied();
         send({ type: "COMPLEX_FORM_SUCCESS", message: "Application submitted successfully" });
-        LOG3("Application submitted successfully!");
+        LOG5("Application submitted successfully!");
       } else if (result === "duplicate") {
         reported = true;
         send({ type: "COMPLEX_FORM_ERROR", errorType: "alreadyApplied", message: "Already applied to this job" });
-        LOG3("Already applied to this job");
+        LOG5("Already applied to this job");
       }
     };
     const successObserver = new MutationObserver(checkAndReport);
     successObserver.observe(document.body, { childList: true, subtree: true });
     const successInterval = setInterval(checkAndReport, 3e3);
     checkAndReport();
-    await sleep2(3e3);
+    await sleep4(3e3);
     send({ type: "SIDEBAR_STATUS", event: "filling_form", atsName: ats.type, url: location.href });
+    await runAtsNavigation(ats.type);
     for (let page = 1; page <= MAX_PAGES; page++) {
       if (reported)
         break;
-      LOG3(`\u2500\u2500 Page ${page}/${MAX_PAGES}: Filling fields \u2500\u2500`);
+      LOG5(`\u2500\u2500 Page ${page}/${MAX_PAGES}: Filling fields \u2500\u2500`);
+      await atsSpecificFill(ats.type);
       await fillPage(adapter, responses, ats.type);
       await enhancedFillPass();
       await tryResumeUpload();
       await solveCaptcha();
-      await sleep2(2e3);
+      await sleep4(2e3);
       if (reported)
         break;
       await enhancedFillPass();
-      const missingCount = countMissingRequired();
-      await sleep2(1e3);
+      const missingLabels = getMissingRequiredFields();
+      const missingCount = missingLabels.length;
+      if (missingCount > 0) {
+        LOG5(`${missingCount} required fields still missing:`, missingLabels);
+        missingLabels.forEach((n) => reportFieldFilled(n, "failed"));
+      }
+      await sleep4(1e3);
       if (reported)
         break;
       const action = await tryClickSubmitOrNext(missingCount);
       if (action === "submitted") {
-        LOG3("Submit clicked \u2014 waiting for success confirmation");
+        LOG5("Submit clicked \u2014 waiting for success confirmation");
         submitClickedTs = Date.now();
         for (let i = 0; i < 15; i++) {
-          await sleep2(1e3);
+          await sleep4(1e3);
           if (reported)
             break;
           checkAndReport();
         }
         if (!reported) {
-          LOG3("No success confirmation after 15s \u2014 reporting done (submit was clicked)");
+          LOG5("No success confirmation after 15s \u2014 reporting done (submit was clicked)");
           reported = true;
           markApplied();
           send({ type: "COMPLEX_FORM_SUCCESS", message: "Application submitted (submit clicked)" });
         }
         break;
       } else if (action === "next_page") {
-        LOG3("Next/Continue clicked \u2014 waiting for page transition");
-        await sleep2(3e3);
+        LOG5("Next/Continue clicked \u2014 waiting for page transition");
+        send({ type: "SIDEBAR_STATUS", event: "filling_form", atsName: ats.type, url: location.href, page: page + 1 });
+        await sleep4(3e3);
         continue;
       } else {
-        LOG3("No submit/next button found \u2014 final fill attempt");
-        await sleep2(2e3);
+        LOG5("No submit/next button found \u2014 final fill attempt");
+        await sleep4(2e3);
         await enhancedFillPass();
         const retry = await tryClickSubmitOrNext(0);
         if (retry === "submitted") {
           submitClickedTs = Date.now();
           for (let i = 0; i < 10; i++) {
-            await sleep2(1e3);
+            await sleep4(1e3);
             if (reported)
               break;
             checkAndReport();
@@ -1931,19 +2718,10 @@
     }
     successObserver.disconnect();
     clearInterval(successInterval);
-    LOG3("Full autofill pipeline complete");
+    LOG5("Full autofill pipeline complete");
   }
   function countMissingRequired() {
-    let count = 0;
-    $$(
-      "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select"
-    ).forEach((el) => {
-      if (!isVisible(el))
-        return;
-      if (isFieldRequired(el) && !hasFieldValue(el))
-        count++;
-    });
-    return count;
+    return getMissingRequiredFields().length;
   }
   async function autoTriggerAutofill() {
     if (_autoTriggerRunning || _autoTriggered)
@@ -1958,32 +2736,71 @@
     if (ats.confidence < 0.3)
       return;
     if (!isApplicationPage(ats.type)) {
-      LOG3(`Auto-trigger: ${ats.type} detected but no application form yet`);
+      LOG5(`Auto-trigger: ${ats.type} detected but no application form yet`);
       return;
     }
     _autoTriggerRunning = true;
     _autoTriggered = true;
-    LOG3(`Auto-trigger: ${ats.type} application form detected \u2014 starting autofill`);
+    LOG5(`Auto-trigger: ${ats.type} application form detected \u2014 starting pipeline`);
     showControlBar();
     updateControlBar(0, 0);
     const statusEl = document.getElementById("ua-fill-status");
     if (statusEl)
-      statusEl.textContent = `${ats.type} detected \u2014 autofilling...`;
+      statusEl.textContent = `${ats.type} detected \u2014 preparing...`;
     try {
       isRunning = true;
+      const sidebar = detectJobrightSidebar();
+      if (sidebar || isTailoringAvailable()) {
+        LOG5("Auto-trigger: Jobright sidebar detected \u2014 running tailoring first");
+        if (statusEl)
+          statusEl.textContent = `${ats.type} detected \u2014 tailoring resume...`;
+        send({ type: "SIDEBAR_STATUS", event: "tailoring_started", atsName: ats.type, url: location.href });
+        const tailored = await runTailoringSteps();
+        LOG5(`Auto-trigger: tailoring ${tailored ? "completed" : "skipped"}`);
+        if (statusEl)
+          statusEl.textContent = tailored ? "Resume tailored \u2014 autofilling..." : "Tailoring skipped \u2014 autofilling...";
+        await sleep4(1500);
+      }
+      await runAtsNavigation(ats.type);
+      await atsSpecificFill(ats.type);
       const adapter = getAdapter(ats.type);
       const responses = await getResponses();
       await fillPage(adapter, responses, ats.type);
       await enhancedFillPass();
       await tryResumeUpload();
       await solveCaptcha();
-      await sleep2(3e3);
+      await sleep4(3e3);
       await enhancedFillPass();
-      if (statusEl)
-        statusEl.textContent = "Autofill complete";
-      LOG3("Auto-trigger: complete");
+      const missingCount = countMissingRequired();
+      if (missingCount === 0) {
+        if (statusEl)
+          statusEl.textContent = "All fields filled \u2014 submitting...";
+        await sleep4(1e3);
+        const action = await tryClickSubmitOrNext(0);
+        if (action === "submitted") {
+          if (statusEl)
+            statusEl.textContent = "Application submitted!";
+          markApplied();
+          send({ type: "COMPLEX_FORM_SUCCESS", message: "Application submitted" });
+        } else if (action === "next_page") {
+          if (statusEl)
+            statusEl.textContent = "Proceeding to next page...";
+          _autoTriggered = false;
+          _autoTriggerRunning = false;
+          await sleep4(3e3);
+          autoTriggerAutofill();
+          return;
+        } else {
+          if (statusEl)
+            statusEl.textContent = "Autofill complete \u2014 review and submit";
+        }
+      } else {
+        if (statusEl)
+          statusEl.textContent = `Autofill complete (${missingCount} fields need review)`;
+      }
+      LOG5("Auto-trigger: complete");
     } catch (err) {
-      LOG3("Auto-trigger: error", err);
+      LOG5("Auto-trigger: error", err);
     } finally {
       _autoTriggerRunning = false;
     }
@@ -1997,10 +2814,10 @@
       return url.includes("/apply") || document.querySelectorAll("[data-automation-id]").length > 2;
     }
     if (atsType === "greenhouse") {
-      return !!document.querySelector('#application_form,form[action*="greenhouse"],[data-provided-by="greenhouse"]');
+      return !!document.querySelector('#application_form,form[action*="greenhouse"],[data-provided-by="greenhouse"]') || location.hostname.includes("boards.greenhouse.io");
     }
     if (atsType === "lever") {
-      return !!document.querySelector(".posting-apply,.postings-form,.application-form");
+      return !!document.querySelector(".posting-apply,.postings-form,.application-form") || location.hostname.includes("jobs.lever.co");
     }
     if (atsType === "icims") {
       return document.querySelectorAll("input:not([type=hidden])").length > 2;
@@ -2011,7 +2828,21 @@
     if (atsType === "taleo") {
       return url.includes("/apply") || !!document.querySelector("#OracleFusionApp,oracle-apply-flow");
     }
-    const hasApply = $$('a, button, [role="button"]').some((el) => {
+    if (atsType === "indeed") {
+      return path.includes("/viewjob") || path.includes("/applystart") || !!document.querySelector('#indeedApplyModal,.ia-container,[id*="indeedApply"]');
+    }
+    if (atsType === "linkedin") {
+      return path.includes("/jobs/view/") || path.includes("/jobs/collections/") || !!document.querySelector(".jobs-easy-apply-modal,[data-test-modal],.jobs-apply-button");
+    }
+    if (atsType === "hiringcafe") {
+      return !!Array.from(document.querySelectorAll("a, button")).find(
+        (el) => /apply directly|apply now/i.test(el.textContent || "") && isVisible(el)
+      );
+    }
+    if (atsType === "ashby") {
+      return path.includes("/application") || !!document.querySelector("[data-ashby-form]");
+    }
+    const hasApply = $$2('a, button, [role="button"]').some((el) => {
       const t = (el.textContent || "").trim().toLowerCase();
       return /^(apply|apply now|apply directly|easy apply)\b/.test(t) && isVisible(el);
     });
@@ -2021,13 +2852,39 @@
     const hasEmail = !!document.querySelector('input[type="email"],input[name*="email" i],input[autocomplete="email"]');
     return hasName && hasEmail;
   }
+  var _dialogFillDebounce = null;
+  function watchMissingDetailsDialog() {
+    new MutationObserver(async () => {
+      if (_dialogFillDebounce)
+        return;
+      const dialog = Array.from(document.querySelectorAll(
+        '[class*="missing"],[id*="missing"],[role="dialog"],[class*="modal"]'
+      )).find(
+        (el) => isVisible(el) && /missing details|fill.*details|add.*details|fill.*form/i.test(el.textContent || "")
+      );
+      if (dialog) {
+        _dialogFillDebounce = setTimeout(() => {
+          _dialogFillDebounce = null;
+        }, 3e3);
+        LOG5("Missing details dialog detected \u2014 auto-filling");
+        await sleep4(300);
+        await enhancedFillPass();
+        await sleep4(700);
+        const btn = Array.from(dialog.querySelectorAll("button")).find(
+          (el) => isVisible(el) && /save|submit|continue|done|next|confirm/i.test(el.textContent || "")
+        );
+        if (btn)
+          realClick(btn);
+      }
+    }).observe(document.body, { childList: true, subtree: true, attributes: false });
+  }
   var _lastHref = location.href;
   setInterval(() => {
     if (location.href !== _lastHref) {
       _lastHref = location.href;
       _autoTriggered = false;
       _autoTriggerRunning = false;
-      sleep2(2e3).then(() => autoTriggerAutofill());
+      sleep4(2e3).then(() => autoTriggerAutofill());
     }
   }, 1e3);
   var _mutationDebounce = null;
@@ -2044,7 +2901,42 @@
   if (document.body) {
     _autoTriggerObserver.observe(document.body, { childList: true, subtree: true });
   }
-  sleep2(2500).then(() => autoTriggerAutofill());
+  sleep4(2500).then(() => autoTriggerAutofill());
+  if (document.body)
+    watchMissingDetailsDialog();
+  var _csvBridgeStarted = false;
+  if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener(async (changes, area) => {
+      if (area !== "local" || _csvBridgeStarted)
+        return;
+      const newJobId = changes.csvActiveJobId?.newValue;
+      const newTabId = changes.csvActiveTabId?.newValue;
+      if (newJobId && newTabId) {
+        _csvBridgeStarted = true;
+        LOG5("CSV bridge: storage change detected \u2014 triggering autofill");
+        await sleep4(3e3);
+        runFullAutofill().catch(() => {
+        });
+      }
+    });
+  }
+  var _csvFillDebounce = null;
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    new MutationObserver(async () => {
+      try {
+        const { csvActiveJobId } = await chrome.storage.local.get("csvActiveJobId");
+        if (!csvActiveJobId)
+          return;
+        if (_csvFillDebounce)
+          clearTimeout(_csvFillDebounce);
+        _csvFillDebounce = setTimeout(async () => {
+          await enhancedFillPass();
+          await solveCaptcha();
+        }, 800);
+      } catch {
+      }
+    }).observe(document.body, { childList: true, subtree: false });
+  }
   function isAlreadyFilled(el) {
     if (el.classList.contains("ua-filled"))
       return true;
@@ -2189,6 +3081,6 @@
   function escapeAttr(s) {
     return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
-  LOG3("v2.0 loaded \u2014 enhanced autofill ready");
+  LOG5("v3.0 loaded \u2014 enhanced autofill with tailoring ready");
 })();
 //# sourceMappingURL=content.js.map

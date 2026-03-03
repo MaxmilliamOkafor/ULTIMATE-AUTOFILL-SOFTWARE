@@ -57,7 +57,9 @@ export interface FieldMatchResult {
 
 export type ATSType =
   | 'workday' | 'greenhouse' | 'lever' | 'smartrecruiters'
-  | 'icims' | 'taleo' | 'ashby' | 'bamboohr' | 'generic';
+  | 'icims' | 'taleo' | 'ashby' | 'bamboohr' | 'generic'
+  | 'indeed' | 'linkedin' | 'hiringcafe' | 'jobvite' | 'workable'
+  | 'paylocity' | 'jazzhr' | 'ziprecruiter' | 'dice' | 'ukg';
 
 export interface ATSDetectionResult {
   type: ATSType;
@@ -153,7 +155,10 @@ export type MessageType =
   | 'TRIGGER_AUTOFILL' | 'START_CSV_QUEUE' | 'STOP_CSV_QUEUE'
   | 'PAUSE_CSV_QUEUE' | 'RESUME_CSV_QUEUE' | 'SKIP_CSV_JOB'
   | 'CSV_JOB_COMPLETE' | 'CSV_JOB_STARTED' | 'CSV_QUEUE_DONE'
-  | 'AUTOFILL_COMPLETE' | 'AUTOFILL_PROGRESS';
+  | 'AUTOFILL_COMPLETE' | 'AUTOFILL_PROGRESS'
+  | 'SIDEBAR_STATUS' | 'SIDEBAR_FIELD_UPDATE' | 'SIDEBAR_FIELD_LIST'
+  | 'TRIGGER_TAILORING' | 'COMPLEX_FORM_SUCCESS' | 'COMPLEX_FORM_ERROR'
+  | 'FILL_COMPLEX_FORM' | 'PING' | 'SOLVE_CAPTCHA';
 
 export interface ExtMessage {
   type: MessageType;

@@ -302,20 +302,48 @@ async function _processNextCsvJobInner(): Promise<void> {
   }
 
   _activeJobId = job.id;
+
+  // Progress broadcasting
+  const pendingCount = q.filter((j: CsvJobItem) => j.status === 'pending' || j.status === 'running').length;
+  const totalCount = q.length;
+  const jobIndex = totalCount - pendingCount + 1;
+  broadcast({ type: 'CSV_QUEUE_PROGRESS', jobIndex, totalCount, jobId: job.id, url: job.url });
+
+  // Store csvActiveJobId BEFORE navigating to prevent race condition
+  // The content script's storage listener will pick this up even if it loads before the tab update event
   await chrome.storage.local.set({
     csvActiveJobId: job.id,
     csvActiveTabId: tab.id,
     csvQueueRunning: true,
   });
 
-  // Wait for tab to finish loading, then trigger autofill
+  // Wait for tab to finish loading, then verify content script is ready via PING before triggering
   const _triggerOnTabLoad = async (updTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
     if (updTabId !== tab.id || changeInfo.status !== 'complete') return;
     chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
     // Wait for page JS to hydrate
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 3000));
+    // Re-store in case storage was cleared
     await chrome.storage.local.set({ csvActiveJobId: job.id, csvActiveTabId: tab.id });
-    // Send TRIGGER_AUTOFILL
+
+    // PING retry loop: verify content script is ready before sending TRIGGER_AUTOFILL
+    let contentScriptReady = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      try {
+        const resp = await chrome.tabs.sendMessage(tab.id!, { type: 'PING' });
+        if (resp?.ready) {
+          contentScriptReady = true;
+          break;
+        }
+      } catch { /* content script not yet injected */ }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (!contentScriptReady) {
+      console.warn('[UA-SW] Content script did not respond to PING after 30s — trying TRIGGER anyway');
+    }
+
+    // Send TRIGGER_AUTOFILL with retries
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await chrome.tabs.sendMessage(tab.id!, { type: 'TRIGGER_AUTOFILL', jobId: job.id });

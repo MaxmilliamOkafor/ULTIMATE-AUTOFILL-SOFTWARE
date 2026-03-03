@@ -827,6 +827,10 @@ async function _processNextCsvJobInner() {
     return;
   }
   _activeJobId = job.id;
+  const pendingCount = q.filter((j) => j.status === "pending" || j.status === "running").length;
+  const totalCount = q.length;
+  const jobIndex = totalCount - pendingCount + 1;
+  broadcast({ type: "CSV_QUEUE_PROGRESS", jobIndex, totalCount, jobId: job.id, url: job.url });
   await chrome.storage.local.set({
     csvActiveJobId: job.id,
     csvActiveTabId: tab.id,
@@ -836,8 +840,23 @@ async function _processNextCsvJobInner() {
     if (updTabId !== tab.id || changeInfo.status !== "complete")
       return;
     chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
-    await new Promise((r) => setTimeout(r, 5e3));
+    await new Promise((r) => setTimeout(r, 3e3));
     await chrome.storage.local.set({ csvActiveJobId: job.id, csvActiveTabId: tab.id });
+    let contentScriptReady = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      try {
+        const resp = await chrome.tabs.sendMessage(tab.id, { type: "PING" });
+        if (resp?.ready) {
+          contentScriptReady = true;
+          break;
+        }
+      } catch {
+      }
+      await new Promise((r) => setTimeout(r, 2e3));
+    }
+    if (!contentScriptReady) {
+      console.warn("[UA-SW] Content script did not respond to PING after 30s \u2014 trying TRIGGER anyway");
+    }
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_AUTOFILL", jobId: job.id });

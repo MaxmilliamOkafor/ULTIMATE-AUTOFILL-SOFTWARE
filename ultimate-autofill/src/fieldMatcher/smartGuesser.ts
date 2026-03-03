@@ -350,6 +350,53 @@ export function guessFieldValue(label: string, profile: NormalizedProfile, el: H
     return guessValue(label, profile) || getResponseValue(label, el, responseEntries) || '';
 }
 
+// ─── Missing Required Fields Tracker ────────────────────────────
+
+/** Get labels of all visible required fields that are still empty. */
+export function getMissingRequiredFields(): string[] {
+    const required = Array.from(document.querySelectorAll<HTMLElement>(
+        'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select'
+    )).filter(el => isVisible(el) && isFieldRequired(el));
+    const missing: string[] = [];
+    for (const el of required) {
+        if ((el as HTMLInputElement).type === 'radio' && (el as HTMLInputElement).name) {
+            const group = Array.from(document.querySelectorAll<HTMLInputElement>(
+                `input[type="radio"][name="${CSS.escape((el as HTMLInputElement).name)}"]`
+            )).filter(isVisible);
+            if (group.some(r => r.checked)) continue;
+        } else if ((el as HTMLInputElement).type === 'checkbox' && !(el as HTMLInputElement).checked) {
+            // required checkbox must be checked
+        } else if (hasFieldValue(el)) {
+            continue;
+        }
+        const lbl = getFieldLabel(el) || (el as HTMLInputElement).name || el.id || 'Required field';
+        if (!missing.includes(lbl)) missing.push(lbl);
+    }
+    return missing;
+}
+
+// ─── Sidebar Reporting ──────────────────────────────────────────
+
+/** Send field status updates to the sidebar via background relay */
+export function reportFieldStatus(fields: { name: string; status: string; required: boolean }[]): void {
+    try {
+        chrome.runtime.sendMessage({
+            type: 'SIDEBAR_FIELD_LIST',
+            fields,
+        }).catch(() => { });
+    } catch { }
+}
+
+export function reportFieldFilled(fieldName: string, status: 'filled' | 'pending' | 'failed'): void {
+    try {
+        chrome.runtime.sendMessage({
+            type: 'SIDEBAR_FIELD_UPDATE',
+            fieldName,
+            status,
+        }).catch(() => { });
+    } catch { }
+}
+
 // Invalidate response cache on storage changes
 if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
