@@ -850,6 +850,38 @@
     return false;
   }
 
+  // Auto-dismiss "How Was Your Autofill Experience This Time?" review popup
+  function dismissReviewPopup() {
+    const allEls = [...$$('div,section,aside,[class*="feedback"],[class*="review"],[class*="rating"],[class*="survey"],[class*="popup"],[class*="toast"],[class*="banner"]'),
+    ...allShadow('div,section,aside,[class*="feedback"],[class*="review"],[class*="rating"],[class*="survey"]')];
+    for (const el of allEls) {
+      const txt = el.textContent || '';
+      if (/how was your autofill experience|rate your experience|autofill experience this time/i.test(txt)) {
+        // Try to find close/dismiss/X button
+        const closeBtn = el.querySelector('[class*="close"],[class*="Close"],button[aria-label*="close"],button[aria-label*="Close"],.ant-modal-close,.ant-drawer-close') ||
+          [...el.querySelectorAll('button,span,div,svg')].find(b => /^[×✕✖xX]$/.test(b.textContent?.trim()) || b.getAttribute('aria-label')?.toLowerCase() === 'close');
+        if (closeBtn) {
+          LOG('Auto-dismissing review/feedback popup');
+          realClick(closeBtn);
+          return true;
+        }
+        // No close button found — hide it directly
+        if (el.offsetHeight > 0 && el.offsetHeight < 400) {
+          LOG('Hiding review popup (no close button found)');
+          el.style.display = 'none';
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Combined popup dismisser — catches any annoying popups
+  function dismissAllPopups() {
+    dismissAutofillConfirm();
+    dismissReviewPopup();
+  }
+
   // ===================== AUTOFILL TRIGGER =====================
   async function triggerAutofill() {
     // Wait for sidebar (shadow DOM aware)
@@ -1275,6 +1307,8 @@
     if (window.self !== window.top) return;
     await load(); await loadAnswerBank(); injectCSS(); buildUI();
     [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
+    // Periodically dismiss annoying popups (review, confirm, feedback)
+    setInterval(dismissAllPopups, 3000);
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
 
     // Listen for messages from background (CSV queue, PING)
