@@ -908,24 +908,6 @@
         return;
       }
 
-      // === Step 0: If sidebar shows "Add A New Job" (e.g. Greenhouse), click the add button first ===
-      checkAbort();
-      const addJobBtn = findSidebarBtn(
-        /add\s*a?\s*new\s*job|add\s*this\s*job|add\s*job|get\s*job\s*match/i,
-        ['button[class*="add"]', 'div[class*="add-job"]', '.external-job-add-button']
-      );
-      // Also look for the "+" icon button in the sidebar
-      const plusBtn = findSidebarBtn(/^\+$/,
-        ['button[class*="add"]', 'button[class*="plus"]', 'svg[class*="add"]']);
-      const addBtn = addJobBtn || plusBtn;
-      if (addBtn) {
-        LOG('Step 0: Sidebar shows Add Job prompt — clicking to register this job');
-        realClick(addBtn);
-        // Wait for the sidebar to detect the job and show resume options
-        await sleep(5000);
-        checkAbort();
-      }
-
       // === Step 1: Click "Generate Your Custom Resume" ===
       checkAbort();
       LOG('Step 1: Looking for Generate Your Custom Resume...');
@@ -933,26 +915,8 @@
         /generate\s*(your\s*)?(custom|my)?\s*resume|tailor\s*resume|create\s*resume/i,
         ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button',
           'button[class*="tailor"]', 'button[class*="generate"]', 'div[class*="generate-resume"]'],
-        20000
+        12000
       );
-
-      // If still not found, try clicking the "+" area one more time
-      if (!tailorBtn) {
-        LOG('Step 1: Generate button not found — trying Add Job again...');
-        const addRetry = findSidebarBtn(/add|new\s*job|\+/i,
-          ['button[class*="add"]', 'div[class*="add-job"]', '.external-job-add-button']);
-        if (addRetry) {
-          realClick(addRetry);
-          await sleep(6000);
-          tailorBtn = await waitForSidebarBtn(
-            /generate\s*(your\s*)?(custom|my)?\s*resume|tailor\s*resume|create\s*resume/i,
-            ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button',
-              'button[class*="tailor"]', 'button[class*="generate"]', 'div[class*="generate-resume"]'],
-            15000
-          );
-        }
-      }
-
       if (tailorBtn) {
         LOG('Step 1: Clicking Generate Your Custom Resume');
         realClick(tailorBtn);
@@ -1705,14 +1669,9 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // Only auto-start when autoApply is ON or queue is actively processing
-      if (autoApply || qActive) {
-        // No delay — start immediately
-        if (isWorkday()) await workdayAutomation();
-        else await tailorFirstFlow();
-      } else {
-        LOG('Auto-apply is OFF — showing badge only. Toggle auto-apply to start.');
-      }
+      // Always auto-trigger tailoring when ATS is detected
+      if (isWorkday()) await workdayAutomation();
+      else await tailorFirstFlow();
     }
     if (qActive && !_abortQ) { processQ(); }
     if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
