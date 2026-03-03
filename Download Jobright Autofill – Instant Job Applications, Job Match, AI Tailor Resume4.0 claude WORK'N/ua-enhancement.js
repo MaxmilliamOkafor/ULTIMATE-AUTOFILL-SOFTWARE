@@ -75,6 +75,16 @@
   };
   let queue = [], qActive = false, qPaused = false, autoApply = false, selected = new Set();
   let _tailorRan = false; // Guard: only run tailor-first flow once per page
+  let _abortQ = false; // Abort flag for stop/pause
+
+  // Abort helper — call between steps to respect stop/pause
+  function checkAbort() {
+    if (_abortQ) { LOG('Abort detected — stopping flow'); throw new Error('UA_ABORT'); }
+  }
+  async function waitWhilePaused() {
+    while (qPaused && !_abortQ) { LOG('Paused — waiting...'); await sleep(2000); }
+    checkAbort();
+  }
   async function load() { queue = (await st.get(SK.Q)) || []; qActive = (await st.get(SK.QA)) || false; qPaused = (await st.get(SK.QP)) || false; autoApply = (await st.get(SK.AA)) || false; }
   async function saveQ() { await st.set(SK.Q, queue); }
 
@@ -664,8 +674,87 @@
     return missing;
   }
 
+  // ===================== CAPTCHA / HUMAN CHECK HANDLING =====================
+  async function solveCaptchas() {
+    LOG('Checking for CAPTCHAs / Human Checks...');
+    let solved = 0;
+
+    // 1. reCAPTCHA v2 checkbox ("I'm not a robot")
+    const recaptchaFrames = $$('iframe[src*="recaptcha"][src*="anchor"]');
+    for (const frame of recaptchaFrames) {
+      try {
+        const doc = frame.contentDocument || frame.contentWindow?.document;
+        if (doc) {
+          const cb = doc.querySelector('.recaptcha-checkbox-border, #recaptcha-anchor');
+          if (cb && !cb.closest('.recaptcha-checkbox')?.classList?.contains('recaptcha-checkbox-checked')) {
+            realClick(cb);
+            LOG('Clicked reCAPTCHA checkbox');
+            solved++;
+            await sleep(2000);
+          }
+        }
+      } catch (e) { /* cross-origin, can't access */ }
+    }
+
+    // 2. reCAPTCHA via container
+    const recaptchaContainers = $$('.g-recaptcha, [class*="recaptcha"], [data-sitekey]');
+    for (const container of recaptchaContainers) {
+      const iframe = container.querySelector('iframe');
+      if (iframe) {
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (doc) {
+            const anchor = doc.querySelector('#recaptcha-anchor, .recaptcha-checkbox');
+            if (anchor && !anchor.classList?.contains('recaptcha-checkbox-checked')) {
+              realClick(anchor); solved++; await sleep(2000);
+            }
+          }
+        } catch (e) {
+          realClick(iframe); solved++; await sleep(2000);
+        }
+      }
+    }
+
+    // 3. hCaptcha
+    const hcaptchaFrames = $$('iframe[src*="hcaptcha"]');
+    for (const frame of hcaptchaFrames) {
+      try {
+        const doc = frame.contentDocument || frame.contentWindow?.document;
+        if (doc) {
+          const cb = doc.querySelector('#checkbox, .check');
+          if (cb) { realClick(cb); solved++; await sleep(2000); }
+        }
+      } catch (e) { realClick(frame); solved++; await sleep(2000); }
+    }
+
+    // 4. Cloudflare Turnstile
+    $$('iframe[src*="turnstile"], iframe[src*="challenges.cloudflare"]').forEach(frame => {
+      try { realClick(frame); solved++; } catch (e) { }
+    });
+
+    // 5. Generic "I'm not a robot" / "Human Check" checkboxes
+    $$('input[type="checkbox"]').filter(isVisible).forEach(cb => {
+      if (cb.checked) return;
+      const lbl = getLabel(cb) || '';
+      if (/not a robot|human check|i.?m not a robot|verify.*human|captcha|robot/i.test(lbl)) {
+        realClick(cb); solved++;
+      }
+    });
+
+    // 6. Labels mentioning human verification
+    $$('label, span, div').filter(el => isVisible(el) && /not a robot|human.?check|verify.*human/i.test(el.textContent?.trim() || '')).forEach(lbl => {
+      const cb = lbl.querySelector('input[type="checkbox"]') || lbl.closest('label')?.querySelector('input[type="checkbox"]');
+      if (cb && !cb.checked) { realClick(cb); solved++; }
+      else if (!cb) { realClick(lbl); solved++; }
+    });
+
+    if (solved > 0) LOG(`Solved ${solved} CAPTCHA(s) / Human Check(s)`);
+    return solved;
+  }
+
   // ===================== TAILOR-FIRST AUTOMATION FLOW =====================
-  // Full sequence: Generate Custom Resume → Improve My Resume → Full Edit → Select All → Generate New → Continue to autofill → Autofill → Fill gaps → Submit
+  // Full: Generate Custom Resume → Improve My Resume → Full Edit → Select All → Generate New Resume
+  //       → Wait → Continue to Autofill → Autofill → CAPTCHAs → Fill gaps → Submit/Next
 
   async function tailorFirstFlow() {
     const ats = detectATS();
@@ -676,168 +765,186 @@
     if (_tailorRan) { LOG('Tailor flow already ran on this page — skipping'); return; }
     _tailorRan = true;
 
-    // Wait for Jobright sidebar to load (try shadow DOM too)
-    let sidebar = await waitFor('#jobright-helper-id', 15000);
-    if (!sidebar) sidebar = queryShadow('#jobright-helper-id');
-    if (!sidebar) {
-      // Also try iframe-based sidebar
-      const frames = $$('iframe[src*="jobright"]');
-      if (frames.length) LOG('Found Jobright iframe but cannot access it directly');
-      LOG('Jobright sidebar not found — falling back to direct autofill');
-      await directAutofillFlow();
-      return;
-    }
-    await sleep(2000);
+    try {
+      checkAbort();
 
-    // === Step 1: Click "Generate Custom Resume" ===
-    LOG('Step 1: Looking for Generate Custom Resume...');
-    let tailorBtn = await waitForSidebarBtn(
-      /generate\s*(custom|my)?\s*resume|tailor\s*resume|create\s*resume/i,
-      ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button',
-        'button[class*="tailor"]', 'button[class*="generate"]', 'div[class*="generate-resume"]'],
-      15000
-    );
-    if (tailorBtn) {
-      LOG('Step 1: Clicking Generate Custom Resume');
-      realClick(tailorBtn);
-      await sleep(4000);
+      // Wait for Jobright sidebar
+      let sidebar = await waitFor('#jobright-helper-id', 15000);
+      if (!sidebar) sidebar = queryShadow('#jobright-helper-id');
+      if (!sidebar) {
+        LOG('Jobright sidebar not found — falling back to direct autofill');
+        await directAutofillFlow();
+        return;
+      }
 
-      // === Step 2: Click "Improve My Resume for This Job" ===
-      LOG('Step 2: Looking for Improve My Resume...');
-      let improveBtn = await waitForSidebarBtn(
-        /improve\s*(my)?\s*resume/i,
-        ['button[class*="improve"]', 'div[class*="improve"]'],
+      // === Step 1: Click "Generate Your Custom Resume" ===
+      checkAbort();
+      LOG('Step 1: Looking for Generate Your Custom Resume...');
+      let tailorBtn = await waitForSidebarBtn(
+        /generate\s*(your\s*)?(custom|my)?\s*resume|tailor\s*resume|create\s*resume/i,
+        ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button',
+          'button[class*="tailor"]', 'button[class*="generate"]', 'div[class*="generate-resume"]'],
         15000
       );
-      if (improveBtn) {
-        LOG('Step 2: Clicking Improve My Resume');
-        realClick(improveBtn);
-        await sleep(3000);
-      } else {
-        LOG('Step 2: Improve button not found — continuing');
-      }
+      if (tailorBtn) {
+        LOG('Step 1: Clicking Generate Your Custom Resume');
+        realClick(tailorBtn);
+        await sleep(4000);
+        checkAbort();
 
-      // === Step 3: Click "Full Edit (All experiences with longer processing time)" ===
-      LOG('Step 3: Looking for Full Edit...');
-      let fullEditBtn = await waitForSidebarBtn(
-        /full\s*edit/i,
-        ['button[class*="full-edit"]', 'div[class*="full-edit"]', 'label[class*="full"]'],
-        10000
-      );
-      if (fullEditBtn) {
-        LOG('Step 3: Clicking Full Edit');
-        realClick(fullEditBtn);
+        // === Step 2: Click "Improve My Resume for This Job" ===
+        LOG('Step 2: Looking for Improve My Resume...');
+        let improveBtn = await waitForSidebarBtn(
+          /improve\s*(my)?\s*resume/i,
+          ['button[class*="improve"]', 'div[class*="improve"]'],
+          12000
+        );
+        if (improveBtn) {
+          LOG('Step 2: Clicking Improve My Resume');
+          realClick(improveBtn);
+          await sleep(3000);
+        } else { LOG('Step 2: Improve button not found — continuing'); }
+        checkAbort();
+
+        // === Step 3: Click "Full Edit" ===
+        LOG('Step 3: Looking for Full Edit...');
+        let fullEditBtn = await waitForSidebarBtn(
+          /full\s*edit/i,
+          ['button[class*="full-edit"]', 'div[class*="full-edit"]', 'label[class*="full"]'],
+          8000
+        );
+        if (fullEditBtn) {
+          LOG('Step 3: Clicking Full Edit');
+          realClick(fullEditBtn);
+          await sleep(2000);
+        } else { LOG('Step 3: Full Edit not found — continuing'); }
+        checkAbort();
+
+        // === Step 4: Click "Select All" (missing skill keywords) ===
+        LOG('Step 4: Looking for Select All...');
+        let selectAllBtn = await waitForSidebarBtn(
+          /select\s*all/i,
+          ['button[class*="select-all"]', 'span[class*="select-all"]', 'label[class*="select"]'],
+          6000
+        );
+        if (selectAllBtn) {
+          LOG('Step 4: Clicking Select All');
+          realClick(selectAllBtn);
+          await sleep(1500);
+        } else { LOG('Step 4: Select All not found — continuing'); }
+        checkAbort();
+
+        // === Step 5: Click "Generate My New Resume" ===
+        LOG('Step 5: Looking for Generate My New Resume...');
+        let generateNewBtn = await waitForSidebarBtn(
+          /generate\s*(my\s*new\s*)?resume|generate$/i,
+          ['button[class*="generate"]', 'div[class*="generate-btn"]'],
+          8000
+        );
+        if (generateNewBtn) {
+          LOG('Step 5: Clicking Generate My New Resume');
+          realClick(generateNewBtn);
+          await sleep(3000);
+        } else { LOG('Step 5: Generate New not found — continuing'); }
+        checkAbort();
+
+        // === Step 6: Wait for resume generation (up to 2 min) ===
+        LOG('Step 6: Waiting for resume generation to complete...');
+        const maxWait = 120000;
+        const start = Date.now();
+        while (Date.now() - start < maxWait) {
+          if (_abortQ) break;
+          const cBtn = findSidebarBtn(/continue\s*to\s*autofill/i,
+            ['.continue-button:not(.continue-button-disabled)']);
+          if (cBtn) { LOG('Resume ready — Continue to Autofill appeared'); break; }
+          const afBtn = queryShadow('.auto-fill-button:not([disabled])');
+          if (afBtn) { LOG('Resume ready — autofill button available'); break; }
+          const dlBtn = findSidebarBtn(/download\s*resume/i);
+          if (dlBtn) { LOG('Resume ready — Download Resume visible'); break; }
+          const loading = queryShadow('.tailor-resume-loading-linear-progress') ||
+            queryShadow('.resume-loading-container') || queryShadow('.spin-loading');
+          if (!loading || !isVisible(loading)) {
+            const scoreEl = findByTextShadow('div,span', /score|good|great|matched/i);
+            if (scoreEl) { LOG('Resume ready — score visible'); break; }
+          }
+          await sleep(3000);
+        }
         await sleep(2000);
       } else {
-        LOG('Step 3: Full Edit not found — continuing');
+        LOG('Step 1: No tailor button found — skipping tailoring steps');
       }
 
-      // === Step 4: Click "Select all" (for missing skill keywords) ===
-      LOG('Step 4: Looking for Select All...');
-      let selectAllBtn = await waitForSidebarBtn(
-        /select\s*all/i,
-        ['button[class*="select-all"]', 'span[class*="select-all"]', 'label[class*="select"]',
-          'input[type="checkbox"][class*="all"]'],
-        8000
+      checkAbort();
+
+      // === Step 7: Click "Continue to Autofill" ===
+      LOG('Step 7: Looking for Continue to Autofill...');
+      let continueBtn = await waitForSidebarBtn(
+        /continue\s*(to)?\s*autofill/i,
+        ['.continue-button:not(.continue-button-disabled)', 'button[class*="continue"]'],
+        12000
       );
-      if (selectAllBtn) {
-        LOG('Step 4: Clicking Select All');
-        realClick(selectAllBtn);
-        await sleep(1500);
-      } else {
-        LOG('Step 4: Select All not found — continuing');
-      }
+      if (continueBtn) {
+        LOG('Step 7: Clicking Continue to Autofill');
+        realClick(continueBtn);
+        await sleep(2000);
+      } else { LOG('Step 7: Continue not found — proceeding to autofill'); }
 
-      // === Step 5: Click "Generate My New Resume" ===
-      LOG('Step 5: Looking for Generate My New Resume...');
-      let generateNewBtn = await waitForSidebarBtn(
-        /generate\s*(my\s*new\s*)?resume|generate$/i,
-        ['button[class*="generate"]', 'div[class*="generate-btn"]'],
-        10000
-      );
-      if (generateNewBtn) {
-        LOG('Step 5: Clicking Generate My New Resume');
-        realClick(generateNewBtn);
-        await sleep(3000);
-      } else {
-        LOG('Step 5: Generate New button not found — continuing');
-      }
+      checkAbort();
 
-      // Wait for resume generation to complete (up to 2 min)
-      LOG('Waiting for resume generation to complete...');
-      const maxWait = 120000;
-      const start = Date.now();
-      while (Date.now() - start < maxWait) {
-        // Check for loading indicators (shadow DOM aware)
-        const loading = queryShadow('.tailor-resume-loading-linear-progress') ||
-          queryShadow('.resume-loading-container') ||
-          queryShadow('.spin-loading') ||
-          findByTextShadow('div,span', /generating|processing|loading/i);
-        if (!loading || !isVisible(loading)) {
-          const afBtn = queryShadow('.auto-fill-button:not([disabled])') ||
-            findSidebarBtn(/continue\s*to\s*autofill|autofill/i);
-          if (afBtn) { LOG('Resume generation complete'); break; }
-        }
-        await sleep(2500);
-      }
-      await sleep(2000);
-    } else {
-      LOG('Step 1: No tailor button found — skipping tailoring steps');
-    }
+      // === Step 8: Click Autofill ===
+      LOG('Step 8: Triggering Autofill');
+      await triggerAutofill();
 
-    // === Step 6: Click "Continue to Autofill" ===
-    LOG('Step 6: Looking for Continue to Autofill...');
-    let continueBtn = await waitForSidebarBtn(
-      /continue\s*(to)?\s*autofill|continue/i,
-      ['.continue-button:not(.continue-button-disabled)', 'button[class*="continue"]'],
-      10000
-    );
-    if (continueBtn) {
-      LOG('Step 6: Clicking Continue to Autofill');
-      realClick(continueBtn);
-      await sleep(2000);
-    } else {
-      LOG('Step 6: Continue button not found — proceeding to autofill click');
-    }
-
-    // === Step 7: Click the Autofill button ===
-    LOG('Step 7: Triggering Autofill');
-    await triggerAutofill();
-
-    // Wait for Jobright autofill to complete
-    LOG('Waiting for Jobright autofill to complete...');
-    await sleep(3000);
-    const fillStart = Date.now();
-    while (Date.now() - fillStart < 60000) {
-      const afBtn = queryShadow('.auto-fill-button') || $('.auto-fill-button');
-      if (afBtn) {
-        const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '' || /^auto.?fill$/i.test(txt)) break;
-      }
-      await sleep(1500);
-    }
-    await sleep(2000);
-
-    // === Step 8: Fallback fill for missed fields ===
-    LOG('Step 8: Running fallback fill for missed fields');
-    await fallbackFill();
-    await sleep(1000);
-    await fallbackFill();
-    await sleep(1000);
-
-    // === Step 9: Auto submit or next ===
-    LOG('Step 9: Auto-submit/next');
-    const result = await autoSubmitOrNext();
-
-    if (result === 'next_page') {
-      LOG('Navigated to next page — continuing multi-page flow');
+      // Wait for autofill to complete
+      LOG('Waiting for Jobright autofill to complete...');
       await sleep(3000);
-      await multiPageLoop();
-    } else if (result === 'submitted') {
-      LOG('Application submitted!');
-      await learnFromPage();
+      const fillStart = Date.now();
+      while (Date.now() - fillStart < 60000) {
+        if (_abortQ) break;
+        const afBtn = queryShadow('.auto-fill-button') || $('.auto-fill-button');
+        if (afBtn) {
+          const txt = afBtn.textContent?.trim().toLowerCase() || '';
+          if (txt === 'autofill' || txt === '' || /^auto.?fill$/i.test(txt)) break;
+        }
+        await sleep(1500);
+      }
       await sleep(2000);
-      if (checkSuccess()) LOG('Success confirmed!');
+
+      checkAbort();
+
+      // === Step 9: CAPTCHAs ===
+      LOG('Step 9: Solving CAPTCHAs...');
+      await solveCaptchas();
+      await sleep(500);
+
+      // === Step 10: Fallback fill ===
+      LOG('Step 10: Fallback fill for missed fields');
+      await fallbackFill();
+      await sleep(800);
+      await fallbackFill();
+      await sleep(500);
+      await solveCaptchas();
+      await sleep(500);
+
+      checkAbort();
+
+      // === Step 11: Submit or next page ===
+      LOG('Step 11: Auto-submit/next');
+      const result = await autoSubmitOrNext();
+
+      if (result === 'next_page') {
+        LOG('Navigated to next page — continuing multi-page flow');
+        await sleep(3000);
+        await multiPageLoop();
+      } else if (result === 'submitted') {
+        LOG('Application submitted!');
+        await learnFromPage();
+        await sleep(2000);
+        if (checkSuccess()) LOG('Success confirmed!');
+      }
+    } catch (e) {
+      if (e.message === 'UA_ABORT') { LOG('Flow aborted by user'); _tailorRan = false; return; }
+      LOG('Error in tailorFirstFlow:', e.message);
     }
   }
 
@@ -1030,27 +1137,46 @@
     goNext();
   }
   function goNext() {
-    if (qPaused) return;
+    if (qPaused || _abortQ) return;
     const n = queue.find(j => j.status === 'pending');
     if (n) {
       n.status = 'applying';
       saveQ().then(() => {
-        LOG(`Queue: opening ${n.url} in new tab`);
-        // Open new tab via background service worker
-        chrome.runtime.sendMessage({ type: 'UA_OPEN_TAB', url: n.url, jobId: n.id }).catch(() => {
-          // Fallback: direct window.open if messaging fails
-          window.open(n.url, '_blank') || (location.href = n.url);
-        });
+        LOG(`Queue: navigating to ${n.url} (same tab)`);
+        // Navigate in-place — NO new tabs
+        location.href = n.url;
       });
     } else {
       qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl();
       LOG('Queue: all jobs processed');
     }
   }
-  async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
-  async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
-  async function pauseQ() { qPaused = true; await st.set(SK.QP, true); renderQ(); updateCtrl(); }
-  async function resumeQ() { qPaused = false; await st.set(SK.QP, false); processQ(); renderQ(); updateCtrl(); }
+  async function startQ() {
+    if (!queue.filter(j => j.status === 'pending').length) return;
+    _abortQ = false; // Reset abort flag
+    qActive = true; qPaused = false;
+    await st.set(SK.QA, true); await st.set(SK.QP, false);
+    updateCtrl(); goNext();
+  }
+  async function stopQ() {
+    LOG('Stop requested — setting abort flag');
+    _abortQ = true; // IMMEDIATELY abort any running async flow
+    qActive = false; qPaused = false;
+    await st.set(SK.QA, false); await st.set(SK.QP, false);
+    queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; });
+    _tailorRan = false; // Allow re-run after stop
+    await saveQ(); renderQ(); updateCtrl();
+  }
+  async function pauseQ() {
+    LOG('Pause requested');
+    qPaused = true;
+    await st.set(SK.QP, true); renderQ(); updateCtrl();
+  }
+  async function resumeQ() {
+    LOG('Resume requested');
+    qPaused = false;
+    await st.set(SK.QP, false); processQ(); renderQ(); updateCtrl();
+  }
   async function skipJob() { const c = queue.find(j => j.status === 'applying'); if (c) { c.status = 'failed'; await saveQ(); } goNext(); }
 
   // ===================== CREDIT HIDE =====================
@@ -1412,12 +1538,16 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // ALWAYS auto-start tailor-first flow when ATS is detected
-      await sleep(2000);
-      if (isWorkday()) await workdayAutomation();
-      else await tailorFirstFlow();
+      // Only auto-start when autoApply is ON or queue is actively processing
+      if (autoApply || qActive) {
+        // No delay — start immediately
+        if (isWorkday()) await workdayAutomation();
+        else await tailorFirstFlow();
+      } else {
+        LOG('Auto-apply is OFF — showing badge only. Toggle auto-apply to start.');
+      }
     }
-    if (qActive) { await sleep(2000); processQ(); }
+    if (qActive && !_abortQ) { processQ(); }
     if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
