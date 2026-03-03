@@ -833,18 +833,14 @@
 
   // ===================== AUTO-DISMISS CONFIRMATION DIALOGS =====================
   function dismissAutofillConfirm() {
-    // Handle "Are you sure to autofill again?" dialog
+    // Handle "Are you sure to autofill again?" dialog — click CANCEL to prevent overwriting
     const containers = [...$$('[class*="modal"],[class*="Modal"],[class*="dialog"],[class*="Dialog"],[class*="ant-modal"],[role="dialog"]'),
     ...allShadow('[class*="modal"],[class*="Modal"],[class*="dialog"],[role="dialog"]')];
     for (const m of containers) {
       if (/are you sure to autofill again|overwrite your current progress/i.test(m.textContent || '')) {
-        LOG('Auto-dismissing autofill confirmation dialog');
-        // Check "Don't ask again"
-        const cb = m.querySelector('input[type="checkbox"]');
-        if (cb && !cb.checked) { realClick(cb); }
-        // Click "Yes"
-        const yesBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => /^yes$/i.test(b.textContent?.trim()));
-        if (yesBtn) { realClick(yesBtn); return true; }
+        LOG('Overwrite dialog detected — clicking Cancel to preserve filled data');
+        const cancelBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => /^cancel$/i.test(b.textContent?.trim()));
+        if (cancelBtn) { realClick(cancelBtn); return true; }
       }
     }
     return false;
