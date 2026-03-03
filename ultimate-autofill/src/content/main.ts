@@ -1,6 +1,8 @@
 /**
  * Content script - runs on every page.
- * Handles autofill orchestration, ATS detection, and MutationObserver for dynamic pages.
+ * Enhanced with: auto-trigger on ATS detection, smart field guesser,
+ * multi-page form handling, CSV queue integration, resume upload,
+ * captcha solving, and tailoring-first flow.
  */
 
 import type { ExtMessage, FieldMatchResult, SavedResponse, ATSType } from '../types/index';
@@ -8,12 +10,26 @@ import { detectATS } from '../atsDetector/index';
 import { getAdapter } from '../adapters/index';
 import { matchFields } from '../fieldMatcher/index';
 import { findMatches } from '../savedResponses/matcher';
+import {
+  guessValue, normalizeProfile, loadProfile, getFieldLabel as smartGetLabel,
+  isFieldRequired, hasFieldValue, nativeSet, isVisible, realClick,
+  getResponseBank, guessFieldValue, NormalizedProfile,
+} from '../fieldMatcher/smartGuesser';
+import { tryClickSubmitOrNext, detectSuccess, markApplied, NavAction } from './formNavigator';
+import { tryResumeUpload } from './resumeUpload';
+import { solveCaptcha, watchForCaptchas } from './captchaSolver';
+
+const LOG = (...a: unknown[]) => console.log('[UA]', ...a);
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const $$ = <T extends Element>(s: string): T[] => Array.from(document.querySelectorAll(s));
 
 let isRunning = false;
 let observer: MutationObserver | null = null;
+let _autoTriggered = false;
+let _autoTriggerRunning = false;
 
 // ─── Message handling from background / popup ───
-chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
   if (msg.type === 'START_AUTOFILL') {
     startAutofill().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
@@ -26,10 +42,27 @@ chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) =>
     const result = detectATS(document);
     sendResponse(result);
   }
+  // CSV queue / automation trigger
+  if (msg.type === 'TRIGGER_AUTOFILL') {
+    runFullAutofill().then(() => sendResponse({ ok: true })).catch(e => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  // OptimHire-compatible message: FILL_COMPLEX_FORM
+  if (msg.type === 'FILL_COMPLEX_FORM') {
+    runFullAutofill().then(() => sendResponse({ ok: true })).catch(e => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg.type === 'PING') {
+    sendResponse({ ready: true });
+  }
+  if (msg.type === 'SOLVE_CAPTCHA') {
+    solveCaptcha().then(() => sendResponse({ ok: true }));
+    return true;
+  }
 });
 
-async function send(msg: ExtMessage): Promise<any> {
-  return chrome.runtime.sendMessage(msg);
+async function send(msg: ExtMessage | Record<string, any>): Promise<any> {
+  try { return await chrome.runtime.sendMessage(msg); } catch { return null; }
 }
 
 async function getResponses(): Promise<SavedResponse[]> {
@@ -38,29 +71,31 @@ async function getResponses(): Promise<SavedResponse[]> {
   return r?.data || [];
 }
 
+// ─── Original autofill (field-by-field with suggestions) ───
 async function startAutofill() {
   if (isRunning) return;
   isRunning = true;
-
   showControlBar();
 
   const ats = detectATS(document);
   const adapter = getAdapter(ats.type);
   const responses = await getResponses();
 
-  // Initial fill
+  // Initial fill with existing saved responses
   await fillPage(adapter, responses, ats.type);
+
+  // Enhanced: also run the smart guesser for any remaining empty fields
+  await enhancedFillPass();
 
   // Watch for dynamic changes
   observer = new MutationObserver(async (mutations) => {
     if (!isRunning) return;
-    // Only re-fill if new nodes were added
     const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
     if (hasNewNodes) {
       await fillPage(adapter, responses, ats.type);
+      await enhancedFillPass();
     }
   });
-
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
@@ -85,17 +120,348 @@ async function fillPage(adapter: ReturnType<typeof getAdapter>, responses: Saved
       filled++;
       match.field.classList.add('ua-filled');
       match.field.classList.add('ua-filled-flash');
-
-      // Record usage
       send({ type: 'RECORD_USAGE', payload: { id: match.response.id } });
-
-      // Remove flash after animation
       setTimeout(() => match.field.classList.remove('ua-filled-flash'), 600);
     }
   }
-
   updateControlBar(filled, matches.length);
 }
+
+// ─── Enhanced Fill Pass (Smart Guesser) ───
+// Fills any remaining empty fields using the smart guesser profile + response bank
+async function enhancedFillPass(): Promise<number> {
+  const profile = await loadProfile();
+  const responseEntries = await getResponseBank();
+  let filled = 0;
+
+  // Text inputs and textareas
+  $$<HTMLInputElement | HTMLTextAreaElement>(
+    'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=checkbox]):not([type=radio]),textarea'
+  ).forEach(el => {
+    if (!isVisible(el) || hasFieldValue(el) || el.classList.contains('ua-filled')) return;
+    const label = smartGetLabel(el);
+    if (!label) return;
+    const val = guessFieldValue(label, profile, el, responseEntries);
+    if (val) {
+      nativeSet(el, val);
+      el.classList.add('ua-filled');
+      filled++;
+    }
+  });
+
+  // Select dropdowns
+  $$<HTMLSelectElement>('select').forEach(sel => {
+    if (!isVisible(sel) || hasFieldValue(sel) || sel.classList.contains('ua-filled')) return;
+    const label = smartGetLabel(sel);
+    if (!label) return;
+    const val = guessValue(label, profile);
+    if (!val) return;
+    const opts = Array.from(sel.options);
+    // Exact match first
+    let match = opts.find(o => (o.textContent || '').trim().toLowerCase() === val.toLowerCase());
+    // Partial match
+    if (!match) match = opts.find(o => (o.textContent || '').trim().toLowerCase().includes(val.toLowerCase()));
+    // For EEO fields, select "Prefer not to say" / "Decline" options
+    if (!match) {
+      const l = label.toLowerCase();
+      if (/gender|ethnic|race|veteran|disabil/i.test(l)) {
+        match = opts.find(o => /prefer not|decline|not (wish|want)|choose not/i.test(o.textContent || ''));
+      }
+    }
+    if (match) {
+      sel.value = match.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      sel.classList.add('ua-filled');
+      filled++;
+    }
+  });
+
+  // Radio button groups
+  const radioGroups = new Map<string, HTMLInputElement[]>();
+  $$<HTMLInputElement>('input[type=radio]').forEach(r => {
+    if (!isVisible(r)) return;
+    const name = r.name;
+    if (!name) return;
+    if (!radioGroups.has(name)) radioGroups.set(name, []);
+    radioGroups.get(name)!.push(r);
+  });
+  for (const [name, radios] of radioGroups) {
+    if (radios.some(r => r.checked)) continue; // Already selected
+    const label = smartGetLabel(radios[0]) || name;
+    const val = guessValue(label, profile);
+    if (!val) continue;
+    for (const radio of radios) {
+      const radioLabel = (radio.closest('label')?.textContent || radio.value || '').trim().toLowerCase();
+      if (radioLabel.includes(val.toLowerCase()) || (val.toLowerCase() === 'yes' && /yes|true|accept/i.test(radioLabel))) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        filled++;
+        break;
+      }
+    }
+  }
+
+  // Agreement checkboxes
+  $$<HTMLInputElement>('input[type=checkbox]').forEach(cb => {
+    if (cb.checked || !isVisible(cb)) return;
+    const label = smartGetLabel(cb);
+    if (/agree|acknowledge|certif|attest|confirm|consent|accept|terms|privacy/i.test(label)) {
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      filled++;
+    }
+  });
+
+  return filled;
+}
+
+// ─── Full Autofill (for CSV queue / auto-trigger) ───
+// Runs the complete pipeline: ATS fill → enhanced fill → resume upload → captcha → submit/next
+async function runFullAutofill(): Promise<void> {
+  LOG('Starting full autofill pipeline');
+  const ats = detectATS(document);
+  const adapter = getAdapter(ats.type);
+  const responses = await getResponses();
+  const initialUrl = location.href;
+  let submitClickedTs = 0;
+  let reported = false;
+
+  const MAX_PAGES = 10;
+  const checkAndReport = () => {
+    if (reported) return;
+    const result = detectSuccess(initialUrl, submitClickedTs);
+    if (result === 'success') {
+      reported = true;
+      markApplied();
+      send({ type: 'COMPLEX_FORM_SUCCESS', message: 'Application submitted successfully' } as any);
+      LOG('Application submitted successfully!');
+    } else if (result === 'duplicate') {
+      reported = true;
+      send({ type: 'COMPLEX_FORM_ERROR', errorType: 'alreadyApplied', message: 'Already applied to this job' } as any);
+      LOG('Already applied to this job');
+    }
+  };
+
+  // Watch for success via MutationObserver
+  const successObserver = new MutationObserver(checkAndReport);
+  successObserver.observe(document.body, { childList: true, subtree: true });
+  const successInterval = setInterval(checkAndReport, 3000);
+  checkAndReport(); // Initial check
+
+  // Wait for page to settle
+  await sleep(3000);
+
+  // Notify sidebar
+  send({ type: 'SIDEBAR_STATUS', event: 'filling_form', atsName: ats.type, url: location.href } as any);
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    if (reported) break;
+    LOG(`── Page ${page}/${MAX_PAGES}: Filling fields ──`);
+
+    // 1. ATS-specific fill via adapter
+    await fillPage(adapter, responses, ats.type);
+
+    // 2. Enhanced fill (smart guesser for missed fields)
+    await enhancedFillPass();
+
+    // 3. Resume upload
+    await tryResumeUpload();
+
+    // 4. Captcha solving
+    await solveCaptcha();
+
+    // 5. Wait and retry for lazy-rendered fields
+    await sleep(2000);
+    if (reported) break;
+    await enhancedFillPass();
+
+    // 6. Count missing required fields
+    const missingCount = countMissingRequired();
+
+    // 7. Click submit or next
+    await sleep(1000);
+    if (reported) break;
+    const action = await tryClickSubmitOrNext(missingCount);
+
+    if (action === 'submitted') {
+      LOG('Submit clicked — waiting for success confirmation');
+      submitClickedTs = Date.now();
+      for (let i = 0; i < 15; i++) {
+        await sleep(1000);
+        if (reported) break;
+        checkAndReport();
+      }
+      if (!reported) {
+        LOG('No success confirmation after 15s — reporting done (submit was clicked)');
+        reported = true;
+        markApplied();
+        send({ type: 'COMPLEX_FORM_SUCCESS', message: 'Application submitted (submit clicked)' } as any);
+      }
+      break;
+    } else if (action === 'next_page') {
+      LOG('Next/Continue clicked — waiting for page transition');
+      await sleep(3000);
+      continue; // Loop to fill next page
+    } else {
+      LOG('No submit/next button found — final fill attempt');
+      await sleep(2000);
+      await enhancedFillPass();
+      const retry = await tryClickSubmitOrNext(0);
+      if (retry === 'submitted') {
+        submitClickedTs = Date.now();
+        for (let i = 0; i < 10; i++) {
+          await sleep(1000);
+          if (reported) break;
+          checkAndReport();
+        }
+        if (!reported) {
+          reported = true;
+          markApplied();
+          send({ type: 'COMPLEX_FORM_SUCCESS', message: 'Application submitted (final attempt)' } as any);
+        }
+      }
+      break;
+    }
+  }
+
+  // Cleanup
+  successObserver.disconnect();
+  clearInterval(successInterval);
+  LOG('Full autofill pipeline complete');
+}
+
+function countMissingRequired(): number {
+  let count = 0;
+  $$<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+    'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select'
+  ).forEach(el => {
+    if (!isVisible(el)) return;
+    if (isFieldRequired(el) && !hasFieldValue(el)) count++;
+  });
+  return count;
+}
+
+// ─── Auto-Trigger on ATS Detection ───
+// When the user lands on a supported ATS application page, automatically starts filling.
+
+async function autoTriggerAutofill(): Promise<void> {
+  if (_autoTriggerRunning || _autoTriggered) return;
+
+  // Check if auto-trigger is enabled
+  const { ua_autoTrigger } = await chrome.storage.local.get('ua_autoTrigger');
+  if (ua_autoTrigger === false) return;
+
+  // Don't auto-trigger if CSV queue is managing this tab
+  const { csvActiveJobId } = await chrome.storage.local.get('csvActiveJobId');
+  if (csvActiveJobId) return;
+
+  const ats = detectATS(document);
+  if (ats.confidence < 0.3) return; // Not an ATS page
+
+  // Check if this is actually an application form
+  if (!isApplicationPage(ats.type)) {
+    LOG(`Auto-trigger: ${ats.type} detected but no application form yet`);
+    return;
+  }
+
+  _autoTriggerRunning = true;
+  _autoTriggered = true;
+  LOG(`Auto-trigger: ${ats.type} application form detected — starting autofill`);
+
+  showControlBar();
+  updateControlBar(0, 0);
+  const statusEl = document.getElementById('ua-fill-status');
+  if (statusEl) statusEl.textContent = `${ats.type} detected — autofilling...`;
+
+  try {
+    isRunning = true;
+    const adapter = getAdapter(ats.type);
+    const responses = await getResponses();
+
+    // Fill page
+    await fillPage(adapter, responses, ats.type);
+    await enhancedFillPass();
+    await tryResumeUpload();
+    await solveCaptcha();
+
+    // Retry after 3s for lazy-rendering fields
+    await sleep(3000);
+    await enhancedFillPass();
+
+    if (statusEl) statusEl.textContent = 'Autofill complete';
+    LOG('Auto-trigger: complete');
+  } catch (err) {
+    LOG('Auto-trigger: error', err);
+  } finally {
+    _autoTriggerRunning = false;
+  }
+}
+
+function isApplicationPage(atsType: ATSType): boolean {
+  const url = location.href.toLowerCase();
+  const path = location.pathname.toLowerCase();
+
+  // URL-based detection
+  if (/\/apply|\/application|\/jobs\/\d|\/requisition/i.test(path)) return true;
+
+  // ATS-specific
+  if (atsType === 'workday') {
+    return url.includes('/apply') || document.querySelectorAll('[data-automation-id]').length > 2;
+  }
+  if (atsType === 'greenhouse') {
+    return !!document.querySelector('#application_form,form[action*="greenhouse"],[data-provided-by="greenhouse"]');
+  }
+  if (atsType === 'lever') {
+    return !!document.querySelector('.posting-apply,.postings-form,.application-form');
+  }
+  if (atsType === 'icims') {
+    return document.querySelectorAll('input:not([type=hidden])').length > 2;
+  }
+  if (atsType === 'smartrecruiters') {
+    return url.includes('/apply') || document.querySelectorAll('input[name]').length > 2;
+  }
+  if (atsType === 'taleo') {
+    return url.includes('/apply') || !!document.querySelector('#OracleFusionApp,oracle-apply-flow');
+  }
+
+  // Generic: check for Apply button or form with name/email inputs
+  const hasApply = $$<HTMLElement>('a, button, [role="button"]').some(el => {
+    const t = (el.textContent || '').trim().toLowerCase();
+    return /^(apply|apply now|apply directly|easy apply)\b/.test(t) && isVisible(el);
+  });
+  if (hasApply) return true;
+
+  const hasName = !!document.querySelector('input[name*="name" i],input[autocomplete="given-name"]');
+  const hasEmail = !!document.querySelector('input[type="email"],input[name*="email" i],input[autocomplete="email"]');
+  return hasName && hasEmail;
+}
+
+// ─── SPA Navigation Watcher ───
+let _lastHref = location.href;
+setInterval(() => {
+  if (location.href !== _lastHref) {
+    _lastHref = location.href;
+    _autoTriggered = false;
+    _autoTriggerRunning = false;
+    sleep(2000).then(() => autoTriggerAutofill());
+  }
+}, 1000);
+
+// ─── DOM Mutation Watcher for auto-trigger ───
+let _mutationDebounce: ReturnType<typeof setTimeout> | null = null;
+const _autoTriggerObserver = new MutationObserver(mutations => {
+  if (_autoTriggered || _autoTriggerRunning) return;
+  const added = mutations.reduce((n, m) => n + m.addedNodes.length, 0);
+  if (added < 2) return;
+  if (_mutationDebounce) clearTimeout(_mutationDebounce);
+  _mutationDebounce = setTimeout(() => autoTriggerAutofill(), 1500);
+});
+if (document.body) {
+  _autoTriggerObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+// Initial auto-trigger after page load
+sleep(2500).then(() => autoTriggerAutofill());
 
 function isAlreadyFilled(el: HTMLElement): boolean {
   if (el.classList.contains('ua-filled')) return true;
@@ -121,7 +487,6 @@ function showControlBar() {
     <button class="ua-btn-stop" id="ua-btn-stop">Stop</button>
   `;
   document.body.appendChild(bar);
-
   bar.querySelector('#ua-btn-stop')?.addEventListener('click', () => {
     stopAutofill();
   });
@@ -137,16 +502,12 @@ function removeControlBar() {
 }
 
 // ─── Overlay for textarea / question suggestions ───
-// Attach focus listener to show suggestions on textareas and long text inputs
 
 document.addEventListener('focusin', async (e) => {
   const el = e.target as HTMLElement;
   if (!isTextareaLike(el)) return;
-
-  // Get label/question for this field
   const label = getFieldLabel(el);
   if (!label) return;
-
   const r = await send({ type: 'GET_SUGGESTIONS', payload: { query: label, domain: location.hostname } });
   if (r?.ok && r.data?.length) {
     showSuggestionOverlay(el, r.data, label);
@@ -154,7 +515,6 @@ document.addEventListener('focusin', async (e) => {
 }, true);
 
 document.addEventListener('focusout', (e) => {
-  // Delay removal to allow click on suggestion
   setTimeout(() => {
     const overlay = document.getElementById('ua-suggestion-overlay');
     if (overlay && !overlay.matches(':hover')) overlay.remove();
@@ -165,7 +525,6 @@ function isTextareaLike(el: HTMLElement): boolean {
   if (el instanceof HTMLTextAreaElement) return true;
   if (el.contentEditable === 'true') return true;
   if (el instanceof HTMLInputElement && el.type === 'text') {
-    // Heuristic: if the field seems to expect a long answer
     const label = getFieldLabel(el);
     if (label && label.length > 30) return true;
   }
@@ -173,7 +532,6 @@ function isTextareaLike(el: HTMLElement): boolean {
 }
 
 function getFieldLabel(el: HTMLElement): string | null {
-  // Check label
   if (el.id) {
     const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     if (lbl?.textContent?.trim()) return lbl.textContent.trim();
@@ -188,9 +546,7 @@ function getFieldLabel(el: HTMLElement): string | null {
 }
 
 function showSuggestionOverlay(target: HTMLElement, suggestions: any[], label: string) {
-  // Remove existing
   document.getElementById('ua-suggestion-overlay')?.remove();
-
   const overlay = document.createElement('div');
   overlay.id = 'ua-suggestion-overlay';
   overlay.className = 'ua-overlay';
@@ -214,14 +570,11 @@ function showSuggestionOverlay(target: HTMLElement, suggestions: any[], label: s
       <button class="ua-suggestion-insert" data-value="${escapeAttr(resp.response)}" data-id="${escapeHtml(resp.id)}">Insert</button>
     </div>`;
   }
-
   html += '</div>';
   overlay.innerHTML = html;
   document.body.appendChild(overlay);
 
-  // Event handlers
   overlay.querySelector('#ua-close-overlay')?.addEventListener('click', () => overlay.remove());
-
   overlay.querySelectorAll('.ua-suggestion-insert').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -257,3 +610,5 @@ function escapeHtml(s: string): string {
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+LOG('v2.0 loaded — enhanced autofill ready');

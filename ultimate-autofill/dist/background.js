@@ -570,11 +570,55 @@ function parseJobCSV(text) {
 }
 
 // src/background/serviceWorker.ts
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  handleMessage(msg).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
+var CSV_QUEUE_KEY = "csvJobQueue";
+var csvQueueRunning = false;
+var csvQueuePaused = false;
+var _reuseTabId = null;
+var _activeJobResolve = null;
+var _activeJobId = null;
+function normalizeUrl(url) {
+  try {
+    const u = new URL(url);
+    ["utm_source", "utm_medium", "utm_campaign", "ref", "source", "fbclid"].forEach((p) => u.searchParams.delete(p));
+    return u.origin + u.pathname;
+  } catch {
+    return url;
+  }
+}
+async function isAlreadyApplied(url) {
+  const { appliedJobs = [] } = await chrome.storage.local.get("appliedJobs");
+  return appliedJobs.includes(normalizeUrl(url));
+}
+function randDelay(minS, maxS) {
+  const ms = (minS + Math.random() * (maxS - minS)) * 1e3;
+  return new Promise((r) => setTimeout(r, ms));
+}
+function broadcast(msg) {
+  chrome.runtime.sendMessage(msg).catch(() => {
+  });
+}
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "COMPLEX_FORM_SUCCESS" && _activeJobResolve) {
+    const r = _activeJobResolve;
+    _activeJobResolve = null;
+    r("done");
+    return false;
+  }
+  if (msg.type === "COMPLEX_FORM_ERROR" && _activeJobResolve) {
+    const r = _activeJobResolve;
+    _activeJobResolve = null;
+    r(msg.errorType === "alreadyApplied" ? "duplicate" : "failed");
+    return false;
+  }
+  if (msg.type === "SIDEBAR_STATUS" || msg.type === "SIDEBAR_FIELD_UPDATE") {
+    chrome.runtime.sendMessage(msg).catch(() => {
+    });
+    return false;
+  }
+  handleMessage(msg, sender).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
   return true;
 });
-async function handleMessage(msg) {
+async function handleMessage(msg, sender) {
   const p = msg.payload;
   switch (msg.type) {
     case "GET_LIBRARIES":
@@ -671,9 +715,190 @@ async function handleMessage(msg) {
       }
       return { ok: false, error: "No active tab" };
     }
+    case "START_CSV_QUEUE":
+      startCsvQueue();
+      return { ok: true };
+    case "STOP_CSV_QUEUE":
+      stopCsvQueue();
+      return { ok: true };
+    case "PAUSE_CSV_QUEUE":
+      csvQueuePaused = true;
+      return { ok: true };
+    case "RESUME_CSV_QUEUE":
+      if (csvQueueRunning && csvQueuePaused) {
+        csvQueuePaused = false;
+        processNextCsvJob();
+      }
+      return { ok: true };
+    case "SKIP_CSV_JOB":
+      if (_activeJobResolve) {
+        const r = _activeJobResolve;
+        _activeJobResolve = null;
+        r("skipped");
+      }
+      return { ok: true };
+    case "TRIGGER_AUTOFILL": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_AUTOFILL" });
+      }
+      return { ok: true };
+    }
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
+}
+function startCsvQueue() {
+  if (csvQueueRunning)
+    return;
+  csvQueueRunning = true;
+  csvQueuePaused = false;
+  processNextCsvJob();
+}
+function stopCsvQueue() {
+  csvQueueRunning = false;
+  csvQueuePaused = false;
+  if (_activeJobResolve) {
+    const r = _activeJobResolve;
+    _activeJobResolve = null;
+    r("skipped");
+  }
+  _reuseTabId = null;
+  chrome.storage.local.set({ csvQueueRunning: false, csvActiveJobId: null, csvActiveTabId: null });
+  broadcast({ type: "SIDEBAR_STATUS", event: "queue_stopped" });
+}
+async function processNextCsvJob() {
+  if (!csvQueueRunning || csvQueuePaused)
+    return;
+  try {
+    await _processNextCsvJobInner();
+  } catch (err) {
+    console.error("[UA-SW] processNextCsvJob error:", err);
+    if (csvQueueRunning && !csvQueuePaused)
+      setTimeout(processNextCsvJob, 3e3);
+  }
+}
+async function _processNextCsvJobInner() {
+  if (!csvQueueRunning || csvQueuePaused)
+    return;
+  const { csvJobQueue: q = [] } = await chrome.storage.local.get(CSV_QUEUE_KEY);
+  const job = q.find((j) => j.status === "pending");
+  if (!job) {
+    csvQueueRunning = false;
+    await chrome.storage.local.set({ csvQueueRunning: false, csvActiveJobId: null, csvActiveTabId: null });
+    broadcast({ type: "CSV_QUEUE_DONE" });
+    return;
+  }
+  job.status = "running";
+  job.startedAt = Date.now();
+  await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+  if (await isAlreadyApplied(job.url)) {
+    job.status = "duplicate";
+    job.finishedAt = Date.now();
+    job.lastError = "Already applied previously";
+    await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: "duplicate" });
+    setTimeout(processNextCsvJob, 600);
+    return;
+  }
+  broadcast({ type: "CSV_JOB_STARTED", jobId: job.id, url: job.url });
+  let tab;
+  try {
+    if (_reuseTabId) {
+      try {
+        await chrome.tabs.update(_reuseTabId, { url: job.url, active: true });
+        tab = await chrome.tabs.get(_reuseTabId);
+      } catch {
+        _reuseTabId = null;
+        tab = await chrome.tabs.create({ url: job.url, active: true });
+        _reuseTabId = tab.id;
+      }
+    } else {
+      tab = await chrome.tabs.create({ url: job.url, active: true });
+      _reuseTabId = tab.id;
+    }
+  } catch (e) {
+    job.status = "failed";
+    job.finishedAt = Date.now();
+    job.lastError = "Could not open tab: " + e.message;
+    await chrome.storage.local.set({ [CSV_QUEUE_KEY]: q });
+    broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: "failed", reason: e.message });
+    setTimeout(processNextCsvJob, 2e3);
+    return;
+  }
+  _activeJobId = job.id;
+  await chrome.storage.local.set({
+    csvActiveJobId: job.id,
+    csvActiveTabId: tab.id,
+    csvQueueRunning: true
+  });
+  const _triggerOnTabLoad = async (updTabId, changeInfo) => {
+    if (updTabId !== tab.id || changeInfo.status !== "complete")
+      return;
+    chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
+    await new Promise((r) => setTimeout(r, 5e3));
+    await chrome.storage.local.set({ csvActiveJobId: job.id, csvActiveTabId: tab.id });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_AUTOFILL", jobId: job.id });
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 2e3 + attempt * 2e3));
+      }
+    }
+  };
+  chrome.tabs.onUpdated.addListener(_triggerOnTabLoad);
+  const result = await waitForCsvResult(tab.id, job.id, 18e4);
+  chrome.tabs.onUpdated.removeListener(_triggerOnTabLoad);
+  _activeJobId = null;
+  await chrome.storage.local.set({ csvActiveJobId: null, csvActiveTabId: null });
+  const freshQ = (await chrome.storage.local.get(CSV_QUEUE_KEY))[CSV_QUEUE_KEY] || [];
+  const freshJob = freshQ.find((j) => j.id === job.id);
+  if (freshJob) {
+    freshJob.finishedAt = Date.now();
+    if (result === "done") {
+      freshJob.status = "done";
+    } else if (result === "duplicate") {
+      freshJob.status = "duplicate";
+      freshJob.lastError = "Already applied";
+    } else if (result === "skipped") {
+      freshJob.status = "skipped";
+      freshJob.lastError = "Skipped";
+    } else {
+      freshJob.status = result?.startsWith("failed") ? "failed" : "skipped";
+      freshJob.lastError = result || "Timeout";
+    }
+    await chrome.storage.local.set({ [CSV_QUEUE_KEY]: freshQ });
+  }
+  broadcast({ type: "CSV_JOB_COMPLETE", jobId: job.id, status: freshJob?.status || "skipped" });
+  if (csvQueuePaused) {
+    broadcast({ type: "CSV_QUEUE_PAUSED" });
+    return;
+  }
+  await randDelay(2, 7);
+  processNextCsvJob();
+}
+function waitForCsvResult(tabId, jobId, maxMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.tabs.onRemoved.removeListener(tabCloseListener);
+      if (_activeJobResolve === resolve)
+        _activeJobResolve = null;
+      resolve(value);
+    };
+    _activeJobResolve = settle;
+    const tabCloseListener = (closedTabId) => {
+      if (closedTabId === tabId)
+        settle("skipped");
+    };
+    chrome.tabs.onRemoved.addListener(tabCloseListener);
+    const timer = setTimeout(() => settle("timeout"), maxMs);
+  });
 }
 chrome.runtime.onInstalled?.addListener(async () => {
   const state = await loadState();

@@ -97,6 +97,45 @@ export interface JobQueueState {
   currentItemId: string | null;
 }
 
+// ─── Enhanced Adapter Interface (for unified autofill engine) ───
+
+export interface FieldResult {
+  label: string;
+  value: string;
+  status: 'filled' | 'skipped' | 'failed';
+}
+
+export interface AdapterResult {
+  fields: FieldResult[];
+  success: boolean;
+  atsName: string;
+}
+
+export interface AtsAdapter {
+  name: string;
+  detect: () => boolean;
+  fill: (responses?: Array<{ question: string; answer: string }>) => Promise<AdapterResult>;
+}
+
+// ─── CSV Queue ───
+
+export type CsvJobStatus =
+  | 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'duplicate';
+
+export interface CsvJobItem {
+  id: string;
+  url: string;
+  title?: string;
+  company?: string;
+  status: CsvJobStatus;
+  addedAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  lastError?: string;
+  attempts?: number;
+  source?: string;
+}
+
 // ─── Messaging ───
 
 export type MessageType =
@@ -110,7 +149,11 @@ export type MessageType =
   | 'GET_JOB_QUEUE' | 'ADD_JOB_URLS' | 'UPDATE_JOB_STATUS'
   | 'IMPORT_JOB_CSV' | 'CLEAR_JOB_QUEUE' | 'OPEN_JOB_TAB'
   | 'DELETE_RESPONSES' | 'EXPORT_ENCRYPTED' | 'IMPORT_ENCRYPTED'
-  | 'GET_DOMAIN_MAPPINGS' | 'SET_DOMAIN_MAPPING' | 'REMOVE_DOMAIN_MAPPING';
+  | 'GET_DOMAIN_MAPPINGS' | 'SET_DOMAIN_MAPPING' | 'REMOVE_DOMAIN_MAPPING'
+  | 'TRIGGER_AUTOFILL' | 'START_CSV_QUEUE' | 'STOP_CSV_QUEUE'
+  | 'PAUSE_CSV_QUEUE' | 'RESUME_CSV_QUEUE' | 'SKIP_CSV_JOB'
+  | 'CSV_JOB_COMPLETE' | 'CSV_JOB_STARTED' | 'CSV_QUEUE_DONE'
+  | 'AUTOFILL_COMPLETE' | 'AUTOFILL_PROGRESS';
 
 export interface ExtMessage {
   type: MessageType;
