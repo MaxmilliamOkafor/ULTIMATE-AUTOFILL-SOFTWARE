@@ -5,77 +5,77 @@
   const LOG = (...a) => console.log('[UA]', ...a);
 
   // ===================== CREDIT BYPASS =====================
-  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999};
+  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999 };
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
     if (/\/swan\/credit\/balance|\/credit\/balance/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{credit:_C,dailyFill:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/swan\/payment\/subscription|\/payment\/subscription/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{status:'ACTIVE',plan:'turbo',subscriptionId:'unlimited'},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { status: 'ACTIVE', plan: 'turbo', subscriptionId: 'unlimited' }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/cost-credit/i.test(u))
-      return new Response(JSON.stringify({code:200,result:false,success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: false, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/swan\/credit\/free|\/credit\/free/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{dailyFill:_C,credit:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { dailyFill: _C, credit: _C }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/payment\/price/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: {}, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/resume.?tailor.*credit|tailor.*credit|resume.*credit|credit.*resume|credit.*tailor/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{credit:99999,remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { credit: 99999, remaining: 99999, limit: 99999, used: 0 }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402) return new Response(JSON.stringify({code:200,result:{}}),{status:200,headers:{'Content-Type':'application/json'}});
+      if (r.status === 402) return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return r;
-    } catch(e) { throw e; }
+    } catch (e) { throw e; }
   };
   const _xhrOpen = XMLHttpRequest.prototype.open;
   const _xhrSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function(method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
-  XMLHttpRequest.prototype.send = function() {
+  XMLHttpRequest.prototype.open = function (method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function () {
     const url = this._ua_url || '';
     if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit/i.test(url)) {
       const s = this;
-      Object.defineProperty(s,'responseText',{get:()=>JSON.stringify({code:200,result:{credit:_C,dailyFill:_C,remaining:99999},success:true})});
-      Object.defineProperty(s,'status',{get:()=>200});
-      Object.defineProperty(s,'readyState',{get:()=>4});
-      setTimeout(()=>{s.onreadystatechange?.();s.onload?.();},50);
+      Object.defineProperty(s, 'responseText', { get: () => JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C, remaining: 99999 }, success: true }) });
+      Object.defineProperty(s, 'status', { get: () => 200 });
+      Object.defineProperty(s, 'readyState', { get: () => 4 });
+      setTimeout(() => { s.onreadystatechange?.(); s.onload?.(); }, 50);
       return;
     }
     return _xhrSend.apply(this, arguments);
   };
 
   // ===================== CONFIG =====================
-  const SK = {AA:'ua_aa',Q:'ua_q',QA:'ua_qa',QP:'ua_qp',POS:'ua_pos',ANS:'ua_answers',PROF:'ua_profile'};
+  const SK = { AA: 'ua_aa', Q: 'ua_q', QA: 'ua_qa', QP: 'ua_qp', POS: 'ua_pos', ANS: 'ua_answers', PROF: 'ua_profile' };
   const ATS = [
-    {n:'Workday',p:/myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i},
-    {n:'Greenhouse',p:/boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i},
-    {n:'Lever',p:/jobs\.lever\.co/i},{n:'SmartRecruiters',p:/jobs\.smartrecruiters\.com/i},
-    {n:'iCIMS',p:/icims\.com/i},{n:'Taleo',p:/taleo\.net|oraclecloud\.com.*CandidateExperience/i},
-    {n:'Ashby',p:/jobs\.ashbyhq\.com/i},{n:'BambooHR',p:/bamboohr\.com.*\/jobs/i},
-    {n:'Oracle',p:/oraclecloud\.com.*recruit/i},{n:'LinkedIn',p:/linkedin\.com\/jobs\/(view|application)/i},
-    {n:'Indeed',p:/indeed\.com.*(viewjob|apply)/i},{n:'UltiPro',p:/ultipro\.com/i},
-    {n:'Jobvite',p:/jobs\.jobvite\.com/i},{n:'Breezy',p:/breezy\.hr|breezyhr\.com/i},
-    {n:'Recruitee',p:/recruitee\.com\/o\//i},{n:'ADP',p:/adp\.com.*\/job|workforcenow\.adp/i},
-    {n:'Rippling',p:/ats\.rippling\.com/i},{n:'Dover',p:/app\.dover\.com/i},
-    {n:'Dayforce',p:/dayforce\.com.*candidateportal/i},{n:'SuccessFactors',p:/successfactors\.com/i},
-    {n:'JazzHR',p:/app\.jazz\.co|applytojob\.com/i},{n:'Fountain',p:/fountain\.com.*\/apply/i},
-    {n:'Pinpoint',p:/pinpointhq\.com/i},{n:'Comeet',p:/comeet\.com.*\/jobs/i},
-    {n:'Personio',p:/personio\.de.*\/job/i},{n:'ZipRecruiter',p:/ziprecruiter\.com/i},
-    {n:'Monster',p:/monster\.com.*job/i},{n:'Glassdoor',p:/glassdoor\.com.*job/i},
-    {n:'Dice',p:/dice\.com.*job/i},{n:'Wellfound',p:/wellfound\.com.*\/jobs/i},
-    {n:'Paylocity',p:/paylocity\.com.*Recruiting/i},{n:'Phenom',p:/phenom\.com.*\/jobs/i},
-    {n:'Avature',p:/avature\.net.*careers/i},{n:'Workable',p:/apply\.workable\.com/i},
-    {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i}
+    { n: 'Workday', p: /myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i },
+    { n: 'Greenhouse', p: /boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i },
+    { n: 'Lever', p: /jobs\.lever\.co/i }, { n: 'SmartRecruiters', p: /jobs\.smartrecruiters\.com/i },
+    { n: 'iCIMS', p: /icims\.com/i }, { n: 'Taleo', p: /taleo\.net|oraclecloud\.com.*CandidateExperience/i },
+    { n: 'Ashby', p: /jobs\.ashbyhq\.com/i }, { n: 'BambooHR', p: /bamboohr\.com.*\/jobs/i },
+    { n: 'Oracle', p: /oraclecloud\.com.*recruit/i }, { n: 'LinkedIn', p: /linkedin\.com\/jobs\/(view|application)/i },
+    { n: 'Indeed', p: /indeed\.com.*(viewjob|apply)/i }, { n: 'UltiPro', p: /ultipro\.com/i },
+    { n: 'Jobvite', p: /jobs\.jobvite\.com/i }, { n: 'Breezy', p: /breezy\.hr|breezyhr\.com/i },
+    { n: 'Recruitee', p: /recruitee\.com\/o\//i }, { n: 'ADP', p: /adp\.com.*\/job|workforcenow\.adp/i },
+    { n: 'Rippling', p: /ats\.rippling\.com/i }, { n: 'Dover', p: /app\.dover\.com/i },
+    { n: 'Dayforce', p: /dayforce\.com.*candidateportal/i }, { n: 'SuccessFactors', p: /successfactors\.com/i },
+    { n: 'JazzHR', p: /app\.jazz\.co|applytojob\.com/i }, { n: 'Fountain', p: /fountain\.com.*\/apply/i },
+    { n: 'Pinpoint', p: /pinpointhq\.com/i }, { n: 'Comeet', p: /comeet\.com.*\/jobs/i },
+    { n: 'Personio', p: /personio\.de.*\/job/i }, { n: 'ZipRecruiter', p: /ziprecruiter\.com/i },
+    { n: 'Monster', p: /monster\.com.*job/i }, { n: 'Glassdoor', p: /glassdoor\.com.*job/i },
+    { n: 'Dice', p: /dice\.com.*job/i }, { n: 'Wellfound', p: /wellfound\.com.*\/jobs/i },
+    { n: 'Paylocity', p: /paylocity\.com.*Recruiting/i }, { n: 'Phenom', p: /phenom\.com.*\/jobs/i },
+    { n: 'Avature', p: /avature\.net.*careers/i }, { n: 'Workable', p: /apply\.workable\.com/i },
+    { n: 'Career', p: /\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i }
   ];
 
   // ===================== STORAGE & STATE =====================
-  const st={
-    get:k=>new Promise(r=>chrome.storage.local.get(k,d=>r(d[k]))),
-    set:(k,v)=>new Promise(r=>chrome.storage.local.set({[k]:v},r)),
-    getMulti:keys=>new Promise(r=>chrome.storage.local.get(keys,d=>r(d)))
+  const st = {
+    get: k => new Promise(r => chrome.storage.local.get(k, d => r(d[k]))),
+    set: (k, v) => new Promise(r => chrome.storage.local.set({ [k]: v }, r)),
+    getMulti: keys => new Promise(r => chrome.storage.local.get(keys, d => r(d)))
   };
-  let queue=[],qActive=false,qPaused=false,autoApply=false,selected=new Set();
-  async function load(){queue=(await st.get(SK.Q))||[];qActive=(await st.get(SK.QA))||false;qPaused=(await st.get(SK.QP))||false;autoApply=(await st.get(SK.AA))||false;}
-  async function saveQ(){await st.set(SK.Q,queue);}
+  let queue = [], qActive = false, qPaused = false, autoApply = false, selected = new Set();
+  async function load() { queue = (await st.get(SK.Q)) || []; qActive = (await st.get(SK.QA)) || false; qPaused = (await st.get(SK.QP)) || false; autoApply = (await st.get(SK.AA)) || false; }
+  async function saveQ() { await st.set(SK.Q, queue); }
 
   // ===================== ANSWER LEARNING SYSTEM =====================
   // Stores answers keyed by normalized field label for future reuse
@@ -88,14 +88,14 @@
     _answerBank = saved || {};
     _answerBankLoaded = true;
     // Also pull from OptimHire storage if available
-    const ohKeys = ['candidateDetails','userDetails','applicationDetails','questionAnswers','responses'];
+    const ohKeys = ['candidateDetails', 'userDetails', 'applicationDetails', 'questionAnswers', 'responses'];
     const ohData = await st.getMulti(ohKeys);
     for (const val of Object.values(ohData || {})) {
       if (!val) continue;
       try {
         const parsed = typeof val === 'string' ? JSON.parse(val) : val;
         collectEntries(parsed);
-      } catch (_) {}
+      } catch (_) { }
     }
     return _answerBank;
   }
@@ -153,12 +153,12 @@
   async function getProfile() {
     let p = (await st.get(SK.PROF)) || {};
     // Also check OptimHire candidate data
-    const ohData = await st.getMulti(['candidateDetails','userDetails']);
+    const ohData = await st.getMulti(['candidateDetails', 'userDetails']);
     try {
       const cd = typeof ohData.candidateDetails === 'string' ? JSON.parse(ohData.candidateDetails) : (ohData.candidateDetails || {});
       const ud = typeof ohData.userDetails === 'string' ? JSON.parse(ohData.userDetails) : (ohData.userDetails || {});
-      p = {...ud, ...cd, ...p};
-    } catch (_) {}
+      p = { ...ud, ...cd, ...p };
+    } catch (_) { }
     return p;
   }
 
@@ -225,6 +225,64 @@
   const $ = (sel, root) => (root || document).querySelector(sel);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+  // ===================== SHADOW DOM TRAVERSAL =====================
+  function queryShadow(sel, root) {
+    root = root || document;
+    let el = root.querySelector(sel);
+    if (el) return el;
+    const hosts = root.querySelectorAll('*');
+    for (const h of hosts) {
+      if (h.shadowRoot) {
+        el = queryShadow(sel, h.shadowRoot);
+        if (el) return el;
+      }
+    }
+    return null;
+  }
+  function allShadow(sel, root) {
+    root = root || document;
+    const results = [...root.querySelectorAll(sel)];
+    const hosts = root.querySelectorAll('*');
+    for (const h of hosts) {
+      if (h.shadowRoot) results.push(...allShadow(sel, h.shadowRoot));
+    }
+    return results;
+  }
+  function findByTextShadow(sel, re) {
+    const all = allShadow(sel);
+    for (const el of all) if (re.test(el.textContent?.trim()) && isVisible(el)) return el;
+    return null;
+  }
+
+  // Find sidebar button via shadow DOM + direct DOM + text matching
+  function findSidebarBtn(textRe, selectors) {
+    // Try direct selectors first
+    if (selectors) {
+      for (const sel of (Array.isArray(selectors) ? selectors : [selectors])) {
+        let el = $(sel) || queryShadow(sel);
+        if (el && isVisible(el)) return el;
+      }
+    }
+    // Then try text matching across regular + shadow DOM
+    const candidates = [
+      ...$$('button,a,[role="button"],span,div').filter(e => textRe.test(e.textContent?.trim()) && isVisible(e)),
+      ...allShadow('button,a,[role="button"],span,div').filter(e => textRe.test(e.textContent?.trim()) && isVisible(e))
+    ];
+    return candidates[0] || null;
+  }
+
+  // Poll for a sidebar button with retries
+  async function waitForSidebarBtn(textRe, selectors, timeout) {
+    timeout = timeout || 20000;
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const btn = findSidebarBtn(textRe, selectors);
+      if (btn) return btn;
+      await sleep(1500);
+    }
+    return null;
+  }
+
   function isVisible(el) {
     if (!el) return false;
     const r = el.getBoundingClientRect();
@@ -250,14 +308,14 @@
     el.click();
   }
 
-  function clickEl(el) { if (!el) return false; el.scrollIntoView?.({behavior:'smooth',block:'center'}); realClick(el); return true; }
+  function clickEl(el) { if (!el) return false; el.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); realClick(el); return true; }
 
   function waitFor(sel, ms, xpath) {
     return new Promise(res => {
       const f = () => xpath ? document.evaluate(sel, document, null, 9, null).singleNodeValue : document.querySelector(sel);
       const e = f(); if (e) { res(e); return; }
       const o = new MutationObserver(() => { const e = f(); if (e) { o.disconnect(); res(e); } });
-      o.observe(document.body || document.documentElement, {childList:true,subtree:true});
+      o.observe(document.body || document.documentElement, { childList: true, subtree: true });
       setTimeout(() => { o.disconnect(); res(null); }, ms || 10000);
     });
   }
@@ -316,17 +374,17 @@
   }
 
   // ===================== QUEUE OPS =====================
-  async function addJob(url,title){if(!url||queue.some(j=>j.url===url))return;queue.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),url,title:title||shortUrl(url),status:'pending',addedAt:Date.now()});await saveQ();renderQ();updateCtrl();}
-  async function removeJob(id){queue=queue.filter(j=>j.id!==id);selected.delete(id);await saveQ();renderQ();updateCtrl();}
-  async function clearQ(){queue=[];selected.clear();await saveQ();renderQ();updateCtrl();}
-  async function removeSelected(){queue=queue.filter(j=>!selected.has(j.id));selected.clear();await saveQ();renderQ();updateCtrl();}
-  function shortUrl(u){try{const p=new URL(u);return p.hostname.replace('www.','')+p.pathname.slice(0,30);}catch{return u.slice(0,40);}}
-  function parseCSV(t){const u=[];for(const l of t.split(/[\r\n]+/)){const s=l.trim();if(!s||/^(url|link|job|title|company)/i.test(s))continue;for(const c of s.split(/[,\t]/)){const v=c.trim().replace(/^["']|["']$/g,'');if(/^https?:\/\//i.test(v)){u.push(v);break;}}if(/^https?:\/\//i.test(s)&&!u.includes(s))u.push(s);}return[...new Set(u)];}
+  async function addJob(url, title) { if (!url || queue.some(j => j.url === url)) return; queue.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), url, title: title || shortUrl(url), status: 'pending', addedAt: Date.now() }); await saveQ(); renderQ(); updateCtrl(); }
+  async function removeJob(id) { queue = queue.filter(j => j.id !== id); selected.delete(id); await saveQ(); renderQ(); updateCtrl(); }
+  async function clearQ() { queue = []; selected.clear(); await saveQ(); renderQ(); updateCtrl(); }
+  async function removeSelected() { queue = queue.filter(j => !selected.has(j.id)); selected.clear(); await saveQ(); renderQ(); updateCtrl(); }
+  function shortUrl(u) { try { const p = new URL(u); return p.hostname.replace('www.', '') + p.pathname.slice(0, 30); } catch { return u.slice(0, 40); } }
+  function parseCSV(t) { const u = []; for (const l of t.split(/[\r\n]+/)) { const s = l.trim(); if (!s || /^(url|link|job|title|company)/i.test(s)) continue; for (const c of s.split(/[,\t]/)) { const v = c.trim().replace(/^["']|["']$/g, ''); if (/^https?:\/\//i.test(v)) { u.push(v); break; } } if (/^https?:\/\//i.test(s) && !u.includes(s)) u.push(s); } return [...new Set(u)]; }
 
   // ===================== ATS =====================
-  function detectATS(){for(const a of ATS)if(a.p.test(location.href))return a.n;return null;}
-  function isWorkday(){return/myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href);}
-  function isJobright(){return/jobright\.ai/i.test(location.hostname);}
+  function detectATS() { for (const a of ATS) if (a.p.test(location.href)) return a.n; return null; }
+  function isWorkday() { return /myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href); }
+  function isJobright() { return /jobright\.ai/i.test(location.hostname); }
 
   // ===================== FALLBACK FORM FILLER =====================
   // Fills fields that Jobright autofill missed
@@ -362,16 +420,16 @@
         if (/gender|disability|veteran|race|ethnicity|sex\b|heritage/i.test(lblLower)) {
           const opts = $$('option', sel).filter(o => o.value && o.index > 0);
           const fb = opts.find(o => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
-          if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+          if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
         }
         continue;
       }
       const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
       else {
         // Try first valid option as fallback
         const opts = $$('option', sel).filter(o => o.value && o.index > 0);
-        if (opts.length) { sel.value = opts[0].value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+        if (opts.length) { sel.value = opts[0].value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
       }
     }
 
@@ -390,7 +448,7 @@
       // Default: Yes for yes/no
       const yes = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
-        return ['yes','true','1'].includes(t);
+        return ['yes', 'true', '1'].includes(t);
       });
       if (yes) { realClick(yes); filled++; }
     }
@@ -441,11 +499,11 @@
 
     // Submit selectors (try if no required missing)
     const submitSels = [
-      'button[type="submit"]','input[type="submit"]',
+      'button[type="submit"]', 'input[type="submit"]',
       'button[data-automation-id="submit"]',
-      '#submit_app','.postings-btn-submit','button.application-submit',
-      'button[data-qa="btn-submit"]','button[aria-label*="Submit" i]',
-      '[data-testid="submit-application"]','button.btn-submit','#resumeSubmitForm',
+      '#submit_app', '.postings-btn-submit', 'button.application-submit',
+      'button[data-qa="btn-submit"]', 'button[aria-label*="Submit" i]',
+      '[data-testid="submit-application"]', 'button.btn-submit', '#resumeSubmitForm',
       'div.form-group.submit-button button.btn.btn-primary',
     ];
 
@@ -478,8 +536,8 @@
       'button[data-automation-id="bottom-navigation-next-button"]',
       'button[data-automation-id="pageFooterNextButton"]',
       'button[data-automation-id="next-button"]',
-      'button[aria-label*="Next" i]','button[aria-label*="Continue" i]',
-      '[data-testid="next-step"]','[data-testid="continue"]',
+      'button[aria-label*="Next" i]', 'button[aria-label*="Continue" i]',
+      '[data-testid="next-step"]', '[data-testid="continue"]',
     ];
     for (const sel of nextSels) {
       const btn = $(sel);
@@ -514,86 +572,164 @@
   }
 
   // ===================== TAILOR-FIRST AUTOMATION FLOW =====================
-  // Step 1: Click "Generate Custom Resume" (in Jobright sidebar)
-  // Step 2: Wait for tailoring to complete
-  // Step 3: Click "Continue to Autofill" / continue button
-  // Step 4: Click "Autofill" button
-  // Step 5: Fallback fill missed fields
-  // Step 6: Submit or Next
+  // Full sequence: Generate Custom Resume → Improve My Resume → Full Edit → Select All → Generate New → Continue to autofill → Autofill → Fill gaps → Submit
 
   async function tailorFirstFlow() {
     const ats = detectATS();
     if (!ats) return;
     LOG(`Tailor-first flow starting for ${ats}...`);
 
-    // Wait for Jobright sidebar to load
-    const sidebar = await waitFor('#jobright-helper-id', 15000);
-    if (!sidebar) { LOG('Jobright sidebar not found — falling back to direct autofill'); await directAutofillFlow(); return; }
+    // Wait for Jobright sidebar to load (try shadow DOM too)
+    let sidebar = await waitFor('#jobright-helper-id', 15000);
+    if (!sidebar) sidebar = queryShadow('#jobright-helper-id');
+    if (!sidebar) {
+      // Also try iframe-based sidebar
+      const frames = $$('iframe[src*="jobright"]');
+      if (frames.length) LOG('Found Jobright iframe but cannot access it directly');
+      LOG('Jobright sidebar not found — falling back to direct autofill');
+      await directAutofillFlow();
+      return;
+    }
     await sleep(2000);
 
-    // Step 1: Click "Generate Custom Resume" if available
-    const tailorBtn = sidebar.querySelector('.application-dashboard-tailor-resume') ||
-                       sidebar.querySelector('.external-job-generate-resume-button');
-    if (tailorBtn && isVisible(tailorBtn)) {
+    // === Step 1: Click "Generate Custom Resume" ===
+    LOG('Step 1: Looking for Generate Custom Resume...');
+    let tailorBtn = await waitForSidebarBtn(
+      /generate\s*(custom|my)?\s*resume|tailor\s*resume|create\s*resume/i,
+      ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button',
+        'button[class*="tailor"]', 'button[class*="generate"]', 'div[class*="generate-resume"]'],
+      15000
+    );
+    if (tailorBtn) {
       LOG('Step 1: Clicking Generate Custom Resume');
       realClick(tailorBtn);
-      await sleep(3000);
+      await sleep(4000);
 
-      // Wait for tailoring to complete (watch for loading to finish)
-      LOG('Waiting for resume tailoring to complete...');
-      const maxWait = 120000; // 2 min max
+      // === Step 2: Click "Improve My Resume for This Job" ===
+      LOG('Step 2: Looking for Improve My Resume...');
+      let improveBtn = await waitForSidebarBtn(
+        /improve\s*(my)?\s*resume/i,
+        ['button[class*="improve"]', 'div[class*="improve"]'],
+        15000
+      );
+      if (improveBtn) {
+        LOG('Step 2: Clicking Improve My Resume');
+        realClick(improveBtn);
+        await sleep(3000);
+      } else {
+        LOG('Step 2: Improve button not found — continuing');
+      }
+
+      // === Step 3: Click "Full Edit (All experiences with longer processing time)" ===
+      LOG('Step 3: Looking for Full Edit...');
+      let fullEditBtn = await waitForSidebarBtn(
+        /full\s*edit/i,
+        ['button[class*="full-edit"]', 'div[class*="full-edit"]', 'label[class*="full"]'],
+        10000
+      );
+      if (fullEditBtn) {
+        LOG('Step 3: Clicking Full Edit');
+        realClick(fullEditBtn);
+        await sleep(2000);
+      } else {
+        LOG('Step 3: Full Edit not found — continuing');
+      }
+
+      // === Step 4: Click "Select all" (for missing skill keywords) ===
+      LOG('Step 4: Looking for Select All...');
+      let selectAllBtn = await waitForSidebarBtn(
+        /select\s*all/i,
+        ['button[class*="select-all"]', 'span[class*="select-all"]', 'label[class*="select"]',
+          'input[type="checkbox"][class*="all"]'],
+        8000
+      );
+      if (selectAllBtn) {
+        LOG('Step 4: Clicking Select All');
+        realClick(selectAllBtn);
+        await sleep(1500);
+      } else {
+        LOG('Step 4: Select All not found — continuing');
+      }
+
+      // === Step 5: Click "Generate My New Resume" ===
+      LOG('Step 5: Looking for Generate My New Resume...');
+      let generateNewBtn = await waitForSidebarBtn(
+        /generate\s*(my\s*new\s*)?resume|generate$/i,
+        ['button[class*="generate"]', 'div[class*="generate-btn"]'],
+        10000
+      );
+      if (generateNewBtn) {
+        LOG('Step 5: Clicking Generate My New Resume');
+        realClick(generateNewBtn);
+        await sleep(3000);
+      } else {
+        LOG('Step 5: Generate New button not found — continuing');
+      }
+
+      // Wait for resume generation to complete (up to 2 min)
+      LOG('Waiting for resume generation to complete...');
+      const maxWait = 120000;
       const start = Date.now();
       while (Date.now() - start < maxWait) {
-        // Check if loading indicator is gone
-        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading');
+        // Check for loading indicators (shadow DOM aware)
+        const loading = queryShadow('.tailor-resume-loading-linear-progress') ||
+          queryShadow('.resume-loading-container') ||
+          queryShadow('.spin-loading') ||
+          findByTextShadow('div,span', /generating|processing|loading/i);
         if (!loading || !isVisible(loading)) {
-          // Check if tailored resume is ready (button text changed or autofill button available)
-          const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
-          if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
+          const afBtn = queryShadow('.auto-fill-button:not([disabled])') ||
+            findSidebarBtn(/continue\s*to\s*autofill|autofill/i);
+          if (afBtn) { LOG('Resume generation complete'); break; }
         }
-        await sleep(2000);
+        await sleep(2500);
       }
-      await sleep(1500);
+      await sleep(2000);
     } else {
-      LOG('Step 1: No tailor button found — skipping to autofill');
+      LOG('Step 1: No tailor button found — skipping tailoring steps');
     }
 
-    // Step 2-3: Click "Continue to Autofill" / continue button if present
-    const continueBtn = sidebar.querySelector('.continue-button:not(.continue-button-disabled)');
-    if (continueBtn && isVisible(continueBtn)) {
-      LOG('Step 2: Clicking Continue button');
+    // === Step 6: Click "Continue to Autofill" ===
+    LOG('Step 6: Looking for Continue to Autofill...');
+    let continueBtn = await waitForSidebarBtn(
+      /continue\s*(to)?\s*autofill|continue/i,
+      ['.continue-button:not(.continue-button-disabled)', 'button[class*="continue"]'],
+      10000
+    );
+    if (continueBtn) {
+      LOG('Step 6: Clicking Continue to Autofill');
       realClick(continueBtn);
       await sleep(2000);
+    } else {
+      LOG('Step 6: Continue button not found — proceeding to autofill click');
     }
 
-    // Step 4: Click the Autofill button
-    LOG('Step 3: Triggering Autofill');
+    // === Step 7: Click the Autofill button ===
+    LOG('Step 7: Triggering Autofill');
     await triggerAutofill();
 
-    // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
+    // Wait for Jobright autofill to complete
     LOG('Waiting for Jobright autofill to complete...');
     await sleep(3000);
     const fillStart = Date.now();
     while (Date.now() - fillStart < 60000) {
-      const afBtn = sidebar.querySelector('.auto-fill-button');
+      const afBtn = queryShadow('.auto-fill-button') || $('.auto-fill-button');
       if (afBtn) {
         const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '') break; // Done filling
+        if (txt === 'autofill' || txt === '' || /^auto.?fill$/i.test(txt)) break;
       }
       await sleep(1500);
     }
     await sleep(2000);
 
-    // Step 5: Fallback fill to catch missed fields
-    LOG('Step 4: Running fallback fill for missed fields');
+    // === Step 8: Fallback fill for missed fields ===
+    LOG('Step 8: Running fallback fill for missed fields');
     await fallbackFill();
     await sleep(1000);
-    // Second pass
     await fallbackFill();
     await sleep(1000);
 
-    // Step 6: Auto submit or next
-    LOG('Step 5: Auto-submit/next');
+    // === Step 9: Auto submit or next ===
+    LOG('Step 9: Auto-submit/next');
     const result = await autoSubmitOrNext();
 
     if (result === 'next_page') {
@@ -692,14 +828,24 @@
 
   // ===================== AUTOFILL TRIGGER =====================
   async function triggerAutofill() {
-    await waitFor('#jobright-helper-id', 8000);
+    // Wait for sidebar (shadow DOM aware)
+    let sidebar = await waitFor('#jobright-helper-id', 8000);
+    if (!sidebar) sidebar = queryShadow('#jobright-helper-id');
     await sleep(1500);
-    let b = $('.auto-fill-button');
-    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked'); return true; }
-    await sleep(3000);
-    b = $('.auto-fill-button');
-    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked (retry)'); return true; }
-    LOG('Autofill button not found or disabled');
+
+    // Try up to 6 times with shadow DOM traversal
+    for (let attempt = 0; attempt < 6; attempt++) {
+      let b = queryShadow('.auto-fill-button') || $('.auto-fill-button') ||
+        findSidebarBtn(/^autofill$/i, ['.auto-fill-button', 'button[class*="autofill"]']);
+      if (b && !b.disabled) {
+        realClick(b);
+        LOG(`Autofill button clicked (attempt ${attempt + 1})`);
+        return true;
+      }
+      LOG(`Autofill button not found (attempt ${attempt + 1}/6), retrying...`);
+      await sleep(2500);
+    }
+    LOG('Autofill button not found after 6 attempts');
     return false;
   }
 
@@ -728,15 +874,27 @@
           goNext();
           return;
         }
-      } catch {}
+      } catch { }
     }
     goNext();
   }
   function goNext() {
     if (qPaused) return;
     const n = queue.find(j => j.status === 'pending');
-    if (n) { n.status = 'applying'; saveQ().then(() => { location.href = n.url; }); }
-    else { qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl(); }
+    if (n) {
+      n.status = 'applying';
+      saveQ().then(() => {
+        LOG(`Queue: opening ${n.url} in new tab`);
+        // Open new tab via background service worker
+        chrome.runtime.sendMessage({ type: 'UA_OPEN_TAB', url: n.url, jobId: n.id }).catch(() => {
+          // Fallback: direct window.open if messaging fails
+          window.open(n.url, '_blank') || (location.href = n.url);
+        });
+      });
+    } else {
+      qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl();
+      LOG('Queue: all jobs processed');
+    }
   }
   async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
   async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
@@ -978,7 +1136,7 @@
       dragging = true; moved = false;
       el.style.transition = 'none';
       document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
-      document.addEventListener('touchmove', onMove, {passive: false}); document.addEventListener('touchend', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false }); document.addEventListener('touchend', onUp);
     };
     const onMove = e => {
       if (!dragging) return; e.preventDefault();
@@ -994,12 +1152,12 @@
       document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
       document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp);
       if (moved) {
-        st.set(SK.POS, {left: el.style.left, top: el.style.top});
+        st.set(SK.POS, { left: el.style.left, top: el.style.top });
         const suppress = ev => { ev.stopPropagation(); ev.preventDefault(); };
-        el.addEventListener('click', suppress, {capture: true, once: true});
+        el.addEventListener('click', suppress, { capture: true, once: true });
       }
     };
-    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive: false});
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, { passive: false });
     st.get(SK.POS).then(p => { if (p?.left) { el.style.left = p.left; el.style.top = p.top; el.style.right = 'auto'; el.style.bottom = 'auto'; } });
   }
 
@@ -1079,7 +1237,7 @@
   function showATSBadge() { const a = detectATS(); if (a) { document.getElementById('ua-ats-n').textContent = a + ' Detected'; document.getElementById('ua-ats').classList.add('show'); } }
 
   // ===================== OBSERVER =====================
-  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, {childList: true, subtree: true}); }
+  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, { childList: true, subtree: true }); }
 
   // ===================== INIT =====================
   async function init() {
@@ -1088,15 +1246,23 @@
     [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
 
+    // Listen for messages from background (CSV queue, PING)
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg?.type === 'TRIGGER_AUTOFILL') {
+        LOG('Received TRIGGER_AUTOFILL from background');
+        tailorFirstFlow();
+        sendResponse({ ok: true });
+      }
+      if (msg?.type === 'PING') sendResponse({ pong: true });
+    });
+
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // Auto-start tailor-first flow when ATS is detected and auto-apply is on
-      if (autoApply) {
-        await sleep(2000);
-        if (isWorkday()) await workdayAutomation();
-        else await tailorFirstFlow();
-      }
+      // ALWAYS auto-start tailor-first flow when ATS is detected
+      await sleep(2000);
+      if (isWorkday()) await workdayAutomation();
+      else await tailorFirstFlow();
     }
     if (qActive) { await sleep(2000); processQ(); }
     if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
