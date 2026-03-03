@@ -204,7 +204,7 @@
     if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
     if (/state|province|region/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
-    if (/country/.test(l)) return p.country || 'United States';
+    if (/country/.test(l)) return p.country || '';
     if (/address|street/.test(l)) return p.address || '';
     if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
 
@@ -317,7 +317,7 @@
     if (/sexual.?orient|lgbtq|lgbt/.test(l)) return DEFAULTS.sexualOrientation;
 
     // --- Nationality / Citizenship ---
-    if (/nationality|citizenship|citizen of/.test(l)) return p.nationality || p.country || 'United States';
+    if (/nationality|citizenship|citizen of/.test(l)) return p.nationality || p.country || '';
     if (/language|fluency|fluent|proficien/.test(l)) return p.languages || 'English';
 
     // --- Catch-all: "Please Specify" / "Other" ---
@@ -625,10 +625,13 @@
         continue;
       }
 
-      // Country → United States
+      // Country → from profile
       if (/country/i.test(lbl)) {
-        const usOpt = $$('option', sel).find(o => /united states|usa|u\.?s\.?a?\.?$/i.test(o.text.trim()));
-        if (usOpt) { sel.value = usOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set Country → United States'); }
+        const profileCountry = p.country || '';
+        if (profileCountry) {
+          const countryOpt = $$('option', sel).find(o => o.text.trim().toLowerCase().includes(profileCountry.toLowerCase()));
+          if (countryOpt) { sel.value = countryOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set Country → ' + profileCountry); }
+        }
         await sleep(500); // Wait for state dropdown to populate
         continue;
       }
