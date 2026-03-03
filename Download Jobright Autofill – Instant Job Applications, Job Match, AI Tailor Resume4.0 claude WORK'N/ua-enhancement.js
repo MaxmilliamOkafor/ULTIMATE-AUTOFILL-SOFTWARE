@@ -74,6 +74,7 @@
     getMulti: keys => new Promise(r => chrome.storage.local.get(keys, d => r(d)))
   };
   let queue = [], qActive = false, qPaused = false, autoApply = false, selected = new Set();
+  let _tailorRan = false; // Guard: only run tailor-first flow once per page
   async function load() { queue = (await st.get(SK.Q)) || []; qActive = (await st.get(SK.QA)) || false; qPaused = (await st.get(SK.QP)) || false; autoApply = (await st.get(SK.AA)) || false; }
   async function saveQ() { await st.set(SK.Q, queue); }
 
@@ -579,6 +580,10 @@
     if (!ats) return;
     LOG(`Tailor-first flow starting for ${ats}...`);
 
+    // Guard: only run once per page
+    if (_tailorRan) { LOG('Tailor flow already ran on this page — skipping'); return; }
+    _tailorRan = true;
+
     // Wait for Jobright sidebar to load (try shadow DOM too)
     let sidebar = await waitFor('#jobright-helper-id', 15000);
     if (!sidebar) sidebar = queryShadow('#jobright-helper-id');
@@ -826,6 +831,25 @@
     el = await findByText('button,a,div[role="button"]', /generate (my new )?resume|generate$/i, 5000); if (el) clickEl(el);
   }
 
+  // ===================== AUTO-DISMISS CONFIRMATION DIALOGS =====================
+  function dismissAutofillConfirm() {
+    // Handle "Are you sure to autofill again?" dialog
+    const containers = [...$$('[class*="modal"],[class*="Modal"],[class*="dialog"],[class*="Dialog"],[class*="ant-modal"],[role="dialog"]'),
+    ...allShadow('[class*="modal"],[class*="Modal"],[class*="dialog"],[role="dialog"]')];
+    for (const m of containers) {
+      if (/are you sure to autofill again|overwrite your current progress/i.test(m.textContent || '')) {
+        LOG('Auto-dismissing autofill confirmation dialog');
+        // Check "Don't ask again"
+        const cb = m.querySelector('input[type="checkbox"]');
+        if (cb && !cb.checked) { realClick(cb); }
+        // Click "Yes"
+        const yesBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => /^yes$/i.test(b.textContent?.trim()));
+        if (yesBtn) { realClick(yesBtn); return true; }
+      }
+    }
+    return false;
+  }
+
   // ===================== AUTOFILL TRIGGER =====================
   async function triggerAutofill() {
     // Wait for sidebar (shadow DOM aware)
@@ -835,10 +859,17 @@
 
     // Try up to 6 times with shadow DOM traversal
     for (let attempt = 0; attempt < 6; attempt++) {
+      // Auto-dismiss any confirmation dialogs first
+      dismissAutofillConfirm();
+      await sleep(300);
+
       let b = queryShadow('.auto-fill-button') || $('.auto-fill-button') ||
         findSidebarBtn(/^autofill$/i, ['.auto-fill-button', 'button[class*="autofill"]']);
       if (b && !b.disabled) {
         realClick(b);
+        // Wait briefly and dismiss any confirmation that pops up after click
+        await sleep(1000);
+        dismissAutofillConfirm();
         LOG(`Autofill button clicked (attempt ${attempt + 1})`);
         return true;
       }
