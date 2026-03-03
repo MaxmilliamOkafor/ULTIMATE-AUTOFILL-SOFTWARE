@@ -5,77 +5,77 @@
   const LOG = (...a) => console.log('[UA]', ...a);
 
   // ===================== CREDIT BYPASS =====================
-  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999};
+  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999 };
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
     if (/\/swan\/credit\/balance|\/credit\/balance/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{credit:_C,dailyFill:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/swan\/payment\/subscription|\/payment\/subscription/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{status:'ACTIVE',plan:'turbo',subscriptionId:'unlimited'},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { status: 'ACTIVE', plan: 'turbo', subscriptionId: 'unlimited' }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/cost-credit/i.test(u))
-      return new Response(JSON.stringify({code:200,result:false,success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: false, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/swan\/credit\/free|\/credit\/free/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{dailyFill:_C,credit:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { dailyFill: _C, credit: _C }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/\/payment\/price/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: {}, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (/resume.?tailor.*credit|tailor.*credit|resume.*credit|credit.*resume|credit.*tailor/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{credit:99999,remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({ code: 200, result: { credit: 99999, remaining: 99999, limit: 99999, used: 0 }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402) return new Response(JSON.stringify({code:200,result:{}}),{status:200,headers:{'Content-Type':'application/json'}});
+      if (r.status === 402) return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return r;
-    } catch(e) { throw e; }
+    } catch (e) { throw e; }
   };
   const _xhrOpen = XMLHttpRequest.prototype.open;
   const _xhrSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function(method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
-  XMLHttpRequest.prototype.send = function() {
+  XMLHttpRequest.prototype.open = function (method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function () {
     const url = this._ua_url || '';
     if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit/i.test(url)) {
       const s = this;
-      Object.defineProperty(s,'responseText',{get:()=>JSON.stringify({code:200,result:{credit:_C,dailyFill:_C,remaining:99999},success:true})});
-      Object.defineProperty(s,'status',{get:()=>200});
-      Object.defineProperty(s,'readyState',{get:()=>4});
-      setTimeout(()=>{s.onreadystatechange?.();s.onload?.();},50);
+      Object.defineProperty(s, 'responseText', { get: () => JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C, remaining: 99999 }, success: true }) });
+      Object.defineProperty(s, 'status', { get: () => 200 });
+      Object.defineProperty(s, 'readyState', { get: () => 4 });
+      setTimeout(() => { s.onreadystatechange?.(); s.onload?.(); }, 50);
       return;
     }
     return _xhrSend.apply(this, arguments);
   };
 
   // ===================== CONFIG =====================
-  const SK = {AA:'ua_aa',Q:'ua_q',QA:'ua_qa',QP:'ua_qp',POS:'ua_pos',ANS:'ua_answers',PROF:'ua_profile'};
+  const SK = { AA: 'ua_aa', Q: 'ua_q', QA: 'ua_qa', QP: 'ua_qp', POS: 'ua_pos', ANS: 'ua_answers', PROF: 'ua_profile' };
   const ATS = [
-    {n:'Workday',p:/myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i},
-    {n:'Greenhouse',p:/boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i},
-    {n:'Lever',p:/jobs\.lever\.co/i},{n:'SmartRecruiters',p:/jobs\.smartrecruiters\.com/i},
-    {n:'iCIMS',p:/icims\.com/i},{n:'Taleo',p:/taleo\.net|oraclecloud\.com.*CandidateExperience/i},
-    {n:'Ashby',p:/jobs\.ashbyhq\.com/i},{n:'BambooHR',p:/bamboohr\.com.*\/jobs/i},
-    {n:'Oracle',p:/oraclecloud\.com.*recruit/i},{n:'LinkedIn',p:/linkedin\.com\/jobs\/(view|application)/i},
-    {n:'Indeed',p:/indeed\.com.*(viewjob|apply)/i},{n:'UltiPro',p:/ultipro\.com/i},
-    {n:'Jobvite',p:/jobs\.jobvite\.com/i},{n:'Breezy',p:/breezy\.hr|breezyhr\.com/i},
-    {n:'Recruitee',p:/recruitee\.com\/o\//i},{n:'ADP',p:/adp\.com.*\/job|workforcenow\.adp/i},
-    {n:'Rippling',p:/ats\.rippling\.com/i},{n:'Dover',p:/app\.dover\.com/i},
-    {n:'Dayforce',p:/dayforce\.com.*candidateportal/i},{n:'SuccessFactors',p:/successfactors\.com/i},
-    {n:'JazzHR',p:/app\.jazz\.co|applytojob\.com/i},{n:'Fountain',p:/fountain\.com.*\/apply/i},
-    {n:'Pinpoint',p:/pinpointhq\.com/i},{n:'Comeet',p:/comeet\.com.*\/jobs/i},
-    {n:'Personio',p:/personio\.de.*\/job/i},{n:'ZipRecruiter',p:/ziprecruiter\.com/i},
-    {n:'Monster',p:/monster\.com.*job/i},{n:'Glassdoor',p:/glassdoor\.com.*job/i},
-    {n:'Dice',p:/dice\.com.*job/i},{n:'Wellfound',p:/wellfound\.com.*\/jobs/i},
-    {n:'Paylocity',p:/paylocity\.com.*Recruiting/i},{n:'Phenom',p:/phenom\.com.*\/jobs/i},
-    {n:'Avature',p:/avature\.net.*careers/i},{n:'Workable',p:/apply\.workable\.com/i},
-    {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i}
+    { n: 'Workday', p: /myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i },
+    { n: 'Greenhouse', p: /boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i },
+    { n: 'Lever', p: /jobs\.lever\.co/i }, { n: 'SmartRecruiters', p: /jobs\.smartrecruiters\.com/i },
+    { n: 'iCIMS', p: /icims\.com/i }, { n: 'Taleo', p: /taleo\.net|oraclecloud\.com.*CandidateExperience/i },
+    { n: 'Ashby', p: /jobs\.ashbyhq\.com/i }, { n: 'BambooHR', p: /bamboohr\.com.*\/jobs/i },
+    { n: 'Oracle', p: /oraclecloud\.com.*recruit/i }, { n: 'LinkedIn', p: /linkedin\.com\/jobs\/(view|application)/i },
+    { n: 'Indeed', p: /indeed\.com.*(viewjob|apply)/i }, { n: 'UltiPro', p: /ultipro\.com/i },
+    { n: 'Jobvite', p: /jobs\.jobvite\.com/i }, { n: 'Breezy', p: /breezy\.hr|breezyhr\.com/i },
+    { n: 'Recruitee', p: /recruitee\.com\/o\//i }, { n: 'ADP', p: /adp\.com.*\/job|workforcenow\.adp/i },
+    { n: 'Rippling', p: /ats\.rippling\.com/i }, { n: 'Dover', p: /app\.dover\.com/i },
+    { n: 'Dayforce', p: /dayforce\.com.*candidateportal/i }, { n: 'SuccessFactors', p: /successfactors\.com/i },
+    { n: 'JazzHR', p: /app\.jazz\.co|applytojob\.com/i }, { n: 'Fountain', p: /fountain\.com.*\/apply/i },
+    { n: 'Pinpoint', p: /pinpointhq\.com/i }, { n: 'Comeet', p: /comeet\.com.*\/jobs/i },
+    { n: 'Personio', p: /personio\.de.*\/job/i }, { n: 'ZipRecruiter', p: /ziprecruiter\.com/i },
+    { n: 'Monster', p: /monster\.com.*job/i }, { n: 'Glassdoor', p: /glassdoor\.com.*job/i },
+    { n: 'Dice', p: /dice\.com.*job/i }, { n: 'Wellfound', p: /wellfound\.com.*\/jobs/i },
+    { n: 'Paylocity', p: /paylocity\.com.*Recruiting/i }, { n: 'Phenom', p: /phenom\.com.*\/jobs/i },
+    { n: 'Avature', p: /avature\.net.*careers/i }, { n: 'Workable', p: /apply\.workable\.com/i },
+    { n: 'Career', p: /\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i }
   ];
 
   // ===================== STORAGE & STATE =====================
-  const st={
-    get:k=>new Promise(r=>chrome.storage.local.get(k,d=>r(d[k]))),
-    set:(k,v)=>new Promise(r=>chrome.storage.local.set({[k]:v},r)),
-    getMulti:keys=>new Promise(r=>chrome.storage.local.get(keys,d=>r(d)))
+  const st = {
+    get: k => new Promise(r => chrome.storage.local.get(k, d => r(d[k]))),
+    set: (k, v) => new Promise(r => chrome.storage.local.set({ [k]: v }, r)),
+    getMulti: keys => new Promise(r => chrome.storage.local.get(keys, d => r(d)))
   };
-  let queue=[],qActive=false,qPaused=false,autoApply=false,selected=new Set();
-  async function load(){queue=(await st.get(SK.Q))||[];qActive=(await st.get(SK.QA))||false;qPaused=(await st.get(SK.QP))||false;autoApply=(await st.get(SK.AA))||false;}
-  async function saveQ(){await st.set(SK.Q,queue);}
+  let queue = [], qActive = false, qPaused = false, autoApply = false, selected = new Set();
+  async function load() { queue = (await st.get(SK.Q)) || []; qActive = (await st.get(SK.QA)) || false; qPaused = (await st.get(SK.QP)) || false; autoApply = (await st.get(SK.AA)) || false; }
+  async function saveQ() { await st.set(SK.Q, queue); }
 
   // ===================== ANSWER LEARNING SYSTEM =====================
   // Stores answers keyed by normalized field label for future reuse
@@ -88,14 +88,14 @@
     _answerBank = saved || {};
     _answerBankLoaded = true;
     // Also pull from OptimHire storage if available
-    const ohKeys = ['candidateDetails','userDetails','applicationDetails','questionAnswers','responses'];
+    const ohKeys = ['candidateDetails', 'userDetails', 'applicationDetails', 'questionAnswers', 'responses'];
     const ohData = await st.getMulti(ohKeys);
     for (const val of Object.values(ohData || {})) {
       if (!val) continue;
       try {
         const parsed = typeof val === 'string' ? JSON.parse(val) : val;
         collectEntries(parsed);
-      } catch (_) {}
+      } catch (_) { }
     }
     return _answerBank;
   }
@@ -152,14 +152,18 @@
 
   async function getProfile() {
     let p = (await st.get(SK.PROF)) || {};
-    // Also check OptimHire candidate data
-    const ohData = await st.getMulti(['candidateDetails','userDetails']);
+    const ohData = await st.getMulti(['candidateDetails', 'userDetails']);
     try {
       const cd = typeof ohData.candidateDetails === 'string' ? JSON.parse(ohData.candidateDetails) : (ohData.candidateDetails || {});
       const ud = typeof ohData.userDetails === 'string' ? JSON.parse(ohData.userDetails) : (ohData.userDetails || {});
-      p = {...ud, ...cd, ...p};
-    } catch (_) {}
+      p = { ...ud, ...cd, ...p };
+    } catch (_) { }
     return p;
+  }
+
+  async function getAppAccount() {
+    const d = await st.getMulti(['appAccountEmail', 'appAccountPassword']);
+    return { email: d.appAccountEmail || '', password: d.appAccountPassword || '' };
   }
 
   // ===================== SMART VALUE GUESSER =====================
@@ -176,6 +180,7 @@
     if (/state|province|region/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
     if (/country/.test(l)) return p.country || 'United States';
+    if (/address.*2|apt|suite|unit|address.?line.?2/.test(l)) return p.address2 || '';
     if (/address|street/.test(l)) return p.address || '';
     if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
@@ -211,8 +216,10 @@
     if (/convicted|criminal|felony|background/.test(l)) return 'No';
     if (/drug.?test|screening/.test(l)) return 'Yes';
     if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l)) return 'Yes';
+    if (/sms|text.*consent/.test(l)) return 'No';
     if (/agree|acknowledge|certif|attest|confirm|consent/.test(l)) return 'Yes';
-    if (/please.?specify|other.?please/.test(l)) return p.city || p.state || '';
+    if (/please.?specify|other.?please/.test(l)) return DEFAULTS.howHeard;
+    if (/not.?applicable|n.?a/i.test(l)) return 'Not Applicable';
     return '';
   }
 
@@ -224,6 +231,38 @@
   const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
   const $ = (sel, root) => (root || document).querySelector(sel);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // ===================== SHADOW DOM TRAVERSAL =====================
+  // Jobright injects its sidebar inside a shadow root — standard querySelector cannot pierce it
+  function queryShadow(sel, root) {
+    root = root || document;
+    try {
+      let r = root.querySelector(sel);
+      if (r) return r;
+    } catch (_) { }
+    const children = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const el of children) {
+      if (el.shadowRoot) {
+        const r = queryShadow(sel, el.shadowRoot);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  function allShadow(sel, root) {
+    root = root || document;
+    let results = [];
+    try { results = [...root.querySelectorAll(sel)]; } catch (_) { }
+    const children = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const el of children) {
+      if (el.shadowRoot) results.push(...allShadow(sel, el.shadowRoot));
+    }
+    return results;
+  }
+  function findByTextShadow(sel, re, root) {
+    const els = allShadow(sel, root);
+    return els.find(e => re.test(e.textContent?.trim() || '')) || null;
+  }
 
   function isVisible(el) {
     if (!el) return false;
@@ -250,14 +289,14 @@
     el.click();
   }
 
-  function clickEl(el) { if (!el) return false; el.scrollIntoView?.({behavior:'smooth',block:'center'}); realClick(el); return true; }
+  function clickEl(el) { if (!el) return false; el.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); realClick(el); return true; }
 
   function waitFor(sel, ms, xpath) {
     return new Promise(res => {
       const f = () => xpath ? document.evaluate(sel, document, null, 9, null).singleNodeValue : document.querySelector(sel);
       const e = f(); if (e) { res(e); return; }
       const o = new MutationObserver(() => { const e = f(); if (e) { o.disconnect(); res(e); } });
-      o.observe(document.body || document.documentElement, {childList:true,subtree:true});
+      o.observe(document.body || document.documentElement, { childList: true, subtree: true });
       setTimeout(() => { o.disconnect(); res(null); }, ms || 10000);
     });
   }
@@ -277,12 +316,14 @@
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
     if (el.id) { const lbl = $(`label[for="${CSS.escape(el.id)}"]`); if (lbl) return lbl.textContent.trim(); }
     if (el.placeholder) return el.placeholder;
-    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row');
+    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row,fieldset,.iCIMS_InfoMsg_Job');
     if (container) {
       const lbl = container.querySelector('label,[class*="label"],[class*="Label"]');
       if (lbl && lbl !== el) return lbl.textContent.trim();
+      const legend = container.querySelector('legend');
+      if (legend) return legend.textContent.trim();
     }
-    return el.name?.replace(/[_\-]/g, ' ') || '';
+    return el.name?.replace(/[_\-]/g, ' ') || '';  
   }
 
   function isFieldRequired(el) {
@@ -316,17 +357,17 @@
   }
 
   // ===================== QUEUE OPS =====================
-  async function addJob(url,title){if(!url||queue.some(j=>j.url===url))return;queue.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),url,title:title||shortUrl(url),status:'pending',addedAt:Date.now()});await saveQ();renderQ();updateCtrl();}
-  async function removeJob(id){queue=queue.filter(j=>j.id!==id);selected.delete(id);await saveQ();renderQ();updateCtrl();}
-  async function clearQ(){queue=[];selected.clear();await saveQ();renderQ();updateCtrl();}
-  async function removeSelected(){queue=queue.filter(j=>!selected.has(j.id));selected.clear();await saveQ();renderQ();updateCtrl();}
-  function shortUrl(u){try{const p=new URL(u);return p.hostname.replace('www.','')+p.pathname.slice(0,30);}catch{return u.slice(0,40);}}
-  function parseCSV(t){const u=[];for(const l of t.split(/[\r\n]+/)){const s=l.trim();if(!s||/^(url|link|job|title|company)/i.test(s))continue;for(const c of s.split(/[,\t]/)){const v=c.trim().replace(/^["']|["']$/g,'');if(/^https?:\/\//i.test(v)){u.push(v);break;}}if(/^https?:\/\//i.test(s)&&!u.includes(s))u.push(s);}return[...new Set(u)];}
+  async function addJob(url, title) { if (!url || queue.some(j => j.url === url)) return; queue.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), url, title: title || shortUrl(url), status: 'pending', addedAt: Date.now() }); await saveQ(); renderQ(); updateCtrl(); }
+  async function removeJob(id) { queue = queue.filter(j => j.id !== id); selected.delete(id); await saveQ(); renderQ(); updateCtrl(); }
+  async function clearQ() { queue = []; selected.clear(); await saveQ(); renderQ(); updateCtrl(); }
+  async function removeSelected() { queue = queue.filter(j => !selected.has(j.id)); selected.clear(); await saveQ(); renderQ(); updateCtrl(); }
+  function shortUrl(u) { try { const p = new URL(u); return p.hostname.replace('www.', '') + p.pathname.slice(0, 30); } catch { return u.slice(0, 40); } }
+  function parseCSV(t) { const u = []; for (const l of t.split(/[\r\n]+/)) { const s = l.trim(); if (!s || /^(url|link|job|title|company)/i.test(s)) continue; for (const c of s.split(/[,\t]/)) { const v = c.trim().replace(/^["']|["']$/g, ''); if (/^https?:\/\//i.test(v)) { u.push(v); break; } } if (/^https?:\/\//i.test(s) && !u.includes(s)) u.push(s); } return [...new Set(u)]; }
 
   // ===================== ATS =====================
-  function detectATS(){for(const a of ATS)if(a.p.test(location.href))return a.n;return null;}
-  function isWorkday(){return/myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href);}
-  function isJobright(){return/jobright\.ai/i.test(location.hostname);}
+  function detectATS() { for (const a of ATS) if (a.p.test(location.href)) return a.n; return null; }
+  function isWorkday() { return /myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href); }
+  function isJobright() { return /jobright\.ai/i.test(location.hostname); }
 
   // ===================== FALLBACK FORM FILLER =====================
   // Fills fields that Jobright autofill missed
@@ -362,16 +403,16 @@
         if (/gender|disability|veteran|race|ethnicity|sex\b|heritage/i.test(lblLower)) {
           const opts = $$('option', sel).filter(o => o.value && o.index > 0);
           const fb = opts.find(o => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
-          if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+          if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
         }
         continue;
       }
       const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
       else {
         // Try first valid option as fallback
         const opts = $$('option', sel).filter(o => o.value && o.index > 0);
-        if (opts.length) { sel.value = opts[0].value; sel.dispatchEvent(new Event('change', {bubbles:true})); filled++; }
+        if (opts.length) { sel.value = opts[0].value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
       }
     }
 
@@ -390,7 +431,7 @@
       // Default: Yes for yes/no
       const yes = radios.find(r => {
         const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
-        return ['yes','true','1'].includes(t);
+        return ['yes', 'true', '1'].includes(t);
       });
       if (yes) { realClick(yes); filled++; }
     }
@@ -441,11 +482,11 @@
 
     // Submit selectors (try if no required missing)
     const submitSels = [
-      'button[type="submit"]','input[type="submit"]',
+      'button[type="submit"]', 'input[type="submit"]',
       'button[data-automation-id="submit"]',
-      '#submit_app','.postings-btn-submit','button.application-submit',
-      'button[data-qa="btn-submit"]','button[aria-label*="Submit" i]',
-      '[data-testid="submit-application"]','button.btn-submit','#resumeSubmitForm',
+      '#submit_app', '.postings-btn-submit', 'button.application-submit',
+      'button[data-qa="btn-submit"]', 'button[aria-label*="Submit" i]',
+      '[data-testid="submit-application"]', 'button.btn-submit', '#resumeSubmitForm',
       'div.form-group.submit-button button.btn.btn-primary',
     ];
 
@@ -478,8 +519,8 @@
       'button[data-automation-id="bottom-navigation-next-button"]',
       'button[data-automation-id="pageFooterNextButton"]',
       'button[data-automation-id="next-button"]',
-      'button[aria-label*="Next" i]','button[aria-label*="Continue" i]',
-      '[data-testid="next-step"]','[data-testid="continue"]',
+      'button[aria-label*="Next" i]', 'button[aria-label*="Continue" i]',
+      '[data-testid="next-step"]', '[data-testid="continue"]',
     ];
     for (const sel of nextSels) {
       const btn = $(sel);
@@ -513,87 +554,407 @@
     return missing;
   }
 
+  // ===================== ATS-SPECIFIC FILLS (from OptimHire) =====================
+  const WD_FIELDS = {
+    legalNameSection_firstName: 'first_name', legalNameSection_lastName: 'last_name', legalNameSection_middleName: 'middle_name',
+    infoFirstName: 'first_name', infoLastName: 'last_name', infoEmail: 'email', infoCellPhone: 'phone', infoLinkedIn: 'linkedin_profile_url',
+    email: 'email', phone: 'phone', addressSection_addressLine1: 'address', addressSection_addressLine2: 'address2',
+    addressSection_city: 'city', addressSection_postalCode: 'postal_code',
+    workHistoryCompanyName: 'current_company', workHistoryPosition: 'current_title',
+    educationHistoryName: 'school', degree: 'degree', linkedIn: 'linkedin_profile_url', website: 'website_url',
+    github: 'github_url', jobTitle: 'current_title', company: 'current_company', school: 'school',
+    major: 'major', postalCode: 'postal_code', city: 'city', state: 'state', country: 'country',
+    yearsOfExperience: 'years_of_experience', salary: 'expected_salary', coverLetter: 'cover_letter', howDidYouHear: 'how_did_you_hear',
+  };
+  const WD_TA_AIDS = new Set(['formField-roleDescription', 'formField-summary', 'formField-coverLetter', 'formField-additionalInfo']);
+
+  async function workdayFill() {
+    const isWD = /myworkdayjobs\.com|myworkdaysite\.com|workday\.com/i.test(location.hostname) || !!$('[data-automation-id]');
+    if (!isWD) return;
+    const p = await getProfile(); const acct = await getAppAccount();
+    LOG('Workday fill starting');
+    // Apply → Apply Manually
+    let ab = $$('button,a').find(e => isVisible(e) && /^\s*Apply(\s+Now)?\s*$/i.test(e.textContent));
+    if (!ab) ab = $('[data-automation-id="applyButton"],[data-automation-id="jobAction-apply"]');
+    if (ab && isVisible(ab)) { realClick(ab); await sleep(2000); }
+    let mb = $('[data-automation-id="applyManually"]') || $$('button,a').find(e => isVisible(e) && /apply manually/i.test(e.textContent));
+    if (mb && isVisible(mb)) { realClick(mb); await sleep(3000); }
+    // Account flow
+    const ccb = $('[data-automation-id="createAccountCheckbox"] input[type=checkbox]');
+    if (ccb && !ccb.checked) { realClick(ccb); await sleep(600); }
+    const ef = $('[data-automation-id="createAccountEmail"] input') || $('input[data-automation-id="email"]') || $('input[name="email"][type="email"]');
+    if (ef && !ef.value?.trim() && (acct.email || p.email)) { ef.focus(); nativeSet(ef, acct.email || p.email); await sleep(200); }
+    if (acct.password) { $$('input[type=password]').filter(isVisible).forEach(pw => { if (!pw.value?.trim()) { pw.focus(); nativeSet(pw, acct.password); } }); await sleep(200); }
+    const cab = $('[data-automation-id="createAccountSubmitButton"]');
+    if (cab && isVisible(cab)) { await sleep(400); realClick(cab); await sleep(1500); }
+    const sib = $('[data-automation-id="signInSubmitButton"]');
+    if (sib && isVisible(sib)) { await sleep(400); realClick(sib); await sleep(1500); }
+    // Fill data-automation-id fields
+    for (const el of $$('[data-automation-id]:not([data-automation-id=""])')) {
+      const aid = el.getAttribute('data-automation-id');
+      if (WD_TA_AIDS.has(aid)) { const ta = $('textarea', el) || (el.tagName === 'TEXTAREA' ? el : null); if (ta && !ta.value?.trim()) { ta.focus(); nativeSet(ta, p.cover_letter || DEFAULTS.cover); } continue; }
+      const pk = WD_FIELDS[aid]; if (!pk) continue; const val = p[pk]; if (!val) continue;
+      const inp = $('input:not([type=hidden]):not([type=file]),textarea', el); if (inp && !inp.value?.trim()) { inp.focus(); nativeSet(inp, val); await sleep(80); continue; }
+      const combo = $('[role=combobox],[data-automation-id*="combobox"]', el); if (combo) { realClick(combo); await sleep(400); const si = $('input', combo); if (si) { nativeSet(si, val); await sleep(700); } const opt = $('[role=option]'); if (opt) realClick(opt); continue; }
+      $$('input[type=radio]', el).forEach(r => { const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || '').toLowerCase(); if (t.includes(val.toLowerCase())) realClick(r); });
+    }
+    // EEO
+    for (const [sel, pat] of [['[data-automation-id="gender"] select', /decline|prefer not/i], ['[data-automation-id="veteranStatus"] select', /not a protected|decline/i], ['[data-automation-id="disability"] select', /do not have|decline/i], ['[data-automation-id="ethnicityDropdown"] select', /decline|prefer not/i]]) {
+      const e = $(sel); if (e && !e.value) { const o = $$('option', e).find(x => pat.test(x.text)); if (o) { e.value = o.value; e.dispatchEvent(new Event('change', { bubbles: true })); } }
+    }
+    $$('[data-automation-id="agreementCheckbox"] input[type=checkbox]').filter(c => !c.checked).forEach(c => realClick(c));
+    LOG('Workday fill done');
+  }
+
+  async function greenhouseFill() {
+    if (!/greenhouse\.io/i.test(location.hostname) && !$('#application_form')) return;
+    const p = await getProfile(); LOG('Greenhouse fill');
+    for (const [sel, val] of [['#first_name,input[id*="first_name"]', p.first_name], ['#last_name,input[id*="last_name"]', p.last_name], ['#email,input[type="email"]', p.email], ['#phone,input[type="tel"]', p.phone], ['input[id*="location"]', p.city], ['input[id*="linkedin"]', p.linkedin_profile_url || p.linkedin], ['input[id*="website"],input[id*="portfolio"]', p.website_url || p.website], ['textarea[id*="cover"]', p.cover_letter || DEFAULTS.cover]]) {
+      if (!val) continue; const e = $(sel); if (e && isVisible(e) && !e.value?.trim()) { e.focus(); nativeSet(e, val); await sleep(50); }
+    }
+    $$('select[id*="gender"],select[id*="disability"],select[id*="veteran"],select[id*="race"],select[id*="ethnicity"]').filter(s => isVisible(s) && !s.value).forEach(s => { const o = $$('option', s).find(x => /decline|prefer not|do not have|not a protected/i.test(x.text)); if (o) { s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); } });
+  }
+
+  async function oracleFill() {
+    if (!/oraclecloud\.com|taleo\.net/i.test(location.hostname)) return;
+    const p = await getProfile(); LOG('Oracle fill');
+    for (const [sel, val] of [['input[id*="firstName"],input[name*="firstName"]', p.first_name], ['input[id*="lastName"],input[name*="lastName"]', p.last_name], ['input[type="email"]', p.email], ['input[type="tel"],input[id*="phone"]', p.phone], ['input[id*="city"]', p.city], ['input[id*="zip"],input[name*="postal"]', p.postal_code || p.zip]]) {
+      if (!val) continue; const e = $(sel); if (e && isVisible(e) && !e.value?.trim()) { e.focus(); nativeSet(e, val); await sleep(60); }
+    }
+  }
+
+  async function srFill() {
+    if (!/smartrecruiters\.com/i.test(location.hostname)) return;
+    const p = await getProfile(); LOG('SmartRecruiters fill');
+    for (const [sel, val] of [['input[name="first_name"],#firstName', p.first_name], ['input[name="last_name"],#lastName', p.last_name], ['input[name="email"],input[type="email"]', p.email], ['input[name="phone"],input[type="tel"]', p.phone], ['input[name="city"]', p.city], ['textarea[name="message"],textarea[name="cover_letter"]', p.cover_letter || DEFAULTS.cover]]) {
+      if (!val) continue; const e = $(sel); if (e && isVisible(e) && !e.value?.trim()) { e.focus(); nativeSet(e, val); await sleep(60); }
+    }
+  }
+
+  // ===================== CAPTCHA SOLVER =====================
+  function solveCaptcha() {
+    $$('iframe[src*="recaptcha"],iframe[src*="hcaptcha"]').forEach(f => { try { const cb = f.contentDocument?.querySelector('.recaptcha-checkbox,#recaptcha-anchor'); if (cb && !cb.classList.contains('recaptcha-checkbox-checked')) realClick(cb); } catch (_) { } });
+    $$('[class*="captcha"] input,[id*="captcha"] input,input[name*="captcha"]').forEach(inp => { const lbl = getLabel(inp); const m = lbl.match(/(\d+)\s*([\+\-\*x×÷\/])\s*(\d+)/); if (!m) return; const [, a, op, b] = m; const n1 = +a, n2 = +b; const ops = { '+': n1 + n2, '-': n1 - n2, '*': n1 * n2, 'x': n1 * n2, '×': n1 * n2, '/': n2 ? Math.round(n1 / n2) : null, '÷': n2 ? Math.round(n1 / n2) : null }; const r = ops[op]; if (r !== null && r !== undefined) nativeSet(inp, String(r)); });
+    $$('input[type=checkbox][id*="captcha"],input[type=checkbox][name*="captcha"]').filter(e => !e.checked).forEach(cb => realClick(cb));
+  }
+  new MutationObserver(() => solveCaptcha()).observe(document.body || document.documentElement, { childList: true, subtree: true });
+  solveCaptcha();
+
+  // ===================== RESUME UPLOAD =====================
+  async function tryResumeUpload() {
+    const fi = $$('input[type="file"]').filter(isVisible); if (!fi.length) return false;
+    const d = await st.getMulti(['ua_resumeFile', 'ua_resumeFileName', 'resumeFile', 'resumeFileName']);
+    const file = d.ua_resumeFile || d.resumeFile; const fn = d.ua_resumeFileName || d.resumeFileName || 'resume.pdf';
+    if (!file) { LOG('No stored resume'); return false; }
+    let ok = false;
+    for (const inp of fi) {
+      if (inp.files && inp.files.length > 0) continue;
+      const lbl = (getLabel(inp) || inp.name || inp.accept || '').toLowerCase();
+      if (/resume|cv|curriculum|document|upload|attach|file/i.test(lbl) || inp.accept?.includes('.pdf')) {
+        try { const r = await fetch(file); const bl = await r.blob(); const fo = new File([bl], fn, { type: bl.type || 'application/pdf' }); const dt = new DataTransfer(); dt.items.add(fo); inp.files = dt.files; inp.dispatchEvent(new Event('change', { bubbles: true })); LOG('Resume uploaded to:', lbl); ok = true; } catch (e) { LOG('Resume upload failed:', e); }
+      }
+    }
+    return ok;
+  }
+
+  // ===================== WAKE LOCK =====================
+  let _wakeLock = null;
+  async function acquireWakeLock() { if ('wakeLock' in navigator) { try { _wakeLock = await navigator.wakeLock.request('screen'); _wakeLock.addEventListener('release', () => setTimeout(acquireWakeLock, 1000)); LOG('Wake lock acquired'); } catch (_) { } } }
+
+  // ===================== DEDUPLICATION =====================
+  function normalizeUrl(url) { try { const u = new URL(url);['utm_source', 'utm_medium', 'utm_campaign', 'ref', 'source', 'fbclid'].forEach(p => u.searchParams.delete(p)); return u.origin + u.pathname; } catch { return url; } }
+  async function markApplied() { const norm = normalizeUrl(location.href); const { appliedJobs = [] } = await chrome.storage.local.get('appliedJobs'); if (!appliedJobs.includes(norm)) { appliedJobs.push(norm); if (appliedJobs.length > 15000) appliedJobs.shift(); await chrome.storage.local.set({ appliedJobs }); } }
+  async function isAlreadyApplied(url) { const { appliedJobs = [] } = await chrome.storage.local.get('appliedJobs'); return appliedJobs.includes(normalizeUrl(url)); }
+
+  // ===================== INDEED NAVIGATION =====================
+  function handleIndeed() {
+    if (!/indeed\.com/i.test(location.hostname)) return;
+    const click = () => {
+      const btn = $$('button,a').find(el => /apply on company site|apply externally|apply now/i.test(el.textContent) || el.getAttribute('data-testid') === 'company-site-apply-button'); if (btn) { LOG('Indeed: Apply on company site'); realClick(btn); }
+      const confirm = $$('button').find(el => /continue|proceed|yes|ok/i.test(el.textContent) && el.closest('[class*="modal"],[role="dialog"]')); if (confirm) realClick(confirm);
+    };
+    setTimeout(click, 1500); new MutationObserver(click).observe(document.body, { childList: true, subtree: true });
+  }
+  handleIndeed();
+
+  // ===================== LINKEDIN NAVIGATION =====================
+  function handleLinkedIn() {
+    if (!/linkedin\.com/i.test(location.hostname) || !/^\/jobs/.test(location.pathname)) return;
+    let acting = false;
+    const act = async () => {
+      if (acting) return; acting = true; try {
+        const direct = $$('.jobs-apply-button,.apply-button,[data-control-name*="apply"]').find(el => { const t = el.textContent.trim().toLowerCase(); return t.includes('apply') && !t.includes('easy'); });
+        if (direct) { LOG('LinkedIn: direct apply'); realClick(direct); return; }
+        const easy = $$('.jobs-apply-button,[aria-label*="Easy Apply"]').find(el => /easy apply/i.test(el.textContent));
+        if (easy) { LOG('LinkedIn: Easy Apply'); realClick(easy); await sleep(1500); await fallbackFill(); }
+      } finally { setTimeout(() => { acting = false; }, 3000); }
+    };
+    setTimeout(act, 2000); new MutationObserver(act).observe(document.body, { childList: true, subtree: false });
+  }
+  handleLinkedIn();
+
+  // ===================== HIRINGCAFE NAVIGATION =====================
+  const GOOD_SIZES = ['51-200', '201-500', '501-1000', '1001-2000', '2001-5000', '5001-10000', '10001+'];
+  function handleHiringCafe() {
+    if (!/hiring\.cafe/i.test(location.hostname)) return;
+    const sizeEl = $$('[class*="size"],[class*="employees"]').find(el => /\d/.test(el.textContent));
+    if (sizeEl) { const txt = sizeEl.textContent.replace(/\s/g, ''); const ok = GOOD_SIZES.some(s => txt.includes(s.replace(/\s/g, ''))); if (!ok) { LOG('HiringCafe: company size not preferred'); return; } }
+    const tryClick = () => { const btn = $$('a,button').find(el => /apply directly|apply now/i.test(el.textContent)); if (btn) { LOG('HiringCafe: Apply Directly'); realClick(btn); } };
+    setTimeout(tryClick, 2000); new MutationObserver(tryClick).observe(document.body, { childList: true, subtree: true });
+  }
+  handleHiringCafe();
+
+  // ===================== FRESHNESS BADGES =====================
+  function parseRelTime(txt) { txt = (txt || '').toLowerCase().trim(); const now = Date.now(); if (/just now|moments? ago/.test(txt)) return new Date(now - 60000); if (/today/.test(txt)) return new Date(now - 3600000); const m = txt.match(/(\d+)\s+(minute|hour|day|week|month)/); if (!m) return null; const mults = { minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2592000000 }; return new Date(now - +m[1] * (mults[m[2]] || 86400000)); }
+  function addFreshBadge(el) { if (!el || el.querySelector('.oh-fresh')) return; const timeEl = el.querySelector('time,[datetime],[class*="posted"],[class*="date"]'); let date = null; if (timeEl) { const dt = timeEl.getAttribute('datetime'); date = dt ? new Date(dt) : parseRelTime(timeEl.textContent); } if (!date) { const m = el.textContent.match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago|just\s+now|today/i); if (m) date = parseRelTime(m[0]); } if (!date || isNaN(date)) return; const age = Date.now() - date.getTime(); let text = '', color = ''; if (age < 30 * 60000) { text = '🔥 Just Posted'; color = '#ef4444'; } else if (age < 86400000) { text = '✨ Fresh (<24h)'; color = '#22c55e'; } else if (age < 3 * 86400000) { text = '📅 Recent (<3d)'; color = '#3b82f6'; } else return; const badge = document.createElement('span'); badge.className = 'oh-fresh'; badge.textContent = text; badge.style.cssText = `display:inline-block;background:${color};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;margin-left:6px;`; const heading = el.querySelector('h1,h2,h3,h4,a'); if (heading) heading.after(badge); else el.prepend(badge); }
+  function processFreshness() { $$('.jobsearch-SerpJobCard,.job_seen_beacon,[class*="result-"],.jobs-search-results__list-item,.job-card-container,[class*="job-card"],[class*="jobCard"],[class*="listing"]').forEach(addFreshBadge); }
+  setInterval(processFreshness, 4000); processFreshness();
+
+  // ===================== MISSING DETAILS DIALOG WATCHER =====================
+  let _dialogDebounce = null;
+  function watchMissingDialog() {
+    new MutationObserver(async () => {
+      if (_dialogDebounce) return;
+      const dialog = $$('[class*="missing"],[id*="missing"],[role="dialog"],[class*="modal"]').find(el => isVisible(el) && /missing details|fill.*details|add.*details/i.test(el.textContent));
+      if (dialog) {
+        _dialogDebounce = setTimeout(() => { _dialogDebounce = null; }, 3000); LOG('Missing details dialog — auto-filling'); await sleep(300); await fallbackFill(); await sleep(700);
+        const btn = $$('button', dialog).find(e => isVisible(e) && /save|submit|continue|done|next|confirm/i.test(e.textContent)); if (btn) realClick(btn);
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  watchMissingDialog();
+
+  // ===================== iCIMS FILL =====================
+  async function icimsFill() {
+    if (!/icims\.com/i.test(location.hostname)) return;
+    const p = await getProfile(); LOG('iCIMS fill starting');
+    // iCIMS uses standard HTML forms with labels — fill by label text
+    const fieldMap = [
+      [/first.?name/i, p.first_name], [/last.?name/i, p.last_name], [/middle.?name/i, p.middle_name || ''],
+      [/preferred.?name/i, p.preferred_name || p.first_name || ''],
+      [/email/i, p.email], [/phone|mobile|cell|telephone/i, p.phone],
+      [/address.*2|apt|suite/i, p.address2 || ''], [/address|street/i, p.address || ''],
+      [/city/i, p.city], [/zip|postal/i, p.postal_code || p.zip || ''],
+      [/salary|compensation|pay/i, p.expected_salary || DEFAULTS.salary],
+      [/linkedin/i, p.linkedin_profile_url || p.linkedin || ''],
+      [/website|portfolio/i, p.website_url || p.website || ''],
+    ];
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea').filter(el => isVisible(el) && !el.value?.trim());
+    for (const inp of inputs) {
+      const lbl = getLabel(inp).toLowerCase();
+      for (const [re, val] of fieldMap) {
+        if (val && re.test(lbl)) { inp.focus(); nativeSet(inp, val); await sleep(60); break; }
+      }
+    }
+    // Handle iCIMS select dropdowns
+    const selects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const sel of selects) {
+      const lbl = (getLabel(sel) || '').toLowerCase();
+      let targetVal = null;
+      if (/country/i.test(lbl)) targetVal = p.country || 'Ireland';
+      else if (/state|province/i.test(lbl)) targetVal = p.state || '';
+      else if (/how.*hear|where.*(find|learn)/i.test(lbl)) targetVal = DEFAULTS.howHeard;
+      else if (/please.?specify/i.test(lbl)) targetVal = 'Not Applicable';
+      else if (/sms|text.*consent/i.test(lbl)) targetVal = 'No';
+      else if (/gender|disability|veteran|race|ethnicity/i.test(lbl)) {
+        const fb = $$('option', sel).find(o => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
+        if (fb) { sel.value = fb.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        continue;
+      }
+      if (targetVal) {
+        const opts = $$('option', sel).filter(o => o.value && o.index > 0);
+        const exact = opts.find(o => o.text.trim().toLowerCase() === targetVal.toLowerCase());
+        const partial = opts.find(o => o.text.trim().toLowerCase().includes(targetVal.toLowerCase()));
+        const pick = exact || partial || (opts.length ? opts[0] : null);
+        if (pick) { sel.value = pick.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+    }
+    // Handle required checkboxes (iCIMS sometimes has consent checkboxes)
+    $$('input[type=checkbox][required],input[type=checkbox][aria-required="true"]')
+      .filter(el => isVisible(el) && !el.checked)
+      .forEach(cb => { realClick(cb); });
+    LOG('iCIMS fill done');
+  }
+
+  // ===================== ATS-SPECIFIC FILL DISPATCHER =====================
+  async function atsSpecificFill() {
+    const h = location.hostname.toLowerCase();
+    if (/myworkdayjobs\.com|myworkdaysite\.com|workday\.com/i.test(h)) await workdayFill();
+    else if (/greenhouse\.io/i.test(h) || $('#application_form')) await greenhouseFill();
+    else if (/oraclecloud\.com|taleo\.net/i.test(h)) await oracleFill();
+    else if (/smartrecruiters\.com/i.test(h)) await srFill();
+    else if (/icims\.com/i.test(h)) await icimsFill();
+  }
+
   // ===================== TAILOR-FIRST AUTOMATION FLOW =====================
-  // Step 1: Click "Generate Custom Resume" (in Jobright sidebar)
-  // Step 2: Wait for tailoring to complete
-  // Step 3: Click "Continue to Autofill" / continue button
-  // Step 4: Click "Autofill" button
-  // Step 5: Fallback fill missed fields
-  // Step 6: Submit or Next
+  // ATS detected → Generate Custom Resume → Improve → Full Edit → Select All → Generate → Continue to Autofill → Autofill → ATS fill → fallback → resume → submit/next
+
+  // Helper: find button by text or selectors, traversing into shadow DOM
+  function findSidebarBtn(textRe, selectors) {
+    // Try CSS selectors first (shadow-piercing)
+    for (const sel of (selectors || [])) {
+      const e = queryShadow(sel) || $(sel);
+      if (e && isVisible(e)) return e;
+    }
+    // Search inside shadow DOM for buttons matching text
+    const candidates = allShadow('button,a,div[role="button"],span[role="button"],label', document);
+    for (const e of candidates) {
+      if (isVisible(e) && textRe.test(e.textContent?.trim() || '')) return e;
+    }
+    // Also search page-level buttons (outside shadow)
+    for (const e of $$('button,a,div[role="button"],span,label')) {
+      if (isVisible(e) && textRe.test(e.textContent?.trim() || '')) return e;
+    }
+    return null;
+  }
+
+  // Helper: wait for a sidebar button with polling
+  async function waitForSidebarBtn(textRe, selectors, timeout) {
+    timeout = timeout || 20000;
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const btn = findSidebarBtn(textRe, selectors);
+      if (btn) return btn;
+      await sleep(1500);
+    }
+    return null;
+  }
 
   async function tailorFirstFlow() {
     const ats = detectATS();
     if (!ats) return;
-    LOG(`Tailor-first flow starting for ${ats}...`);
+    LOG(`=== Tailor-first flow starting for ${ats} ===`);
 
-    // Wait for Jobright sidebar to load
-    const sidebar = await waitFor('#jobright-helper-id', 15000);
+    // Check dedup
+    if (await isAlreadyApplied(location.href)) { LOG('Already applied to this URL — skipping'); return; }
+
+    // Acquire wake lock to prevent sleep during automation
+    acquireWakeLock();
+
+    // Wait for Jobright sidebar to load (check shadow DOM too)
+    LOG('Waiting for Jobright sidebar...');
+    let sidebar = null;
+    const sidebarStart = Date.now();
+    while (Date.now() - sidebarStart < 20000) {
+      sidebar = queryShadow('#jobright-helper-id') || $('#jobright-helper-id');
+      if (sidebar) break;
+      // Also check if the sidebar is a custom element with shadow root
+      const helpers = $$('[id*="jobright"],[class*="jobright"],[id*="helper"]');
+      for (const h of helpers) {
+        if (h.shadowRoot) { sidebar = h; break; }
+      }
+      if (sidebar) break;
+      await sleep(1500);
+    }
     if (!sidebar) { LOG('Jobright sidebar not found — falling back to direct autofill'); await directAutofillFlow(); return; }
-    await sleep(2000);
+    LOG('Sidebar found! Waiting for it to fully load...');
+    await sleep(3000);
 
-    // Step 1: Click "Generate Custom Resume" if available
-    const tailorBtn = sidebar.querySelector('.application-dashboard-tailor-resume') ||
-                       sidebar.querySelector('.external-job-generate-resume-button');
-    if (tailorBtn && isVisible(tailorBtn)) {
+    // ── STEP 1: Click "Generate Custom Resume" ──
+    LOG('Step 1: Looking for Generate Custom Resume button...');
+    let tailorBtn = await waitForSidebarBtn(
+      /generate.*custom.*resume|generate.*resume|tailor.*resume|customize.*resume/i,
+      ['.application-dashboard-tailor-resume', '.external-job-generate-resume-button', '[data-testid*="generate"]', '[data-testid*="tailor"]'],
+      20000
+    );
+    if (tailorBtn) {
       LOG('Step 1: Clicking Generate Custom Resume');
       realClick(tailorBtn);
-      await sleep(3000);
+      await sleep(5000);
 
-      // Wait for tailoring to complete (watch for loading to finish)
-      LOG('Waiting for resume tailoring to complete...');
-      const maxWait = 120000; // 2 min max
-      const start = Date.now();
-      while (Date.now() - start < maxWait) {
-        // Check if loading indicator is gone
-        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading');
+      // ── STEP 2: "Improve My Resume for This Job" ──
+      LOG('Step 2: Looking for Improve My Resume...');
+      let improveBtn = await waitForSidebarBtn(/improve my resume|improve.*resume/i, [], 15000);
+      if (improveBtn) { LOG('Step 2: Clicking Improve My Resume'); realClick(improveBtn); await sleep(4000); }
+      else { LOG('Step 2: Improve button not found — continuing'); }
+
+      // ── STEP 3: "Full Edit" ──
+      LOG('Step 3: Looking for Full Edit...');
+      let fullEditBtn = await waitForSidebarBtn(/full edit/i, [], 15000);
+      if (fullEditBtn) { LOG('Step 3: Clicking Full Edit'); realClick(fullEditBtn); await sleep(5000); }
+      else { LOG('Step 3: Full Edit not found — continuing'); }
+
+      // ── STEP 4: "Select all" (missing skill keywords) ──
+      LOG('Step 4: Looking for Select All...');
+      let selAllBtn = await waitForSidebarBtn(/select all/i, [], 10000);
+      if (selAllBtn) { LOG('Step 4: Clicking Select All skills'); realClick(selAllBtn); await sleep(2000); }
+      else { LOG('Step 4: Select All not found — continuing'); }
+
+      // ── STEP 5: "Generate My New Resume" / "Generate" ──
+      LOG('Step 5: Looking for Generate...');
+      let genBtn = await waitForSidebarBtn(/generate (my )?new resume|generate my resume|^generate$/i, [], 10000);
+      if (genBtn) { LOG('Step 5: Clicking Generate'); realClick(genBtn); await sleep(3000); }
+      else { LOG('Step 5: Generate button not found — continuing'); }
+
+      // Wait for resume generation to complete (loading indicator gone)
+      LOG('Waiting for resume tailoring to complete (up to 2 min)...');
+      const maxWait = 120000;
+      const genStart = Date.now();
+      while (Date.now() - genStart < maxWait) {
+        // Check loading indicators (shadow-aware)
+        const loading = queryShadow('.tailor-resume-loading-linear-progress') ||
+          queryShadow('.resume-loading-container') ||
+          queryShadow('.spin-loading') ||
+          findByTextShadow('div,span', /generating|loading|processing/i);
         if (!loading || !isVisible(loading)) {
-          // Check if tailored resume is ready (button text changed or autofill button available)
-          const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
-          if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
+          const ready = findSidebarBtn(/continue to autofill/i) ||
+            queryShadow('.auto-fill-button:not([disabled])') ||
+            findSidebarBtn(/download resume/i);
+          if (ready) { LOG('Tailoring complete!'); break; }
         }
-        await sleep(2000);
+        await sleep(2500);
       }
-      await sleep(1500);
+      await sleep(2000);
     } else {
       LOG('Step 1: No tailor button found — skipping to autofill');
     }
 
-    // Step 2-3: Click "Continue to Autofill" / continue button if present
-    const continueBtn = sidebar.querySelector('.continue-button:not(.continue-button-disabled)');
-    if (continueBtn && isVisible(continueBtn)) {
-      LOG('Step 2: Clicking Continue button');
-      realClick(continueBtn);
-      await sleep(2000);
-    }
+    // ── STEP 6: "Continue to Autofill" ──
+    LOG('Step 6: Looking for Continue to Autofill...');
+    let continueBtn = await waitForSidebarBtn(
+      /continue to autofill|continue/i,
+      ['.continue-button:not(.continue-button-disabled)'],
+      15000
+    );
+    if (continueBtn) { LOG('Step 6: Clicking Continue to Autofill'); realClick(continueBtn); await sleep(3000); }
+    else { LOG('Step 6: Continue button not found — trying Autofill directly'); }
 
-    // Step 4: Click the Autofill button
-    LOG('Step 3: Triggering Autofill');
+    // ── STEP 7: Click the "Autofill" button ──
+    LOG('Step 7: Triggering Autofill');
     await triggerAutofill();
 
-    // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
+    // Wait for Jobright autofill to complete
     LOG('Waiting for Jobright autofill to complete...');
-    await sleep(3000);
+    await sleep(4000);
     const fillStart = Date.now();
     while (Date.now() - fillStart < 60000) {
-      const afBtn = sidebar.querySelector('.auto-fill-button');
+      const afBtn = queryShadow('.auto-fill-button') || $('.auto-fill-button');
       if (afBtn) {
         const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '') break; // Done filling
+        if (txt === 'autofill' || txt === '' || /^auto.?fill$/i.test(txt)) break;
       }
-      await sleep(1500);
+      await sleep(2000);
     }
     await sleep(2000);
 
-    // Step 5: Fallback fill to catch missed fields
-    LOG('Step 4: Running fallback fill for missed fields');
-    await fallbackFill();
-    await sleep(1000);
-    // Second pass
-    await fallbackFill();
+    // ── STEP 8: ATS-specific fill ──
+    LOG('Step 8: ATS-specific fill');
+    await atsSpecificFill();
+    await sleep(500);
+
+    // ── STEP 9: Fallback fill + resume + captcha ──
+    LOG('Step 9: Fallback fill (pass 1)');
+    await fallbackFill(); await sleep(800);
+    LOG('Step 9: Fallback fill (pass 2)');
+    await fallbackFill(); await sleep(500);
+    LOG('Step 9: ATS-specific fill (pass 2)');
+    await atsSpecificFill(); await sleep(300);
+    await tryResumeUpload();
+    solveCaptcha();
     await sleep(1000);
 
-    // Step 6: Auto submit or next
-    LOG('Step 5: Auto-submit/next');
+    // ── STEP 10: Auto submit or next ──
+    LOG('Step 10: Auto-submit/next');
     const result = await autoSubmitOrNext();
 
     if (result === 'next_page') {
@@ -602,9 +963,22 @@
       await multiPageLoop();
     } else if (result === 'submitted') {
       LOG('Application submitted!');
-      await learnFromPage();
+      await learnFromPage(); await markApplied();
       await sleep(2000);
       if (checkSuccess()) LOG('Success confirmed!');
+      // Signal CSV bridge
+      chrome.runtime.sendMessage({ type: 'CSV_JOB_COMPLETE', status: 'done', url: location.href }).catch(() => { });
+    } else {
+      // No submit/next found — try one more fallback+submit cycle
+      LOG('Step 10b: Retry — fallback + submit');
+      await fallbackFill(); await sleep(1000);
+      const retry = await autoSubmitOrNext();
+      if (retry === 'submitted') {
+        await learnFromPage(); await markApplied();
+        chrome.runtime.sendMessage({ type: 'CSV_JOB_COMPLETE', status: 'done', url: location.href }).catch(() => { });
+      } else if (retry === 'next_page') {
+        await sleep(3000); await multiPageLoop();
+      }
     }
   }
 
@@ -692,14 +1066,23 @@
 
   // ===================== AUTOFILL TRIGGER =====================
   async function triggerAutofill() {
-    await waitFor('#jobright-helper-id', 8000);
-    await sleep(1500);
-    let b = $('.auto-fill-button');
-    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked'); return true; }
-    await sleep(3000);
-    b = $('.auto-fill-button');
-    if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked (retry)'); return true; }
-    LOG('Autofill button not found or disabled');
+    LOG('Looking for Autofill button (shadow DOM aware)...');
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      // Try shadow DOM traversal first
+      let b = queryShadow('.auto-fill-button') || $('.auto-fill-button');
+      // Also try finding by text in shadow DOM
+      if (!b || b.disabled) {
+        b = findSidebarBtn(/^autofill$/i, ['.auto-fill-button', '[data-testid*="autofill"]', '.autofill-button']);
+      }
+      if (b && !b.disabled) {
+        realClick(b);
+        LOG(`Autofill button clicked (attempt ${attempt})`);
+        return true;
+      }
+      LOG(`Autofill button not found/disabled — attempt ${attempt}/6`);
+      await sleep(2500);
+    }
+    LOG('Autofill button not found after all attempts');
     return false;
   }
 
@@ -728,15 +1111,27 @@
           goNext();
           return;
         }
-      } catch {}
+      } catch { }
     }
     goNext();
   }
   function goNext() {
     if (qPaused) return;
     const n = queue.find(j => j.status === 'pending');
-    if (n) { n.status = 'applying'; saveQ().then(() => { location.href = n.url; }); }
-    else { qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl(); }
+    if (n) {
+      n.status = 'applying';
+      saveQ().then(() => {
+        LOG(`Queue: opening ${n.url} in new tab`);
+        // Use chrome.tabs.create via background for visible new tab
+        chrome.runtime.sendMessage({ type: 'UA_OPEN_TAB', url: n.url, jobId: n.id }).catch(() => {
+          // Fallback: direct navigation if messaging fails
+          window.open(n.url, '_blank') || (location.href = n.url);
+        });
+      });
+    } else {
+      qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl();
+      LOG('Queue: all jobs processed');
+    }
   }
   async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
   async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
@@ -978,7 +1373,7 @@
       dragging = true; moved = false;
       el.style.transition = 'none';
       document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
-      document.addEventListener('touchmove', onMove, {passive: false}); document.addEventListener('touchend', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false }); document.addEventListener('touchend', onUp);
     };
     const onMove = e => {
       if (!dragging) return; e.preventDefault();
@@ -994,12 +1389,12 @@
       document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
       document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp);
       if (moved) {
-        st.set(SK.POS, {left: el.style.left, top: el.style.top});
+        st.set(SK.POS, { left: el.style.left, top: el.style.top });
         const suppress = ev => { ev.stopPropagation(); ev.preventDefault(); };
-        el.addEventListener('click', suppress, {capture: true, once: true});
+        el.addEventListener('click', suppress, { capture: true, once: true });
       }
     };
-    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive: false});
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, { passive: false });
     st.get(SK.POS).then(p => { if (p?.left) { el.style.left = p.left; el.style.top = p.top; el.style.right = 'auto'; el.style.bottom = 'auto'; } });
   }
 
@@ -1079,7 +1474,7 @@
   function showATSBadge() { const a = detectATS(); if (a) { document.getElementById('ua-ats-n').textContent = a + ' Detected'; document.getElementById('ua-ats').classList.add('show'); } }
 
   // ===================== OBSERVER =====================
-  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, {childList: true, subtree: true}); }
+  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, { childList: true, subtree: true }); }
 
   // ===================== INIT =====================
   async function init() {
@@ -1088,15 +1483,23 @@
     [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
 
+    // Listen for TRIGGER_AUTOFILL from background (CSV queue)
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg?.type === 'TRIGGER_AUTOFILL') {
+        LOG('Received TRIGGER_AUTOFILL from background');
+        tailorFirstFlow();
+        sendResponse({ ok: true });
+      }
+      if (msg?.type === 'PING') sendResponse({ pong: true });
+    });
+
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // Auto-start tailor-first flow when ATS is detected and auto-apply is on
-      if (autoApply) {
-        await sleep(2000);
-        if (isWorkday()) await workdayAutomation();
-        else await tailorFirstFlow();
-      }
+      // ALWAYS auto-start tailor-first flow when ATS is detected
+      await sleep(2000);
+      if (isWorkday()) await workdayAutomation();
+      else await tailorFirstFlow();
     }
     if (qActive) { await sleep(2000); processQ(); }
     if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
