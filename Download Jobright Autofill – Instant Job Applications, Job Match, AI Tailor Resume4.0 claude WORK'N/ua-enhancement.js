@@ -46,27 +46,152 @@
   // ===================== CONFIG =====================
   const SK = { AA: 'ua_aa', Q: 'ua_q', QA: 'ua_qa', QP: 'ua_qp', POS: 'ua_pos', ANS: 'ua_answers', PROF: 'ua_profile' };
   const ATS = [
+    // === Tier 1: Major ATS platforms ===
     { n: 'Workday', p: /myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i },
-    { n: 'Greenhouse', p: /boards\.greenhouse\.io|greenhouse\.io.*\/jobs/i },
-    { n: 'Lever', p: /jobs\.lever\.co/i }, { n: 'SmartRecruiters', p: /jobs\.smartrecruiters\.com/i },
-    { n: 'iCIMS', p: /icims\.com/i }, { n: 'Taleo', p: /taleo\.net|oraclecloud\.com.*CandidateExperience/i },
-    { n: 'Ashby', p: /jobs\.ashbyhq\.com/i }, { n: 'BambooHR', p: /bamboohr\.com.*\/jobs/i },
-    { n: 'Oracle', p: /oraclecloud\.com.*recruit/i }, { n: 'LinkedIn', p: /linkedin\.com\/jobs\/(view|application)/i },
-    { n: 'Indeed', p: /indeed\.com.*(viewjob|apply)/i }, { n: 'UltiPro', p: /ultipro\.com/i },
-    { n: 'Jobvite', p: /jobs\.jobvite\.com/i }, { n: 'Breezy', p: /breezy\.hr|breezyhr\.com/i },
-    { n: 'Recruitee', p: /recruitee\.com\/o\//i }, { n: 'ADP', p: /adp\.com.*\/job|workforcenow\.adp/i },
-    { n: 'Rippling', p: /ats\.rippling\.com/i }, { n: 'Dover', p: /app\.dover\.com/i },
-    { n: 'Dayforce', p: /dayforce\.com.*candidateportal/i }, { n: 'SuccessFactors', p: /successfactors\.com/i },
-    { n: 'JazzHR', p: /app\.jazz\.co|applytojob\.com/i }, { n: 'Fountain', p: /fountain\.com.*\/apply/i },
-    { n: 'Pinpoint', p: /pinpointhq\.com/i }, { n: 'Comeet', p: /comeet\.com.*\/jobs/i },
-    { n: 'Personio', p: /personio\.de.*\/job/i }, { n: 'ZipRecruiter', p: /ziprecruiter\.com/i },
-    { n: 'Monster', p: /monster\.com.*job/i }, { n: 'Glassdoor', p: /glassdoor\.com.*job/i },
-    { n: 'Dice', p: /dice\.com.*job/i }, { n: 'Wellfound', p: /wellfound\.com.*\/jobs/i },
-    { n: 'Paylocity', p: /paylocity\.com.*Recruiting/i }, { n: 'Phenom', p: /phenom\.com.*\/jobs/i },
-    { n: 'Avature', p: /avature\.net.*careers/i }, { n: 'Workable', p: /apply\.workable\.com/i },
-    { n: 'Career', p: /\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i }
+    { n: 'Greenhouse', p: /boards\.greenhouse\.io|greenhouse\.io.*\/jobs|grnh\.se/i },
+    { n: 'Lever', p: /jobs\.lever\.co|lever\.co\/.*\/apply/i },
+    { n: 'SmartRecruiters', p: /jobs\.smartrecruiters\.com|smartrecruiters\.com\/.*\/job/i },
+    { n: 'iCIMS', p: /icims\.com|\.icims\./i },
+    { n: 'Taleo', p: /taleo\.net|oraclecloud\.com.*CandidateExperience|taleo\./i },
+    { n: 'Oracle', p: /oraclecloud\.com.*recruit|oraclecloud\.com.*hcm/i },
+    { n: 'SuccessFactors', p: /successfactors\.com|successfactors\.eu/i },
+    { n: 'LinkedIn', p: /linkedin\.com\/jobs\/(view|application|search)/i },
+    { n: 'Indeed', p: /indeed\.com.*(viewjob|apply|job)|indeed\.\w+\/.*job/i },
+    // === Tier 2: Popular ATS ===
+    { n: 'Ashby', p: /jobs\.ashbyhq\.com|ashbyhq\.com\/.*\/jobs/i },
+    { n: 'BambooHR', p: /bamboohr\.com.*\/jobs/i },
+    { n: 'Jobvite', p: /jobs\.jobvite\.com|jobvite\.com/i },
+    { n: 'Breezy', p: /breezy\.hr|breezyhr\.com/i },
+    { n: 'Recruitee', p: /recruitee\.com\/o\//i },
+    { n: 'ADP', p: /adp\.com.*\/job|workforcenow\.adp|recruiting\.adp/i },
+    { n: 'Rippling', p: /ats\.rippling\.com/i },
+    { n: 'Dover', p: /app\.dover\.com/i },
+    { n: 'Dayforce', p: /dayforce\.com.*candidateportal|ceridian\.com/i },
+    { n: 'JazzHR', p: /app\.jazz\.co|applytojob\.com|jazz\.co/i },
+    { n: 'Fountain', p: /fountain\.com.*\/apply|fountain\.com\/jobs/i },
+    { n: 'Pinpoint', p: /pinpointhq\.com/i },
+    { n: 'Comeet', p: /comeet\.com.*\/jobs|comeet\.co/i },
+    { n: 'Personio', p: /personio\.de.*\/job|personio\.com/i },
+    { n: 'Workable', p: /apply\.workable\.com|workable\.com\/.*\/j\//i },
+    { n: 'UltiPro', p: /ultipro\.com|ukg\.com/i },
+    { n: 'Paylocity', p: /paylocity\.com.*Recruiting|recruiting\.paylocity/i },
+    { n: 'Phenom', p: /phenom\.com.*\/jobs|\.phenom\.com/i },
+    { n: 'Avature', p: /avature\.net/i },
+    // === Tier 3: Job boards ===
+    { n: 'ZipRecruiter', p: /ziprecruiter\.com/i },
+    { n: 'Monster', p: /monster\.com.*job/i },
+    { n: 'Glassdoor', p: /glassdoor\.com.*job|glassdoor\.\w+.*job/i },
+    { n: 'Dice', p: /dice\.com.*job/i },
+    { n: 'Wellfound', p: /wellfound\.com.*\/jobs|angel\.co\/.*\/jobs/i },
+    { n: 'SimplyHired', p: /simplyhired\.com/i },
+    { n: 'CareerBuilder', p: /careerbuilder\.com/i },
+    { n: 'Snagajob', p: /snagajob\.com/i },
+    { n: 'FlexJobs', p: /flexjobs\.com/i },
+    { n: 'Robert Half', p: /roberthalf\.com/i },
+    { n: 'Handshake', p: /joinhandshake\.com|app\.joinhandshake/i },
+    { n: 'Hired', p: /hired\.com/i },
+    { n: 'AngelList', p: /angel\.co/i },
+    { n: 'BuiltIn', p: /builtin\.com.*\/job/i },
+    { n: 'HiringCafe', p: /hiring\.cafe/i },
+    // === Tier 4: Additional ATS/HR platforms ===
+    { n: 'Teamtailor', p: /teamtailor\.com|career\.\w+\.teamtailor/i },
+    { n: 'Bullhorn', p: /bullhorn\.com|bullhornstaffing/i },
+    { n: 'Manatal', p: /manatal\.com/i },
+    { n: 'Kronos', p: /kronos\.net|ukg\.\w+/i },
+    { n: 'Hirebridge', p: /hirebridge\.com/i },
+    { n: 'ClearCompany', p: /clearcompany\.com/i },
+    { n: 'Paycom', p: /paycom\.com.*careers|paycomonline\.net/i },
+    { n: 'Newton', p: /newtonsoftware\.com/i },
+    { n: 'Zoho', p: /zoho\.com.*recruit|zohorecruit/i },
+    { n: 'Freshteam', p: /freshteam\.com/i },
+    { n: 'Recruitics', p: /recruitics\.com/i },
+    { n: 'Jobsoid', p: /jobsoid\.com/i },
+    { n: 'TalentLyft', p: /talentlyft\.com/i },
+    { n: 'Trakstar', p: /trakstar\.com|recruiterbox\.com/i },
+    { n: 'ApplicantPro', p: /applicantpro\.com/i },
+    { n: 'iSolved', p: /isolved\.com/i },
+    { n: 'Paychex', p: /paychex\.com.*careers|paychexflex/i },
+    { n: 'Cornerstone', p: /cornerstoneondemand\.com|csod\.com/i },
+    { n: 'Eightfold', p: /eightfold\.ai/i },
+    { n: 'Gem', p: /gem\.com\/.*jobs/i },
+    { n: 'Beamery', p: /beamery\.com/i },
+    { n: 'HireVue', p: /hirevue\.com/i },
+    { n: 'Criteria', p: /criteriacorp\.com/i },
+    { n: 'Prevue', p: /prevuehr\.com/i },
+    { n: 'Loxo', p: /loxo\.co/i },
+    { n: 'Crelate', p: /crelate\.com/i },
+    { n: 'PCRecruiter', p: /pcrecruiter\.net/i },
+    { n: 'ApplicantStack', p: /applicantstack\.com/i },
+    { n: 'CATS', p: /catsone\.com/i },
+    { n: 'Kenexa', p: /kenexa\.com|brasssring\.com|brassring\.com/i },
+    { n: 'SilkRoad', p: /silkroad\.com|hrsonline\.com/i },
+    { n: 'Lumesse', p: /lumesse\.com|talentlink/i },
+    { n: 'Sage', p: /sage\.com.*hr|sage\.hr/i },
+    { n: 'Harri', p: /harri\.com/i },
+    { n: 'Homebase', p: /joinhomebase\.com/i },
+    { n: 'Hireology', p: /hireology\.com/i },
+    { n: 'ApplyBoard', p: /applyboard\.com/i },
+    { n: 'Freshworks', p: /freshworks\.com.*careers/i },
+    { n: 'Hibob', p: /hibob\.com/i },
+    { n: 'Deputy', p: /deputy\.com/i },
+    { n: 'Gusto', p: /gusto\.com.*careers/i },
+    // === Tier 5: EU/International ATS ===
+    { n: 'HeyJobs', p: /heyjobs\.co/i },
+    { n: 'JOIN', p: /join\.com\/.*\/jobs/i },
+    { n: 'Recruitee', p: /recruitee\.com/i },
+    { n: 'Traffit', p: /traffit\.com/i },
+    { n: 'Recooty', p: /recooty\.com/i },
+    { n: 'Occupop', p: /occupop\.com/i },
+    { n: 'GoHire', p: /gohire\.io/i },
+    { n: 'Breezy', p: /breezy\.hr/i },
+    { n: 'RecruitNow', p: /recruitnow\.nl/i },
+    { n: 'OnlyFy', p: /onlyfy\.com/i },
+    // === Universal catch-all: any career/jobs/apply page ===
+    { n: 'Career', p: /\/careers?\/?$|\/careers?\/|\/jobs?\/?$|\/jobs?\/|\/apply\b|\/positions?\//i },
+    { n: 'JobPage', p: /\/job[-_]?(listing|opening|posting|detail|description|vacancy)|\/vacancy|\/vacancies|\/openings?|\/opportunities?\//i },
+    { n: 'Recruiting', p: /\/recruit(ing|ment)?\/|\/talent\/?|\/join.?us|\/work.?with.?us|\/job.?application/i }
   ];
 
+  // ===================== ATS =====================
+  function detectATS() {
+    // First: check URL patterns
+    for (const a of ATS) if (a.p.test(location.href)) return a.n;
+
+    // Second: universal job form detection — check page content
+    return detectJobFormOnPage();
+  }
+
+  // Universal job form detector — works on ANY website
+  function detectJobFormOnPage() {
+    // Check if there's a visible form with job-application-like fields
+    const forms = $$('form').filter(isVisible);
+    if (!forms.length) return null;
+
+    const pageText = (document.title + ' ' + document.body?.innerText?.slice(0, 3000) || '').toLowerCase();
+
+    // Strong indicators: page title or body mentions job/career/apply + form present
+    const jobPageIndicators = /apply\s*(for|now|here|to)|job\s*application|submit\s*(your\s*)?application|career|work\s*with\s*us|join\s*our\s*team|we.re\s*hiring|job\s*opening|position|vacancy|employment|resume|cover\s*letter|upload\s*your\s*cv/i;
+
+    if (jobPageIndicators.test(pageText)) {
+      // Verify: check that the form has at least 2 typical job fields
+      const allInputs = $$('input:not([type=hidden]):not([type=submit]),textarea,select').filter(isVisible);
+      let jobFieldCount = 0;
+      for (const inp of allInputs) {
+        const lbl = (getLabel(inp) || inp.name || inp.placeholder || '').toLowerCase();
+        if (/name|email|phone|resume|cv|cover|address|experience|education|linkedin|salary|start\s*date|work\s*auth|relocat|visa|citizen/i.test(lbl)) {
+          jobFieldCount++;
+        }
+      }
+      if (jobFieldCount >= 2) {
+        LOG('Universal detection: Job application form detected on page');
+        return 'JobForm';
+      }
+    }
+    return null;
+  }
+
+  function isWorkday() { return /myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href); }
+  function isJobright() { return /jobright\.ai/i.test(location.hostname); }
   // ===================== STORAGE & STATE =====================
   const st = {
     get: k => new Promise(r => chrome.storage.local.get(k, d => r(d[k]))),
