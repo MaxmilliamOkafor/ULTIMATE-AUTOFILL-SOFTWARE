@@ -173,12 +173,16 @@
   async function getProfile() {
     let p = (await st.get(SK.PROF)) || {};
     // Also check OptimHire candidate data
-    const ohData = await st.getMulti(['candidateDetails', 'userDetails']);
+    const ohData = await st.getMulti(['candidateDetails', 'userDetails', 'appAccountEmail', 'appAccountPassword']);
     try {
       const cd = typeof ohData.candidateDetails === 'string' ? JSON.parse(ohData.candidateDetails) : (ohData.candidateDetails || {});
       const ud = typeof ohData.userDetails === 'string' ? JSON.parse(ohData.userDetails) : (ohData.userDetails || {});
       p = { ...ud, ...cd, ...p };
     } catch (_) { }
+    // Pull application account credentials if available
+    if (ohData.appAccountEmail && !p.email) p.email = ohData.appAccountEmail;
+    if (ohData.appAccountPassword) p.appPassword = ohData.appAccountPassword;
+    if (ohData.appAccountPassword) p.password = ohData.appAccountPassword;
     return p;
   }
 
@@ -187,8 +191,11 @@
     const l = (label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
 
     // === PERSONAL INFO ===
-    if (/first.?name|given.?name|prenom/.test(l)) return p.first_name || p.firstName || '';
-    if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
+    if (/^login$|^user.?name$|^user.?id$/i.test(l)) return p.email || '';
+    if (/^password$|^pass$|^pwd$/i.test(l)) return p.password || p.appPassword || '';
+    if (/password.*re.?enter|re.?enter.*password|confirm.*password|password.*confirm/i.test(l)) return p.password || p.appPassword || '';
+    if (/first.?name|given.?name|prenom|legal.?first/i.test(l)) return p.first_name || p.firstName || '';
+    if (/last.?name|family.?name|surname|legal.?last/i.test(l)) return p.last_name || p.lastName || '';
     if (/middle.?name/.test(l)) return p.middle_name || '';
     if (/preferred.?name|nick.?name/.test(l)) return p.preferred_name || p.first_name || '';
     if (/full.?name|your name|^name$/.test(l) && !/company|last|first|user/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
@@ -562,6 +569,127 @@
       .forEach(cb => { realClick(cb); filled++; });
 
     LOG(`Fallback fill done: ${filled} fields filled`);
+
+    // === iCIMS-SPECIFIC HANDLING ===
+    if (/icims\.com/i.test(location.href)) {
+      filled += await icimsFill(p);
+    }
+
+    return filled;
+  }
+
+  // ===================== iCIMS-SPECIFIC FILL =====================
+  async function icimsFill(p) {
+    LOG('Running iCIMS-specific fill...');
+    let filled = 0;
+
+    // Fill Login field (usually email)
+    const loginInputs = $$('input').filter(el => isVisible(el) && !el.value?.trim());
+    for (const inp of loginInputs) {
+      const lbl = getLabel(inp) || inp.name || inp.id || '';
+      const ll = lbl.toLowerCase();
+      if (/^login$|user.?name|user.?id/i.test(ll) && !inp.value?.trim()) {
+        nativeSet(inp, p.email || ''); filled++;
+      }
+      if (/^password|^pwd/i.test(ll) && !inp.value?.trim() && inp.type === 'password') {
+        const pwd = p.password || p.appPassword || '';
+        if (pwd) { nativeSet(inp, pwd); filled++; }
+      }
+    }
+
+    // iCIMS Type dropdowns (Phone Type → "Mobile", Address Type → "Home")
+    const allSelects = $$('select').filter(isVisible);
+    for (const sel of allSelects) {
+      if (hasFieldValue(sel)) continue;
+      const lbl = (getLabel(sel) || sel.name || sel.id || '').toLowerCase();
+
+      // Phone Type → Mobile
+      if (/phone.*type|type.*phone/i.test(lbl) || (lbl === 'type' && sel.closest('[class*="phone"],[id*="phone"],[class*="Phone"]'))) {
+        const mobileOpt = $$('option', sel).find(o => /mobile|cell/i.test(o.text));
+        if (mobileOpt) { sel.value = mobileOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set Phone Type → Mobile'); }
+        else {
+          const firstOpt = $$('option', sel).find(o => o.value && o.index > 0);
+          if (firstOpt) { sel.value = firstOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        }
+        continue;
+      }
+
+      // Address Type → Home
+      if (/address.*type|type.*address/i.test(lbl) || (lbl === 'type' && sel.closest('[class*="address"],[id*="address"],[class*="Address"]'))) {
+        const homeOpt = $$('option', sel).find(o => /home|primary|residential/i.test(o.text));
+        if (homeOpt) { sel.value = homeOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set Address Type → Home'); }
+        else {
+          const firstOpt = $$('option', sel).find(o => o.value && o.index > 0);
+          if (firstOpt) { sel.value = firstOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        }
+        continue;
+      }
+
+      // Country → United States
+      if (/country/i.test(lbl)) {
+        const usOpt = $$('option', sel).find(o => /united states|usa|u\.?s\.?a?\.?$/i.test(o.text.trim()));
+        if (usOpt) { sel.value = usOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set Country → United States'); }
+        await sleep(500); // Wait for state dropdown to populate
+        continue;
+      }
+
+      // State/Province — set from profile or pick first valid
+      if (/state|province/i.test(lbl)) {
+        const stateVal = p.state || '';
+        if (stateVal) {
+          const stOpt = $$('option', sel).find(o => o.text.toLowerCase().includes(stateVal.toLowerCase()));
+          if (stOpt) { sel.value = stOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set State → ' + stateVal); }
+        }
+        continue;
+      }
+
+      // County — just pick first valid option if required
+      if (/county/i.test(lbl) && (sel.required || sel.getAttribute('aria-required') === 'true')) {
+        const firstOpt = $$('option', sel).find(o => o.value && o.index > 0);
+        if (firstOpt) { sel.value = firstOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        continue;
+      }
+
+      // Generic "Type" dropdown with no label context — pick first option
+      if (/^type$/i.test(lbl.trim())) {
+        const firstOpt = $$('option', sel).find(o => o.value && o.index > 0);
+        if (firstOpt) { sel.value = firstOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('iCIMS: Set generic Type → ' + firstOpt.text); }
+      }
+    }
+
+    // Fill address fields that may still be empty
+    const addrInputs = $$('input').filter(el => isVisible(el) && !el.value?.trim());
+    for (const inp of addrInputs) {
+      const lbl = (getLabel(inp) || inp.name || inp.id || '').toLowerCase();
+      if (/^address$|^address.?1$|^street/i.test(lbl) && p.address) { nativeSet(inp, p.address); filled++; }
+      if (/^city$/i.test(lbl) && p.city) { nativeSet(inp, p.city); filled++; }
+      if (/^zip|^postal/i.test(lbl) && (p.postal_code || p.zip)) { nativeSet(inp, p.postal_code || p.zip); filled++; }
+      if (/^county$/i.test(lbl) && p.county) { nativeSet(inp, p.county); filled++; }
+    }
+
+    // Also fill inside iCIMS iframes
+    const iframes = $$('iframe[src*="icims"]');
+    for (const frame of iframes) {
+      try {
+        const doc = frame.contentDocument || frame.contentWindow?.document;
+        if (doc) {
+          const inputs = [...doc.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')]
+            .filter(el => el.offsetWidth > 0);
+          for (const inp of inputs) {
+            if (inp.value?.trim()) continue;
+            const lbl = (doc.querySelector(`label[for="${inp.id}"]`)?.textContent || inp.name || inp.placeholder || '').trim();
+            const val = guessFieldValue(lbl, p, inp);
+            if (val && inp.tagName !== 'SELECT') { nativeSet(inp, val); filled++; }
+            else if (val && inp.tagName === 'SELECT') {
+              const opt = [...inp.querySelectorAll('option')].find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+              if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+            }
+          }
+        }
+      } catch (e) { /* cross-origin iframe */ }
+    }
+
+    LOG(`iCIMS fill done: ${filled} fields filled`);
     return filled;
   }
 
