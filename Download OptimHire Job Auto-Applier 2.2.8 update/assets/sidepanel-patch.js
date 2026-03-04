@@ -281,26 +281,76 @@
     _fieldMap = {};
   }
 
+  function firstNum() {
+    for (var i = 0; i < arguments.length; i++) {
+      var v = arguments[i];
+      if (typeof v === 'number' && !isNaN(v)) return v;
+    }
+    return null;
+  }
+
+  function readAutoApplyCounter(autoState) {
+    if (!autoState || typeof autoState !== 'object') return null;
+    var total = firstNum(
+      autoState.total,
+      autoState.totalJobs,
+      autoState.totalJobCount,
+      autoState.total_job_count,
+      autoState.queueTotal,
+      autoState.jobsCount,
+      Array.isArray(autoState.jobs) ? autoState.jobs.length : null,
+      Array.isArray(autoState.jobList) ? autoState.jobList.length : null
+    );
+    var applied = firstNum(
+      autoState.applied,
+      autoState.appliedCount,
+      autoState.appliedJobs,
+      autoState.successCount,
+      autoState.completed,
+      autoState.doneCount,
+      autoState.currentIndex,
+      autoState.currentJobIndex
+    );
+
+    if (typeof total === 'number' && typeof applied === 'number') {
+      return { total: Math.max(total, 0), applied: Math.max(applied, 0) };
+    }
+    return null;
+  }
+
   /* ── Live counter from storage ── */
   function syncCounter() {
     try {
-      chrome.storage.local.get('csvJobQueue', function (data) {
+      chrome.storage.local.get(['csvJobQueue', 'autoApplyState'], function (data) {
         if (chrome.runtime.lastError) return;
         var q = data.csvJobQueue || [];
-        if (!q.length) { hidePanel(); return; }
-        var done = 0, total = q.length, running = false;
-        for (var i = 0; i < q.length; i++) {
-          if (q[i].status === 'done') done++;
-          if (q[i].status === 'running') running = true;
+        var autoCounter = readAutoApplyCounter(data.autoApplyState);
+
+        if (q.length) {
+          var done = 0, total = q.length, running = false;
+          for (var i = 0; i < q.length; i++) {
+            if (q[i].status === 'done') done++;
+            if (q[i].status === 'running') running = true;
+          }
+          updateCounter(done, total);
+          if (running || _isRunning) { showPanel(); setPulse('active'); _isRunning = true; }
+          return;
         }
-        updateCounter(done, total);
-        if (running || _isRunning) { showPanel(); setPulse('active'); _isRunning = true; }
+
+        if (autoCounter) {
+          updateCounter(autoCounter.applied, autoCounter.total);
+          showPanel();
+          if (_isRunning || autoCounter.applied < autoCounter.total) setPulse('active');
+          return;
+        }
+
+        hidePanel();
       });
     } catch (_) {}
   }
   syncCounter();
   chrome.storage.onChanged.addListener(function (changes, area) {
-    if (area === 'local' && changes.csvJobQueue) syncCounter();
+    if (area === 'local' && (changes.csvJobQueue || changes.autoApplyState)) syncCounter();
   });
 
   /* ── MutationObserver fallback to kill referral cards React renders ── */
