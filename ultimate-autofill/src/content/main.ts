@@ -659,18 +659,14 @@ async function autoTriggerAutofill(): Promise<void> {
   try {
     isRunning = true;
 
-    // ─── TAILORING-FIRST FLOW ───
-    // Check if Jobright sidebar is present and tailoring is available
+    // ─── SKIP TAILORING on auto-trigger ───
+    // Do NOT automatically click Jobright sidebar buttons (Generate Custom Resume, etc.)
+    // This was corrupting the Jobright sidebar state and preventing Autofill from filling fields.
+    // Tailoring should only happen when explicitly requested via TRIGGER_TAILORING message.
     const sidebar = detectJobrightSidebar();
-    if (sidebar || isTailoringAvailable()) {
-      LOG('Auto-trigger: Jobright sidebar detected — running tailoring first');
-      if (statusEl) statusEl.textContent = `${ats.type} detected — tailoring resume...`;
-      send({ type: 'SIDEBAR_STATUS', event: 'tailoring_started', atsName: ats.type, url: location.href } as any);
-
-      const tailored = await runTailoringSteps();
-      LOG(`Auto-trigger: tailoring ${tailored ? 'completed' : 'skipped'}`);
-      if (statusEl) statusEl.textContent = tailored ? 'Resume tailored — autofilling...' : 'Tailoring skipped — autofilling...';
-      await sleep(1500);
+    if (sidebar) {
+      LOG('Auto-trigger: Jobright sidebar detected — skipping tailoring (let user use Jobright Autofill)');
+      if (statusEl) statusEl.textContent = `${ats.type} detected — filling form fields...`;
     }
 
     // ─── Run ATS navigation (click Apply buttons, etc.) ───

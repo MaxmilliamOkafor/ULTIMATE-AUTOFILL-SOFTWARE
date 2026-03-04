@@ -2037,9 +2037,6 @@
     }
     return null;
   }
-  function isTailoringAvailable() {
-    return !!(findButtonByText(/generate.*custom.*resume/i) || findButtonByText(/improve.*resume.*this.*job/i) || document.querySelector('[class*="resume-tailor"],[data-testid*="tailor"]'));
-  }
   async function runTailoringSteps() {
     LOG4("Starting tailoring workflow...");
     let genBtn = findButtonByText(/generate.*custom.*resume/i);
@@ -2743,16 +2740,10 @@
     try {
       isRunning = true;
       const sidebar = detectJobrightSidebar();
-      if (sidebar || isTailoringAvailable()) {
-        LOG5("Auto-trigger: Jobright sidebar detected \u2014 running tailoring first");
+      if (sidebar) {
+        LOG5("Auto-trigger: Jobright sidebar detected \u2014 skipping tailoring (let user use Jobright Autofill)");
         if (statusEl)
-          statusEl.textContent = `${ats.type} detected \u2014 tailoring resume...`;
-        send({ type: "SIDEBAR_STATUS", event: "tailoring_started", atsName: ats.type, url: location.href });
-        const tailored = await runTailoringSteps();
-        LOG5(`Auto-trigger: tailoring ${tailored ? "completed" : "skipped"}`);
-        if (statusEl)
-          statusEl.textContent = tailored ? "Resume tailored \u2014 autofilling..." : "Tailoring skipped \u2014 autofilling...";
-        await sleep4(1500);
+          statusEl.textContent = `${ats.type} detected \u2014 filling form fields...`;
       }
       await runAtsNavigation(ats.type);
       await atsSpecificFill(ats.type);
