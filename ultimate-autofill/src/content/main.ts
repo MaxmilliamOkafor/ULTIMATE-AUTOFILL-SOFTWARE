@@ -659,14 +659,16 @@ async function autoTriggerAutofill(): Promise<void> {
   try {
     isRunning = true;
 
-    // ─── SKIP TAILORING on auto-trigger ───
-    // Do NOT automatically click Jobright sidebar buttons (Generate Custom Resume, etc.)
-    // This was corrupting the Jobright sidebar state and preventing Autofill from filling fields.
-    // Tailoring should only happen when explicitly requested via TRIGGER_TAILORING message.
+    // ─── When Jobright sidebar is present, DO NOT auto-fill ───
+    // Our nativeSet fills corrupt the form's React state, causing Jobright's
+    // own Autofill to see fields as already filled while the form state says empty.
+    // This results in "1 out of 14 required fields filled". Let Jobright handle it.
     const sidebar = detectJobrightSidebar();
-    if (sidebar) {
-      LOG('Auto-trigger: Jobright sidebar detected — skipping tailoring (let user use Jobright Autofill)');
-      if (statusEl) statusEl.textContent = `${ats.type} detected — filling form fields...`;
+    if (sidebar || isTailoringAvailable()) {
+      LOG('Auto-trigger: Jobright sidebar detected — deferring to Jobright Autofill (no interference)');
+      isRunning = false;
+      _autoTriggerRunning = false;
+      return;
     }
 
     // ─── Run ATS navigation (click Apply buttons, etc.) ───

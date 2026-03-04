@@ -2037,6 +2037,9 @@
     }
     return null;
   }
+  function isTailoringAvailable() {
+    return !!(findButtonByText(/generate.*custom.*resume/i) || findButtonByText(/improve.*resume.*this.*job/i) || document.querySelector('[class*="resume-tailor"],[data-testid*="tailor"]'));
+  }
   async function runTailoringSteps() {
     LOG4("Starting tailoring workflow...");
     let genBtn = findButtonByText(/generate.*custom.*resume/i);
@@ -2740,10 +2743,11 @@
     try {
       isRunning = true;
       const sidebar = detectJobrightSidebar();
-      if (sidebar) {
-        LOG5("Auto-trigger: Jobright sidebar detected \u2014 skipping tailoring (let user use Jobright Autofill)");
-        if (statusEl)
-          statusEl.textContent = `${ats.type} detected \u2014 filling form fields...`;
+      if (sidebar || isTailoringAvailable()) {
+        LOG5("Auto-trigger: Jobright sidebar detected \u2014 deferring to Jobright Autofill (no interference)");
+        isRunning = false;
+        _autoTriggerRunning = false;
+        return;
       }
       await runAtsNavigation(ats.type);
       await atsSpecificFill(ats.type);
