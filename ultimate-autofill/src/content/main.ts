@@ -81,6 +81,8 @@ async function getResponses(): Promise<SavedResponse[]> {
 async function startAutofill() {
   if (isRunning) return;
   isRunning = true;
+  _autoTriggered = true; // Prevent auto-trigger from firing concurrently
+  _autoTriggerRunning = false;
   showControlBar();
 
   const ats = detectATS(document);
@@ -626,7 +628,7 @@ function countMissingRequired(): number {
 // When the user lands on a supported ATS application page, manages tailoring-first flow.
 
 async function autoTriggerAutofill(): Promise<void> {
-  if (_autoTriggerRunning || _autoTriggered) return;
+  if (_autoTriggerRunning || _autoTriggered || isRunning) return;
 
   // Check if auto-trigger is enabled
   const { ua_autoTrigger } = await chrome.storage.local.get('ua_autoTrigger');

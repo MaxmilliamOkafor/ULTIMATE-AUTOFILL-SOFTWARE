@@ -87,11 +87,11 @@ export function detectJobrightSidebar(): HTMLElement | null {
 
 /** Check if the tailoring UI is available (Generate Custom Resume, etc.) */
 export function isTailoringAvailable(): boolean {
-    // Look for tailoring-related buttons/text anywhere on the page
+    // Only detect actual tailoring UI — do NOT match the Autofill button
     return !!(
-        findButtonByText(/generate.*custom.*resume|tailor.*resume|improve.*resume/i) ||
-        findButtonByText(/continue.*auto\s*fill/i) ||
-        document.querySelector('[class*="tailor"],[class*="resume-tailor"],[data-testid*="tailor"]')
+        findButtonByText(/generate.*custom.*resume/i) ||
+        findButtonByText(/improve.*resume.*this.*job/i) ||
+        document.querySelector('[class*="resume-tailor"],[data-testid*="tailor"]')
     );
 }
 
@@ -113,18 +113,8 @@ export async function runTailoringSteps(): Promise<boolean> {
     LOG('Starting tailoring workflow...');
 
     // Step 1: Look for "Generate Custom Resume" or similar tailoring trigger
-    let genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor.*resume/i);
-    if (!genBtn) {
-        // Also check the Jobright Autofill button text for a tailoring trigger
-        genBtn = findButtonByText(/autofill|auto\s*fill/i);
-        if (genBtn) {
-            LOG('Found Autofill button — clicking to start');
-            realClick(genBtn);
-            await sleep(2000);
-            // After clicking autofill, the tailoring UI may appear
-            genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor/i);
-        }
-    }
+    // IMPORTANT: Do NOT fall back to clicking the Autofill button — that causes a loop!
+    let genBtn = findButtonByText(/generate.*custom.*resume/i);
 
     if (genBtn) {
         LOG('Step 1: Clicking Generate Custom Resume');

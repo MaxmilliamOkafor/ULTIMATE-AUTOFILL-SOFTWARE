@@ -1288,14 +1288,20 @@
 
   // ===================== AUTO-DISMISS CONFIRMATION DIALOGS =====================
   function dismissAutofillConfirm() {
-    // Handle "Are you sure to autofill again?" dialog — click CANCEL to prevent overwriting
+    // Handle "Are you sure to autofill again?" dialog — click YES to let autofill proceed
     const containers = [...$$('[class*="modal"],[class*="Modal"],[class*="dialog"],[class*="Dialog"],[class*="ant-modal"],[role="dialog"]'),
     ...allShadow('[class*="modal"],[class*="Modal"],[class*="dialog"],[role="dialog"]')];
     for (const m of containers) {
       if (/are you sure to autofill again|overwrite your current progress/i.test(m.textContent || '')) {
-        LOG('Overwrite dialog detected — clicking Cancel to preserve filled data');
-        const cancelBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => /^cancel$/i.test(b.textContent?.trim()));
-        if (cancelBtn) { realClick(cancelBtn); return true; }
+        LOG('Overwrite dialog detected — clicking Yes to proceed with autofill');
+        const yesBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => /^(yes|ok|confirm|continue|proceed)$/i.test(b.textContent?.trim()));
+        if (yesBtn) { realClick(yesBtn); return true; }
+        // Fallback: click any primary/colored button that's not cancel
+        const primaryBtn = [...m.querySelectorAll('button,a,[role="button"]')].find(b => {
+          const t = b.textContent?.trim().toLowerCase() || '';
+          return t && !/^(cancel|no|close|dismiss)$/i.test(t);
+        });
+        if (primaryBtn) { realClick(primaryBtn); return true; }
       }
     }
     return false;

@@ -2038,20 +2038,11 @@
     return null;
   }
   function isTailoringAvailable() {
-    return !!(findButtonByText(/generate.*custom.*resume|tailor.*resume|improve.*resume/i) || findButtonByText(/continue.*auto\s*fill/i) || document.querySelector('[class*="tailor"],[class*="resume-tailor"],[data-testid*="tailor"]'));
+    return !!(findButtonByText(/generate.*custom.*resume/i) || findButtonByText(/improve.*resume.*this.*job/i) || document.querySelector('[class*="resume-tailor"],[data-testid*="tailor"]'));
   }
   async function runTailoringSteps() {
     LOG4("Starting tailoring workflow...");
-    let genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor.*resume/i);
-    if (!genBtn) {
-      genBtn = findButtonByText(/autofill|auto\s*fill/i);
-      if (genBtn) {
-        LOG4("Found Autofill button \u2014 clicking to start");
-        realClick3(genBtn);
-        await sleep3(2e3);
-        genBtn = findButtonByText(/generate.*custom.*resume|generate.*resume|tailor/i);
-      }
-    }
+    let genBtn = findButtonByText(/generate.*custom.*resume/i);
     if (genBtn) {
       LOG4("Step 1: Clicking Generate Custom Resume");
       realClick3(genBtn);
@@ -2209,6 +2200,8 @@
     if (isRunning)
       return;
     isRunning = true;
+    _autoTriggered = true;
+    _autoTriggerRunning = false;
     showControlBar();
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
@@ -2724,7 +2717,7 @@
     return getMissingRequiredFields().length;
   }
   async function autoTriggerAutofill() {
-    if (_autoTriggerRunning || _autoTriggered)
+    if (_autoTriggerRunning || _autoTriggered || isRunning)
       return;
     const { ua_autoTrigger } = await chrome.storage.local.get("ua_autoTrigger");
     if (ua_autoTrigger === false)
