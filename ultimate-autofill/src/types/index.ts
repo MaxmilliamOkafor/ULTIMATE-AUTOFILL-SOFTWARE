@@ -232,7 +232,10 @@ export type MessageType =
   // One-click add to queue from content script
   | 'ADD_CURRENT_PAGE_TO_QUEUE'
   // AI Tailoring
-  | 'TAILOR_RESPONSE' | 'GET_TAILORING_STATUS';
+  | 'TAILOR_RESPONSE' | 'GET_TAILORING_STATUS'
+  // Answer Bank & Profile
+  | 'GET_ANSWER_BANK' | 'SAVE_ANSWER' | 'CLEAR_ANSWER_BANK'
+  | 'GET_PROFILE' | 'SAVE_PROFILE' | 'LEARN_FROM_PAGE';
 
 export interface ExtMessage {
   type: MessageType;

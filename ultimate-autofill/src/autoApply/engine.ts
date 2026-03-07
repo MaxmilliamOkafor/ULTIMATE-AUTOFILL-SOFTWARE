@@ -2,6 +2,7 @@
  * Auto-Apply Engine
  * Orchestrates the fully automatic job application pipeline.
  * Opens job URLs, detects ATS, runs autofill, optionally submits, closes tabs.
+ * Now includes multi-page support, success detection, and Workday automation.
  */
 
 import type { AutoApplyStatus, AutoApplySettings, JobQueueItem, JobStatus } from '../types/index';
@@ -24,8 +25,6 @@ let _status: AutoApplyStatus = {
 let _abortController: AbortController | null = null;
 let _appliedThisHour = 0;
 let _appliedToday = 0;
-let _hourResetTimer: ReturnType<typeof setInterval> | null = null;
-let _dayResetTimer: ReturnType<typeof setInterval> | null = null;
 
 // Rate limiting counters
 const RATE_KEY = 'ua_rate_limits';
@@ -81,8 +80,8 @@ function humanDelay(baseMs: number): Promise<void> {
  * 2. Open URL in a new tab
  * 3. Wait for page load
  * 4. Send START_AUTOFILL to the content script
- * 5. Wait for autofill completion
- * 6. Optionally auto-submit
+ * 5. Wait for autofill completion (with multi-page support)
+ * 6. Detect success or needs_input
  * 7. Update job status
  * 8. Close tab (if setting enabled)
  * 9. Wait for rate limit delay
@@ -158,7 +157,8 @@ async function processQueue(settings: AutoApplySettings, source?: 'all' | 'impor
     // Check if domain is allowed
     try {
       const domain = new URL(job.url).hostname;
-      const isAllowed = settings.domainAllowlist.some((d) => domain.includes(d));
+      const isAllowed = settings.domainAllowlist.length === 0 ||
+        settings.domainAllowlist.some((d) => domain.includes(d));
       if (!isAllowed) {
         await queue.updateStatus(job.id, 'skipped', 'Domain not in allowlist');
         _status.skippedJobs++;
@@ -181,8 +181,24 @@ async function processQueue(settings: AutoApplySettings, source?: 'all' | 'impor
       await incrementRateLimit();
     } catch (err) {
       console.error('[UA] Job failed:', job.url, err);
-      await queue.updateStatus(job.id, 'failed', String(err));
-      _status.failedJobs++;
+      // Retry logic
+      const retryCount = (job.retryCount || 0) + 1;
+      if (retryCount <= settings.retryFailedMax) {
+        await queue.updateStatus(job.id, 'not_started', `Retry ${retryCount}/${settings.retryFailedMax}: ${String(err)}`);
+        // Update retry count
+        const items = await queue.getItems();
+        const item = items.find((i) => i.id === job.id);
+        if (item) {
+          item.retryCount = retryCount;
+          const state = await queue.loadQueue();
+          const stateItem = state.items.find((i) => i.id === job.id);
+          if (stateItem) stateItem.retryCount = retryCount;
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      } else {
+        await queue.updateStatus(job.id, 'failed', String(err));
+        _status.failedJobs++;
+      }
     }
 
     _status.estimatedRemaining--;
@@ -233,8 +249,8 @@ async function processJob(job: JobQueueItem, settings: AutoApplySettings): Promi
     }
   }
 
-  // Wait for autofill to complete (with timeout)
-  const result = await waitForAutofillComplete(tab.id, job.id, 60000);
+  // Wait for autofill to complete (with extended timeout for multi-page)
+  const result = await waitForAutofillComplete(tab.id, job.id, 120000);
 
   if (result === 'applied') {
     await queue.updateStatus(job.id, 'applied');

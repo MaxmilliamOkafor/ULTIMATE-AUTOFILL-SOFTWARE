@@ -1788,6 +1788,726 @@
     };
   }
 
+  // src/answerBank/index.ts
+  var ANSWER_BANK_KEY = "ua_answer_bank";
+  var PROFILE_KEY = "ua_user_profile";
+  var _answerBank = {};
+  var _loaded = false;
+  function normalizeKey(s) {
+    return (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  async function loadAnswerBank() {
+    if (_loaded)
+      return _answerBank;
+    const r = await chrome.storage.local.get(ANSWER_BANK_KEY);
+    _answerBank = r[ANSWER_BANK_KEY] || {};
+    _loaded = true;
+    return _answerBank;
+  }
+  async function learnAnswer(label, value) {
+    if (!label || !value)
+      return;
+    const key = normalizeKey(label);
+    if (!key)
+      return;
+    _answerBank[key] = value;
+    await chrome.storage.local.set({ [ANSWER_BANK_KEY]: _answerBank });
+  }
+  function getLearnedAnswer(label, el) {
+    const candidates = [
+      label,
+      el?.getAttribute("name") || "",
+      el?.id || "",
+      el?.placeholder || "",
+      el?.getAttribute("aria-label") || ""
+    ].filter(Boolean);
+    for (const c of candidates) {
+      const k = normalizeKey(c);
+      if (_answerBank[k])
+        return _answerBank[k];
+    }
+    for (const c of candidates) {
+      const k = normalizeKey(c);
+      if (!k)
+        continue;
+      for (const [bk, bv] of Object.entries(_answerBank)) {
+        if (k.includes(bk) || bk.includes(k))
+          return bv;
+      }
+    }
+    return "";
+  }
+  async function learnFromPage(doc) {
+    await loadAnswerBank();
+    const selector = 'input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]),textarea,select';
+    const elements = doc.querySelectorAll(selector);
+    let learned = 0;
+    for (const el of elements) {
+      if (!isVisible(el))
+        continue;
+      if (!hasFieldValue(el))
+        continue;
+      const lbl = getFieldLabel(el);
+      if (!lbl)
+        continue;
+      let val;
+      if (el instanceof HTMLSelectElement) {
+        val = (el.options[el.selectedIndex]?.textContent || el.value || "").trim();
+      } else {
+        val = (el.value || "").trim();
+      }
+      if (val) {
+        await learnAnswer(lbl, val);
+        learned++;
+      }
+    }
+    return learned;
+  }
+  async function loadProfile() {
+    const r = await chrome.storage.local.get(PROFILE_KEY);
+    return r[PROFILE_KEY] || {};
+  }
+  function isVisible(el) {
+    if (!el)
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+  function hasFieldValue(el) {
+    if (el instanceof HTMLSelectElement) {
+      const val = (el.value || "").trim();
+      if (!val)
+        return false;
+      const idx = el.selectedIndex;
+      if (idx >= 0) {
+        const txt = (el.options[idx]?.textContent || "").trim().toLowerCase();
+        if (!txt || /^(select|choose|please|--|—)/.test(txt))
+          return false;
+      }
+      return true;
+    }
+    if (el instanceof HTMLInputElement) {
+      if (el.type === "checkbox" || el.type === "radio")
+        return !!el.checked;
+      return !!el.value?.trim();
+    }
+    if (el instanceof HTMLTextAreaElement)
+      return !!el.value?.trim();
+    return false;
+  }
+  function getFieldLabel(el) {
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel?.trim())
+      return ariaLabel.trim();
+    if (el.id) {
+      const lbl = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lbl?.textContent?.trim())
+        return lbl.textContent.trim();
+    }
+    if (el.placeholder?.trim())
+      return el.placeholder.trim();
+    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row');
+    if (container) {
+      const lbl = container.querySelector('label,[class*="label"],[class*="Label"]');
+      if (lbl && lbl !== el && lbl.textContent?.trim())
+        return lbl.textContent.trim();
+    }
+    const name = el.getAttribute("name");
+    if (name)
+      return name.replace(/[_\-]/g, " ");
+    return "";
+  }
+
+  // src/smartFill/valueGuesser.ts
+  var DEFAULTS = {
+    authorized: "Yes",
+    sponsorship: "No",
+    relocation: "Yes",
+    remote: "Yes",
+    veteran: "I am not a protected veteran",
+    disability: "I do not have a disability",
+    gender: "Prefer not to say",
+    ethnicity: "Prefer not to say",
+    race: "Prefer not to say",
+    years: "5",
+    salary: "80000",
+    notice: "2 weeks",
+    availability: "Immediately",
+    cover: "I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.",
+    why: "I admire the company culture and the opportunity to make a meaningful impact.",
+    howHeard: "LinkedIn"
+  };
+  function guessValue(label, profile) {
+    const l = (label || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ");
+    if (/first.?name|given.?name|prenom/.test(l))
+      return profile.first_name || "";
+    if (/last.?name|family.?name|surname/.test(l))
+      return profile.last_name || "";
+    if (/middle.?name/.test(l))
+      return profile.middle_name || "";
+    if (/preferred.?name|nick.?name/.test(l))
+      return profile.preferred_name || profile.first_name || "";
+    if (/full.?name|your name|^name$/.test(l) && !/company|last|first|user/.test(l))
+      return `${profile.first_name || ""} ${profile.last_name || ""}`.trim();
+    if (/\bemail\b/.test(l))
+      return profile.email || "";
+    if (/phone|mobile|cell|telephone/.test(l))
+      return profile.phone || "";
+    if (/^city$|\bcity\b|current.?city/.test(l))
+      return profile.city || "";
+    if (/state|province|region/.test(l))
+      return profile.state || "";
+    if (/zip|postal/.test(l))
+      return profile.postal_code || "";
+    if (/country/.test(l))
+      return profile.country || "United States";
+    if (/address|street/.test(l))
+      return profile.address || "";
+    if (/location|where.*(you|do you).*live/.test(l))
+      return profile.city ? `${profile.city}, ${profile.state || ""}`.trim().replace(/,$/, "") : "";
+    if (/linkedin/.test(l))
+      return profile.linkedin || "";
+    if (/github/.test(l))
+      return profile.github || "";
+    if (/website|portfolio|personal.?url/.test(l))
+      return profile.website || "";
+    if (/twitter|x\.com/.test(l))
+      return profile.twitter || "";
+    if (/university|school|college|alma.?mater/.test(l))
+      return profile.school || "";
+    if (/\bdegree\b|qualification/.test(l))
+      return profile.degree || "Bachelor's";
+    if (/major|field.?of.?study|concentration/.test(l))
+      return profile.major || "";
+    if (/gpa|grade.?point/.test(l))
+      return profile.gpa || "";
+    if (/graduation|grad.?date|grad.?year/.test(l))
+      return profile.graduation_year || "";
+    if (/title|position|role|current.?title|job.?title/.test(l) && !/company/.test(l))
+      return profile.current_title || "";
+    if (/company|employer|org|current.?company/.test(l))
+      return profile.current_company || "";
+    if (/salary|compensation|pay|desired.?pay/.test(l))
+      return profile.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.?info|message.?to/.test(l))
+      return profile.cover_letter || DEFAULTS.cover;
+    if (/summary|about.?(yourself|you|me)|bio|objective/.test(l))
+      return profile.summary || profile.cover_letter || DEFAULTS.cover;
+    if (/why.*(compan|role|want|interest|position)/.test(l))
+      return DEFAULTS.why;
+    if (/how.*hear|where.*(find|learn|discover)|source|referred/.test(l))
+      return DEFAULTS.howHeard;
+    if (/years.*(exp|work)|exp.*years|total.*experience/.test(l))
+      return DEFAULTS.years;
+    if (/availab|start.?date|notice|when.*start/.test(l))
+      return DEFAULTS.availability;
+    if (/authoriz|eligible|work.*right|legal.*right/.test(l))
+      return DEFAULTS.authorized;
+    if (/sponsor|visa|immigration|work.?permit/.test(l))
+      return DEFAULTS.sponsorship;
+    if (/relocat|willing.*move/.test(l))
+      return DEFAULTS.relocation;
+    if (/remote|work.*home|hybrid|on.?site/.test(l))
+      return DEFAULTS.remote;
+    if (/veteran|military|armed.?forces/.test(l))
+      return DEFAULTS.veteran;
+    if (/disabilit/.test(l))
+      return DEFAULTS.disability;
+    if (/gender|sex\b|pronouns/.test(l))
+      return DEFAULTS.gender;
+    if (/ethnic|race|racial|heritage/.test(l))
+      return DEFAULTS.ethnicity;
+    if (/nationality|citizenship/.test(l))
+      return profile.nationality || profile.country || "United States";
+    if (/language|fluency|fluent/.test(l))
+      return profile.languages || "English";
+    if (/certif|license|credential/.test(l))
+      return profile.certifications || "";
+    if (/commute|travel|willing.*travel/.test(l))
+      return "Yes";
+    if (/convicted|criminal|felony|background/.test(l))
+      return "No";
+    if (/drug.?test|screening/.test(l))
+      return "Yes";
+    if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l))
+      return "Yes";
+    if (/agree|acknowledge|certif|attest|confirm|consent/.test(l))
+      return "Yes";
+    if (/please.?specify|other.?please/.test(l))
+      return profile.city || profile.state || "";
+    return "";
+  }
+
+  // src/smartFill/fallbackFiller.ts
+  function isVisible2(el) {
+    if (!el)
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+  function nativeSet(el, val) {
+    try {
+      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter)
+        setter.call(el, val);
+      else
+        el.value = val;
+    } catch {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("blur", { bubbles: true }));
+  }
+  function realClick(el) {
+    if (!el)
+      return;
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.click();
+  }
+  function getLabel(el) {
+    if (!el)
+      return "";
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel?.trim())
+      return ariaLabel.trim();
+    if (el.id) {
+      const lbl = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lbl?.textContent?.trim())
+        return lbl.textContent.trim();
+    }
+    if (el.placeholder?.trim())
+      return el.placeholder.trim();
+    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row');
+    if (container) {
+      const lbl = container.querySelector('label,[class*="label"],[class*="Label"]');
+      if (lbl && lbl !== el && lbl.textContent?.trim())
+        return lbl.textContent.trim();
+    }
+    return el.getAttribute("name")?.replace(/[_\-]/g, " ") || "";
+  }
+  function hasFieldValue2(el) {
+    if (el instanceof HTMLSelectElement) {
+      const val = (el.value || "").trim();
+      if (!val)
+        return false;
+      const idx = el.selectedIndex;
+      if (idx >= 0) {
+        const txt = (el.options[idx]?.textContent || "").trim().toLowerCase();
+        if (!txt || /^(select|choose|please|--|—)/.test(txt))
+          return false;
+      }
+      return true;
+    }
+    if (el instanceof HTMLInputElement) {
+      if (el.type === "checkbox" || el.type === "radio")
+        return !!el.checked;
+      return !!el.value?.trim();
+    }
+    if (el instanceof HTMLTextAreaElement)
+      return !!el.value?.trim();
+    return false;
+  }
+  function isFieldRequired(el) {
+    if (el.required || el.getAttribute("aria-required") === "true")
+      return true;
+    const container = el.closest('.field,.question,[class*="field"],[class*="Field"],[class*="question"],li,div');
+    const label = getLabel(el);
+    if (/\*\s*$|required/i.test(label || ""))
+      return true;
+    if (container) {
+      if (container.classList.contains("required"))
+        return true;
+      if (container.getAttribute("data-required") === "true")
+        return true;
+      if (container.querySelector('.required,.asterisk,[aria-label*="required" i]'))
+        return true;
+    }
+    return false;
+  }
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  function guessFieldValue(label, profile, el) {
+    return guessValue(label, profile) || getLearnedAnswer(label, el) || "";
+  }
+  async function fallbackFill(doc, profile) {
+    await loadAnswerBank();
+    let filled = 0;
+    const inputs = Array.from(
+      doc.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]),textarea')
+    ).filter((el) => isVisible2(el) && !el.value?.trim());
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl)
+        continue;
+      const val = guessFieldValue(lbl, profile, inp);
+      if (!val)
+        continue;
+      inp.focus();
+      nativeSet(inp, val);
+      inp.classList.add("ua-filled");
+      filled++;
+      await sleep(60);
+    }
+    const selects = Array.from(doc.querySelectorAll("select")).filter(
+      (el) => isVisible2(el) && !hasFieldValue2(el)
+    );
+    for (const sel of selects) {
+      const lbl = getLabel(sel);
+      const val = guessFieldValue(lbl, profile, sel);
+      if (!val) {
+        const lblLower = (lbl || "").toLowerCase();
+        if (/gender|disability|veteran|race|ethnicity|sex\b|heritage/i.test(lblLower)) {
+          const opts = Array.from(sel.options).filter((o) => o.value && o.index > 0);
+          const fb = opts.find((o) => /prefer not|decline|not to|do not|don.t wish/i.test(o.text));
+          if (fb) {
+            sel.value = fb.value;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            sel.classList.add("ua-filled");
+            filled++;
+          }
+        }
+        continue;
+      }
+      const opt = Array.from(sel.options).find(
+        (o) => o.text.toLowerCase().includes(val.toLowerCase())
+      );
+      if (opt) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        sel.classList.add("ua-filled");
+        filled++;
+      } else {
+        const opts = Array.from(sel.options).filter((o) => o.value && o.index > 0);
+        if (opts.length) {
+          sel.value = opts[0].value;
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          sel.classList.add("ua-filled");
+          filled++;
+        }
+      }
+    }
+    const groups = {};
+    const radios = Array.from(doc.querySelectorAll('input[type="radio"]')).filter(isVisible2);
+    for (const r of radios) {
+      const key = r.name || r.id;
+      if (!key)
+        continue;
+      (groups[key] ||= []).push(r);
+    }
+    for (const [, radioGroup] of Object.entries(groups)) {
+      if (radioGroup.some((r) => r.checked))
+        continue;
+      const lbl = getLabel(radioGroup[0]);
+      const guess = guessFieldValue(lbl, profile, radioGroup[0]);
+      const match = radioGroup.find((r) => {
+        const labelEl = r.id ? doc.querySelector(`label[for="${CSS.escape(r.id)}"]`) : null;
+        const t = (labelEl?.textContent || r.value || "").toLowerCase();
+        return guess && t.includes(guess.toLowerCase());
+      });
+      if (match) {
+        realClick(match);
+        filled++;
+        continue;
+      }
+      const yesRadio = radioGroup.find((r) => {
+        const labelEl = r.id ? doc.querySelector(`label[for="${CSS.escape(r.id)}"]`) : null;
+        const t = (labelEl?.textContent || r.value || "").toLowerCase().trim();
+        return ["yes", "true", "1"].includes(t);
+      });
+      if (yesRadio) {
+        realClick(yesRadio);
+        filled++;
+      }
+    }
+    const requiredCheckboxes = Array.from(
+      doc.querySelectorAll(
+        'input[type="checkbox"][required],input[type="checkbox"][aria-required="true"]'
+      )
+    ).filter((el) => isVisible2(el) && !el.checked);
+    for (const cb of requiredCheckboxes) {
+      realClick(cb);
+      filled++;
+    }
+    return filled;
+  }
+  function getMissingRequired(doc) {
+    const required = Array.from(
+      doc.querySelectorAll('input:not([type="hidden"]),textarea,select')
+    ).filter((el) => isVisible2(el) && isFieldRequired(el));
+    const missing = [];
+    for (const el of required) {
+      if (el instanceof HTMLInputElement && el.type === "radio" && el.name) {
+        const group = Array.from(
+          doc.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`)
+        ).filter(isVisible2);
+        if (group.some((r) => r.checked))
+          continue;
+      } else if (el instanceof HTMLInputElement && el.type === "checkbox" && !el.checked) {
+      } else if (hasFieldValue2(el)) {
+        continue;
+      }
+      const lbl = getLabel(el) || el.getAttribute("name") || el.id || "Required field";
+      if (!missing.includes(lbl))
+        missing.push(lbl);
+    }
+    return missing;
+  }
+
+  // src/smartFill/successDetector.ts
+  function checkSuccess(doc) {
+    const href = (doc.location?.href || "").toLowerCase();
+    if (/\/thanks|\/thank.you|\/success|\/confirmation|\/submitted|\/done|\/complete/i.test(href)) {
+      return true;
+    }
+    const body = doc.body?.innerText || "";
+    if (/application submitted|thank you for applying|application received|we.ve received your|successfully submitted|application complete|thanks for applying|your application has been|application was submitted/i.test(body)) {
+      return true;
+    }
+    const confirmationSelectors = [
+      "#application_confirmation",
+      ".application-confirmation",
+      ".confirmation-text",
+      ".posting-confirmation",
+      '[data-automation-id="congratulationsMessage"]',
+      '[data-automation-id="confirmationMessage"]',
+      ".success-message",
+      ".submission-confirmation",
+      '[data-testid="application-success"]',
+      '[data-testid="confirmation-page"]'
+    ];
+    for (const sel of confirmationSelectors) {
+      if (doc.querySelector(sel))
+        return true;
+    }
+    return false;
+  }
+  function findNextButton(doc) {
+    const nextSelectors = [
+      'button[data-automation-id="bottom-navigation-next-button"]',
+      'button[data-automation-id="pageFooterNextButton"]',
+      'button[data-automation-id="next-button"]',
+      'button[aria-label*="Next" i]',
+      'button[aria-label*="Continue" i]',
+      '[data-testid="next-step"]',
+      '[data-testid="continue"]',
+      ".btn-next",
+      ".next-button"
+    ];
+    for (const sel of nextSelectors) {
+      const btn = doc.querySelector(sel);
+      if (btn && btn.offsetParent !== null)
+        return btn;
+    }
+    const allBtns = doc.querySelectorAll('button,a[role="button"]');
+    for (const btn of allBtns) {
+      const t = (btn.textContent || "").trim().toLowerCase();
+      if (/^(next|continue|proceed|save.*continue|review)\b/i.test(t) && !/cancel|back|prev|close/i.test(t) && btn.offsetParent !== null) {
+        return btn;
+      }
+    }
+    return null;
+  }
+  function findSubmitButton(doc) {
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button[data-automation-id="submit"]',
+      'button[data-automation-id="submitButton"]',
+      "#submit_app",
+      ".postings-btn-submit",
+      "button.application-submit",
+      'button[data-qa="btn-submit"]',
+      'button[aria-label*="Submit" i]',
+      '[data-testid="submit-application"]',
+      '[data-testid="submit-button"]',
+      '[data-testid="apply-button"]',
+      "button.btn-submit",
+      'button[aria-label="Submit application"]',
+      'button[aria-label="Apply"]'
+    ];
+    for (const sel of submitSelectors) {
+      const btn = doc.querySelector(sel);
+      if (btn && btn.offsetParent !== null)
+        return btn;
+    }
+    const allBtns = doc.querySelectorAll('button,a[role="button"],input[type="submit"]');
+    for (const btn of allBtns) {
+      const t = (btn.textContent || btn.value || "").trim().toLowerCase();
+      if (/^(submit|apply|send|complete|finish)\b/i.test(t) && !/cancel|back|prev|close/i.test(t) && btn.offsetParent !== null) {
+        return btn;
+      }
+    }
+    return null;
+  }
+
+  // src/smartFill/multiPageHandler.ts
+  var MAX_PAGES = 10;
+  function sleep2(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  function realClick2(el) {
+    if (!el)
+      return;
+    el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.click();
+  }
+  async function autoSubmitOrNext(doc) {
+    await learnFromPage(doc);
+    const missing = getMissingRequired(doc);
+    if (missing.length === 0) {
+      const submitBtn = findSubmitButton(doc);
+      if (submitBtn) {
+        await sleep2(500);
+        realClick2(submitBtn);
+        return "submitted";
+      }
+    }
+    const nextBtn = findNextButton(doc);
+    if (nextBtn) {
+      await sleep2(500);
+      realClick2(nextBtn);
+      return "next_page";
+    }
+    if (missing.length > 0) {
+      const submitBtn = findSubmitButton(doc);
+      if (submitBtn) {
+        await sleep2(500);
+        realClick2(submitBtn);
+        return "submitted";
+      }
+    }
+    return "no_action";
+  }
+  async function multiPageLoop(doc, fillPageFn, profile) {
+    const userProfile = profile || await loadProfile();
+    let totalFilled = 0;
+    let finalAction = "no_action";
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      if (checkSuccess(doc)) {
+        return { pagesProcessed: page - 1, success: true, finalAction, totalFieldsFilled: totalFilled };
+      }
+      await sleep2(2e3);
+      const primaryFilled = await fillPageFn();
+      totalFilled += primaryFilled;
+      await sleep2(1e3);
+      const fallback1 = await fallbackFill(doc, userProfile);
+      totalFilled += fallback1;
+      await sleep2(500);
+      const fallback2 = await fallbackFill(doc, userProfile);
+      totalFilled += fallback2;
+      const action = await autoSubmitOrNext(doc);
+      finalAction = action;
+      if (action === "submitted") {
+        await sleep2(3e3);
+        const success = checkSuccess(doc);
+        return { pagesProcessed: page, success, finalAction: action, totalFieldsFilled: totalFilled };
+      } else if (action === "next_page") {
+        await sleep2(3e3);
+        continue;
+      } else {
+        await sleep2(2e3);
+        const extra = await fallbackFill(doc, userProfile);
+        totalFilled += extra;
+        const retry = await autoSubmitOrNext(doc);
+        finalAction = retry;
+        if (retry !== "no_action") {
+          await sleep2(3e3);
+          const success = retry === "submitted" ? checkSuccess(doc) : false;
+          return { pagesProcessed: page, success, finalAction: retry, totalFieldsFilled: totalFilled };
+        }
+        break;
+      }
+    }
+    return { pagesProcessed: MAX_PAGES, success: false, finalAction, totalFieldsFilled: totalFilled };
+  }
+
+  // src/smartFill/workdayAutomation.ts
+  function sleep3(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  function isVisible3(el) {
+    if (!el)
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+  function realClick3(el) {
+    if (!el)
+      return;
+    el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    el.click();
+  }
+  function waitFor(doc, selector, timeout, xpath = false) {
+    return new Promise((resolve) => {
+      const find = () => {
+        if (xpath) {
+          return doc.evaluate(selector, doc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        }
+        return doc.querySelector(selector);
+      };
+      const el = find();
+      if (el) {
+        resolve(el);
+        return;
+      }
+      const observer2 = new MutationObserver(() => {
+        const el2 = find();
+        if (el2) {
+          observer2.disconnect();
+          resolve(el2);
+        }
+      });
+      observer2.observe(doc.body || doc.documentElement, { childList: true, subtree: true });
+      setTimeout(() => {
+        observer2.disconnect();
+        resolve(null);
+      }, timeout);
+    });
+  }
+  async function workdayNavigateToForm(doc) {
+    const allBtns = doc.querySelectorAll("a, button");
+    for (const b of allBtns) {
+      if (/^\s*Apply\s*$/i.test(b.textContent || "") && isVisible3(b)) {
+        realClick3(b);
+        await sleep3(2e3);
+        break;
+      }
+    }
+    const applyManually = await waitFor(doc, "//*[@data-automation-id='applyManually']", 8e3, true);
+    if (applyManually) {
+      await sleep3(500);
+      realClick3(applyManually);
+      await sleep3(2e3);
+    }
+    const formPageSelectors = [
+      "[data-automation-id='quickApplyPage']",
+      "[data-automation-id='applyFlowAutoFillPage']",
+      "[data-automation-id='contactInformationPage']",
+      "[data-automation-id='applyFlowMyInfoPage']",
+      "[data-automation-id='ApplyFlowPage']"
+    ].join(",");
+    const formPage = await waitFor(doc, formPageSelectors, 1e4);
+    if (formPage) {
+      await sleep3(1e3);
+      return true;
+    }
+    return false;
+  }
+  function isWorkdayPage(url) {
+    return /myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i.test(url);
+  }
+
   // src/content/main.ts
   var isRunning = false;
   var observer = null;
@@ -1840,6 +2560,7 @@
     const credits = await send({ type: "CHECK_CREDITS" });
     if (!credits?.ok || !credits.data?.unlimited && credits.data?.remaining <= 0)
       return;
+    await loadAnswerBank();
     if (!isRunning) {
       await startAutofill();
     }
@@ -1850,23 +2571,77 @@
       return;
     isRunning = true;
     showControlBar();
+    await loadAnswerBank();
     const ats = detectATS(document);
     const adapter = getAdapter(ats.type);
     const responses = await getResponses();
     const jobContext = extractJobContext(document);
+    if (isWorkdayPage(location.href)) {
+      updateControlBar(0, 0, "Navigating Workday form...");
+      const reached = await workdayNavigateToForm(document);
+      if (!reached) {
+        updateControlBar(0, 0, "Workday form not found - trying direct fill");
+      }
+    }
     const fillResult = await fillPage(adapter, responses, ats.type, jobContext);
+    const profile = await loadProfile();
+    await randomDelay(500, 1e3);
+    const fallbackCount = await fallbackFill(document, profile);
+    if (fallbackCount > 0) {
+      updateControlBar(fillResult.filled + fallbackCount, fillResult.total + fallbackCount, `${fillResult.filled + fallbackCount} fields filled (${fallbackCount} by smart fill)`);
+    }
     observer = new MutationObserver(async (mutations) => {
       if (!isRunning)
         return;
       const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
       if (hasNewNodes) {
         await fillPage(adapter, responses, ats.type, jobContext);
+        await fallbackFill(document, profile);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    if (autoSubmitEnabled && fillResult.filled > 0) {
-      await attemptAutoSubmit(ats.type, fillResult.filled, fillResult.total);
+    if (autoSubmitEnabled && (fillResult.filled > 0 || fallbackCount > 0)) {
+      await handleAutoSubmitFlow(ats.type, fillResult.filled + fallbackCount, fillResult.total + fallbackCount, adapter, responses, jobContext, profile);
     }
+  }
+  async function handleAutoSubmitFlow(atsType, filledCount, totalCount, adapter, responses, jobContext, profile) {
+    if (!autoSubmitEnabled)
+      return;
+    await randomDelay(1e3, 2e3);
+    const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
+    if (resumeInput && !resumeInput.files?.length) {
+      const settingsR = await send({ type: "GET_SETTINGS" });
+      if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
+        updateControlBar(filledCount, totalCount, "Resume required - manual upload needed");
+        reportCompletion("needs_input");
+        return;
+      }
+    }
+    const fillPageFn = async () => {
+      const result2 = await fillPage(adapter, responses, atsType, jobContext);
+      const fb = await fallbackFill(document, profile);
+      return result2.filled + fb;
+    };
+    const result = await multiPageLoop(document, fillPageFn, profile);
+    if (result.success) {
+      updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, "Application submitted successfully!");
+      reportCompletion("applied");
+    } else if (result.finalAction === "submitted") {
+      updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, "Application submitted!");
+      reportCompletion("applied");
+    } else if (result.finalAction === "next_page") {
+      updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, `Processed ${result.pagesProcessed} pages`);
+      reportCompletion("prefilled");
+    } else {
+      if (checkSuccess(document)) {
+        updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, "Application submitted!");
+        reportCompletion("applied");
+      } else {
+        updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, "Form filled - manual review needed");
+        reportCompletion("needs_input");
+      }
+    }
+    await learnFromPage(document);
   }
   function stopAutofill() {
     isRunning = false;
@@ -1911,65 +2686,6 @@
     }
     updateControlBar(filled, matches.length);
     return { filled, total: matches.length };
-  }
-  async function attemptAutoSubmit(atsType, filledCount, totalCount) {
-    if (!autoSubmitEnabled)
-      return;
-    await randomDelay(1e3, 2e3);
-    const submitBtn = findSubmitButton();
-    if (!submitBtn) {
-      reportCompletion("needs_input");
-      return;
-    }
-    const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
-    if (resumeInput && !resumeInput.files?.length) {
-      const settingsR = await send({ type: "GET_SETTINGS" });
-      if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
-        updateControlBar(filledCount, totalCount, "Resume required - manual upload needed");
-        reportCompletion("needs_input");
-        return;
-      }
-    }
-    try {
-      submitBtn.click();
-      await randomDelay(500, 1e3);
-      updateControlBar(filledCount, totalCount, "Application submitted!");
-      reportCompletion("applied");
-    } catch {
-      reportCompletion("prefilled");
-    }
-  }
-  function findSubmitButton() {
-    const selectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button[data-automation-id="bottom-navigation-next-button"]',
-      // Workday
-      'button[data-automation-id="submitButton"]',
-      "#submit_app",
-      // Greenhouse
-      ".btn-submit",
-      "button.application-submit",
-      '[data-qa="btn-submit"]',
-      'button[aria-label="Submit application"]',
-      'button[aria-label="Submit"]',
-      'button[aria-label="Apply"]',
-      '[data-testid="submit-button"]',
-      '[data-testid="apply-button"]'
-    ];
-    for (const sel of selectors) {
-      const btn = document.querySelector(sel);
-      if (btn && btn.offsetParent !== null)
-        return btn;
-    }
-    const allButtons = document.querySelectorAll('button, input[type="submit"], a.btn');
-    for (const btn of allButtons) {
-      const text = btn.textContent?.toLowerCase().trim() || "";
-      if ((text.includes("submit") || text.includes("apply") || text.includes("send application")) && !text.includes("cancel") && !text.includes("back") && btn.offsetParent !== null) {
-        return btn;
-      }
-    }
-    return null;
   }
   function reportCompletion(status) {
     send({
@@ -2153,7 +2869,7 @@
     const el = e.target;
     if (!isTextareaLike(el))
       return;
-    const label = getFieldLabel(el);
+    const label = getFieldLabel2(el);
     if (!label)
       return;
     const r = await send({ type: "GET_SUGGESTIONS", payload: { query: label, domain: location.hostname } });
@@ -2174,13 +2890,13 @@
     if (el.contentEditable === "true")
       return true;
     if (el instanceof HTMLInputElement && el.type === "text") {
-      const label = getFieldLabel(el);
+      const label = getFieldLabel2(el);
       if (label && label.length > 30)
         return true;
     }
     return false;
   }
-  function getFieldLabel(el) {
+  function getFieldLabel2(el) {
     if (el.id) {
       const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (lbl?.textContent?.trim())

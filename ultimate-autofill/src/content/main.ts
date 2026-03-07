@@ -1,8 +1,9 @@
 /**
  * Content script - runs on every page.
  * Handles autofill orchestration, ATS detection, universal form detection,
- * AI tailoring, one-click queue button, auto-apply, and MutationObserver
- * for dynamic pages.
+ * AI tailoring, answer bank learning, fallback filling, multi-page form
+ * handling, success detection, Workday automation, one-click queue button,
+ * auto-apply, and MutationObserver for dynamic pages.
  */
 
 import type { ExtMessage, FieldMatchResult, SavedResponse, ATSType, TailoringContext } from '../types/index';
@@ -11,6 +12,11 @@ import { getAdapter } from '../adapters/index';
 import { matchFields } from '../fieldMatcher/index';
 import { findMatches } from '../savedResponses/matcher';
 import { extractJobContext, tailorResponse } from '../autoApply/tailoring';
+import { loadAnswerBank, learnFromPage, loadProfile } from '../answerBank/index';
+import { fallbackFill, getMissingRequired } from '../smartFill/fallbackFiller';
+import { checkSuccess, findNextButton, findSubmitButton as findSubmitBtn } from '../smartFill/successDetector';
+import { multiPageLoop, autoSubmitOrNext } from '../smartFill/multiPageHandler';
+import { workdayNavigateToForm, isWorkdayPage } from '../smartFill/workdayAutomation';
 
 let isRunning = false;
 let observer: MutationObserver | null = null;
@@ -84,6 +90,9 @@ async function handleAutoDetectFill() {
   const credits = await send({ type: 'CHECK_CREDITS' });
   if (!credits?.ok || (!credits.data?.unlimited && credits.data?.remaining <= 0)) return;
 
+  // Load answer bank for this session
+  await loadAnswerBank();
+
   // Auto-start autofill
   if (!isRunning) {
     await startAutofill();
@@ -99,6 +108,9 @@ async function startAutofill() {
 
   showControlBar();
 
+  // Load answer bank
+  await loadAnswerBank();
+
   const ats = detectATS(document);
   const adapter = getAdapter(ats.type);
   const responses = await getResponses();
@@ -106,8 +118,25 @@ async function startAutofill() {
   // Extract job context for AI tailoring
   const jobContext = extractJobContext(document);
 
+  // Workday-specific: navigate to the form first
+  if (isWorkdayPage(location.href)) {
+    updateControlBar(0, 0, 'Navigating Workday form...');
+    const reached = await workdayNavigateToForm(document);
+    if (!reached) {
+      updateControlBar(0, 0, 'Workday form not found - trying direct fill');
+    }
+  }
+
   // Initial fill with tailoring
   const fillResult = await fillPage(adapter, responses, ats.type, jobContext);
+
+  // Fallback fill to catch fields the primary autofill missed
+  const profile = await loadProfile();
+  await randomDelay(500, 1000);
+  const fallbackCount = await fallbackFill(document, profile);
+  if (fallbackCount > 0) {
+    updateControlBar(fillResult.filled + fallbackCount, fillResult.total + fallbackCount, `${fillResult.filled + fallbackCount} fields filled (${fallbackCount} by smart fill)`);
+  }
 
   // Watch for dynamic changes (multi-step forms)
   observer = new MutationObserver(async (mutations) => {
@@ -115,15 +144,79 @@ async function startAutofill() {
     const hasNewNodes = mutations.some((m) => m.addedNodes.length > 0);
     if (hasNewNodes) {
       await fillPage(adapter, responses, ats.type, jobContext);
+      // Run fallback on new content too
+      await fallbackFill(document, profile);
     }
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Auto-submit if enabled and form is fully filled
-  if (autoSubmitEnabled && fillResult.filled > 0) {
-    await attemptAutoSubmit(ats.type, fillResult.filled, fillResult.total);
+  // Auto-submit if enabled
+  if (autoSubmitEnabled && (fillResult.filled > 0 || fallbackCount > 0)) {
+    await handleAutoSubmitFlow(ats.type, fillResult.filled + fallbackCount, fillResult.total + fallbackCount, adapter, responses, jobContext, profile);
   }
+}
+
+/**
+ * Enhanced auto-submit flow with multi-page support and success detection.
+ */
+async function handleAutoSubmitFlow(
+  atsType: ATSType,
+  filledCount: number,
+  totalCount: number,
+  adapter: ReturnType<typeof getAdapter>,
+  responses: SavedResponse[],
+  jobContext: TailoringContext,
+  profile: Awaited<ReturnType<typeof loadProfile>>,
+) {
+  if (!autoSubmitEnabled) return;
+
+  // Wait for any dynamic updates to settle
+  await randomDelay(1000, 2000);
+
+  // Check if resume is required but missing
+  const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
+  if (resumeInput && !(resumeInput as HTMLInputElement).files?.length) {
+    const settingsR = await send({ type: 'GET_SETTINGS' });
+    if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
+      updateControlBar(filledCount, totalCount, 'Resume required - manual upload needed');
+      reportCompletion('needs_input');
+      return;
+    }
+  }
+
+  // Use multi-page handler for the full flow
+  const fillPageFn = async () => {
+    const result = await fillPage(adapter, responses, atsType, jobContext);
+    const fb = await fallbackFill(document, profile);
+    return result.filled + fb;
+  };
+
+  const result = await multiPageLoop(document, fillPageFn, profile);
+
+  if (result.success) {
+    updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, 'Application submitted successfully!');
+    reportCompletion('applied');
+  } else if (result.finalAction === 'submitted') {
+    // Submitted but couldn't confirm success
+    updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, 'Application submitted!');
+    reportCompletion('applied');
+  } else if (result.finalAction === 'next_page') {
+    updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, `Processed ${result.pagesProcessed} pages`);
+    reportCompletion('prefilled');
+  } else {
+    // Check for success one more time
+    if (checkSuccess(document)) {
+      updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, 'Application submitted!');
+      reportCompletion('applied');
+    } else {
+      updateControlBar(result.totalFieldsFilled, result.totalFieldsFilled, 'Form filled - manual review needed');
+      reportCompletion('needs_input');
+    }
+  }
+
+  // Learn from the final page state
+  await learnFromPage(document);
 }
 
 function stopAutofill() {
@@ -181,87 +274,6 @@ async function fillPage(
 
   updateControlBar(filled, matches.length);
   return { filled, total: matches.length };
-}
-
-/**
- * Attempt auto-submit after form is filled.
- * Safety guards:
- * - Only submits if auto-submit is explicitly enabled
- * - Checks for resume upload presence
- * - Looks for submit/apply buttons
- * - Sends completion report back to background
- */
-async function attemptAutoSubmit(atsType: ATSType, filledCount: number, totalCount: number) {
-  if (!autoSubmitEnabled) return;
-
-  // Wait for any dynamic updates to settle
-  await randomDelay(1000, 2000);
-
-  // Find the submit/apply button
-  const submitBtn = findSubmitButton();
-  if (!submitBtn) {
-    reportCompletion('needs_input');
-    return;
-  }
-
-  // Check if resume is required but missing
-  const resumeInput = document.querySelector('input[type="file"][accept*=".pdf"], input[type="file"][accept*=".doc"], input[name*="resume"], input[name*="cv"]');
-  if (resumeInput && !(resumeInput as HTMLInputElement).files?.length) {
-    // Check settings - if resume is required, don't submit
-    const settingsR = await send({ type: 'GET_SETTINGS' });
-    if (settingsR?.ok && settingsR.data?.autoApply?.requireResumeForSubmit) {
-      updateControlBar(filledCount, totalCount, 'Resume required - manual upload needed');
-      reportCompletion('needs_input');
-      return;
-    }
-  }
-
-  // Click the submit button
-  try {
-    submitBtn.click();
-    await randomDelay(500, 1000);
-    updateControlBar(filledCount, totalCount, 'Application submitted!');
-    reportCompletion('applied');
-  } catch {
-    reportCompletion('prefilled');
-  }
-}
-
-function findSubmitButton(): HTMLElement | null {
-  // Priority order of selectors for submit/apply buttons
-  const selectors = [
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button[data-automation-id="bottom-navigation-next-button"]', // Workday
-    'button[data-automation-id="submitButton"]',
-    '#submit_app', // Greenhouse
-    '.btn-submit',
-    'button.application-submit',
-    '[data-qa="btn-submit"]',
-    'button[aria-label="Submit application"]',
-    'button[aria-label="Submit"]',
-    'button[aria-label="Apply"]',
-    '[data-testid="submit-button"]',
-    '[data-testid="apply-button"]',
-  ];
-
-  for (const sel of selectors) {
-    const btn = document.querySelector(sel) as HTMLElement;
-    if (btn && btn.offsetParent !== null) return btn;
-  }
-
-  // Fallback: find button with submit/apply text
-  const allButtons = document.querySelectorAll('button, input[type="submit"], a.btn');
-  for (const btn of allButtons) {
-    const text = btn.textContent?.toLowerCase().trim() || '';
-    if ((text.includes('submit') || text.includes('apply') || text.includes('send application')) &&
-        !text.includes('cancel') && !text.includes('back') &&
-        (btn as HTMLElement).offsetParent !== null) {
-      return btn as HTMLElement;
-    }
-  }
-
-  return null;
 }
 
 function reportCompletion(status: string) {

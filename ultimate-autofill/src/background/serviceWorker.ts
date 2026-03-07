@@ -6,6 +6,7 @@ import * as queue from '../jobQueue/storage';
 import * as settings from '../settings/storage';
 import * as autoApply from '../autoApply/engine';
 import * as scraper from '../autoApply/scraper';
+import * as answerBankModule from '../answerBank/index';
 
 chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
   handleMessage(msg).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
@@ -238,6 +239,21 @@ async function handleMessage(msg: ExtMessage): Promise<ExtResponse> {
       const s = await settings.loadSettings();
       return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
     }
+
+    // ─── Answer Bank & Profile ───
+    case 'GET_ANSWER_BANK':
+      return { ok: true, data: await answerBankModule.loadAnswerBank() };
+    case 'SAVE_ANSWER':
+      await answerBankModule.learnAnswer(p.label, p.value);
+      return { ok: true };
+    case 'CLEAR_ANSWER_BANK':
+      await chrome.storage.local.remove('ua_answer_bank');
+      return { ok: true };
+    case 'GET_PROFILE':
+      return { ok: true, data: await answerBankModule.loadProfile() };
+    case 'SAVE_PROFILE':
+      await answerBankModule.saveProfile(p);
+      return { ok: true };
 
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };

@@ -1006,7 +1006,7 @@ async function processQueue(settings, source) {
     }
     try {
       const domain = new URL(job.url).hostname;
-      const isAllowed = settings.domainAllowlist.some((d) => domain.includes(d));
+      const isAllowed = settings.domainAllowlist.length === 0 || settings.domainAllowlist.some((d) => domain.includes(d));
       if (!isAllowed) {
         await updateStatus(job.id, "skipped", "Domain not in allowlist");
         _status.skippedJobs++;
@@ -1027,8 +1027,23 @@ async function processQueue(settings, source) {
       await incrementRateLimit();
     } catch (err) {
       console.error("[UA] Job failed:", job.url, err);
-      await updateStatus(job.id, "failed", String(err));
-      _status.failedJobs++;
+      const retryCount = (job.retryCount || 0) + 1;
+      if (retryCount <= settings.retryFailedMax) {
+        await updateStatus(job.id, "not_started", `Retry ${retryCount}/${settings.retryFailedMax}: ${String(err)}`);
+        const items = await getItems();
+        const item = items.find((i) => i.id === job.id);
+        if (item) {
+          item.retryCount = retryCount;
+          const state = await loadQueue();
+          const stateItem = state.items.find((i) => i.id === job.id);
+          if (stateItem)
+            stateItem.retryCount = retryCount;
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      } else {
+        await updateStatus(job.id, "failed", String(err));
+        _status.failedJobs++;
+      }
     }
     _status.estimatedRemaining--;
     if (settings.humanLikePacing) {
@@ -1065,7 +1080,7 @@ async function processJob(job, settings) {
       throw new Error(`Cannot inject content script: ${e}`);
     }
   }
-  const result = await waitForAutofillComplete(tab.id, job.id, 6e4);
+  const result = await waitForAutofillComplete(tab.id, job.id, 12e4);
   if (result === "applied") {
     await updateStatus(job.id, "applied");
   } else if (result === "prefilled") {
@@ -1201,6 +1216,39 @@ function stopScraper() {
     clearInterval(_scraperInterval);
     _scraperInterval = null;
   }
+}
+
+// src/answerBank/index.ts
+var ANSWER_BANK_KEY = "ua_answer_bank";
+var PROFILE_KEY = "ua_user_profile";
+var _answerBank = {};
+var _loaded = false;
+function normalizeKey(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+}
+async function loadAnswerBank() {
+  if (_loaded)
+    return _answerBank;
+  const r = await chrome.storage.local.get(ANSWER_BANK_KEY);
+  _answerBank = r[ANSWER_BANK_KEY] || {};
+  _loaded = true;
+  return _answerBank;
+}
+async function learnAnswer(label, value) {
+  if (!label || !value)
+    return;
+  const key = normalizeKey(label);
+  if (!key)
+    return;
+  _answerBank[key] = value;
+  await chrome.storage.local.set({ [ANSWER_BANK_KEY]: _answerBank });
+}
+async function loadProfile() {
+  const r = await chrome.storage.local.get(PROFILE_KEY);
+  return r[PROFILE_KEY] || {};
+}
+async function saveProfile(profile) {
+  await chrome.storage.local.set({ [PROFILE_KEY]: profile });
 }
 
 // src/background/serviceWorker.ts
@@ -1404,6 +1452,19 @@ async function handleMessage(msg) {
       const s = await loadSettings();
       return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
     }
+    case "GET_ANSWER_BANK":
+      return { ok: true, data: await loadAnswerBank() };
+    case "SAVE_ANSWER":
+      await learnAnswer(p.label, p.value);
+      return { ok: true };
+    case "CLEAR_ANSWER_BANK":
+      await chrome.storage.local.remove("ua_answer_bank");
+      return { ok: true };
+    case "GET_PROFILE":
+      return { ok: true, data: await loadProfile() };
+    case "SAVE_PROFILE":
+      await saveProfile(p);
+      return { ok: true };
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
