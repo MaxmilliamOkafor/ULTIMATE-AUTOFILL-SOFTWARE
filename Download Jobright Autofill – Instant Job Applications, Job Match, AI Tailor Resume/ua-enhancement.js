@@ -1,5 +1,5 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v7.0 ===
-// Tailor-first flow, answer-learning, fallback form-fill, auto-submit, profile editor, enhanced multi-page
+// === ULTIMATE AUTOFILL ENHANCEMENT v8.0 ===
+// ATS-specific flows (Greenhouse, Lever, iCIMS, LinkedIn), resume upload, error recovery, keyboard shortcuts, CSV export
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
@@ -661,15 +661,21 @@
     }
     await sleep(2000);
 
-    // Step 5: Fallback fill to catch missed fields
+    // Step 5: Try resume upload if needed
+    await tryResumeUpload();
+
+    // Step 6: Fallback fill to catch missed fields
     LOG('Step 4: Running fallback fill for missed fields');
     await fallbackFill();
     await sleep(1000);
     // Second pass
     await fallbackFill();
-    await sleep(1000);
+    await sleep(500);
+    // Fix any validation errors
+    await handleValidationErrors();
+    await sleep(500);
 
-    // Step 6: Auto submit or next
+    // Step 7: Auto submit or next
     LOG('Step 5: Auto-submit/next');
     const result = await autoSubmitOrNext();
 
@@ -712,11 +718,13 @@
       await triggerAutofill();
       await sleep(3000);
 
-      // Fallback fill — two passes
+      // Fallback fill — two passes + validation fix
       await fallbackFill();
       await sleep(1000);
       await fallbackFill();
       await sleep(500);
+      await handleValidationErrors();
+      await sleep(300);
 
       // Submit or next
       const action = await autoSubmitOrNext();
@@ -797,6 +805,321 @@
     }
   }
 
+  // ===================== GREENHOUSE AUTOMATION =====================
+  async function greenhouseAutomation() {
+    LOG('Greenhouse automation starting...');
+    // Greenhouse has a simple single/multi-page form
+    // Wait for the application form
+    const form = await waitFor('#application_form,#application,.application-form,.main-content form', 10000);
+    if (!form) { LOG('No Greenhouse form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Check for "Apply with LinkedIn" or similar quick-apply buttons — skip them
+    const quickApply = $('button[data-source="LinkedIn"],a[data-source="LinkedIn"],.quick-apply-button');
+    // We want the full application form, not quick apply
+
+    // Run tailor-first (sidebar autofill + fallback)
+    await tailorFirstFlow();
+  }
+
+  // ===================== LEVER AUTOMATION =====================
+  async function leverAutomation() {
+    LOG('Lever automation starting...');
+    // Lever uses a simple form at /apply
+    const applyLink = $('a.posting-btn-submit,a[data-qa="show-page-apply"],.apply-button a,.postings-btn-submit');
+    if (applyLink && isVisible(applyLink) && !location.href.includes('/apply')) {
+      LOG('Clicking Lever Apply button');
+      realClick(applyLink);
+      await sleep(3000);
+    }
+    // Wait for form
+    const form = await waitFor('.application-form,#application-form,.postings-form,form[action*="apply"]', 10000);
+    if (!form) { LOG('No Lever form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+    await tailorFirstFlow();
+  }
+
+  // ===================== iCIMS AUTOMATION =====================
+  async function icimsAutomation() {
+    LOG('iCIMS automation starting...');
+    // iCIMS often has an "Apply" link that opens a new page or iframe
+    const applyBtn = $('a.iCIMS_MainLink[href*="apply"],a[title*="Apply"],a.header-apply-button,.iCIMS_ApplyLink,button.applyButton');
+    if (applyBtn && isVisible(applyBtn)) {
+      LOG('Clicking iCIMS Apply button');
+      realClick(applyBtn);
+      await sleep(4000);
+    }
+    // iCIMS can load in an iframe
+    const iframe = $('iframe[src*="icims"],iframe[name*="icims"]');
+    if (iframe) {
+      LOG('iCIMS iframe detected — content script cannot access cross-origin iframe, proceeding with main page');
+    }
+    // Wait for form fields
+    await waitFor('.iCIMS_InfoMsg_Job,.iCIMS_Forms_Region,form,.applicant-form', 8000);
+    await sleep(1500);
+    await tailorFirstFlow();
+  }
+
+  // ===================== LINKEDIN EASY APPLY =====================
+  async function linkedinEasyApply() {
+    LOG('LinkedIn Easy Apply automation starting...');
+    // Click the Easy Apply button if on a job listing
+    const easyApplyBtn = await findByText('button', /easy apply/i, 5000);
+    if (easyApplyBtn && isVisible(easyApplyBtn)) {
+      LOG('Clicking Easy Apply button');
+      realClick(easyApplyBtn);
+      await sleep(2000);
+    }
+    // Wait for the modal form
+    const modal = await waitFor('.jobs-easy-apply-modal,.jobs-easy-apply-content,[class*="easy-apply"],.artdeco-modal', 8000);
+    if (!modal) { LOG('LinkedIn Easy Apply modal not found'); return; }
+    await sleep(1500);
+
+    // LinkedIn Easy Apply has multiple pages — loop through them
+    const MAX_STEPS = 8;
+    for (let step = 1; step <= MAX_STEPS; step++) {
+      LOG(`LinkedIn Easy Apply: step ${step}`);
+      await sleep(1000);
+
+      // Fill visible fields
+      const p = await getProfile();
+      await loadAnswerBank();
+      const fields = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select', modal)
+        .filter(el => isVisible(el) && !hasFieldValue(el));
+      for (const field of fields) {
+        const lbl = getLabel(field);
+        if (!lbl) continue;
+        const val = guessFieldValue(lbl, p, field);
+        if (!val) continue;
+        if (field.tagName === 'SELECT') {
+          const opt = $$('option', field).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+          if (opt) { field.value = opt.value; field.dispatchEvent(new Event('change', {bubbles:true})); }
+        } else {
+          field.focus(); nativeSet(field, val);
+        }
+        await sleep(80);
+      }
+
+      // Check for required radio groups
+      const radioGroups = {};
+      $$('input[type=radio]', modal).filter(isVisible).forEach(r => { (radioGroups[r.name||r.id]||=[]).push(r); });
+      for (const [, radios] of Object.entries(radioGroups)) {
+        if (radios.some(r => r.checked)) continue;
+        const lbl = getLabel(radios[0]);
+        const guess = guessFieldValue(lbl, p, radios[0]);
+        const match = radios.find(r => {
+          const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+          return guess && t.includes(guess.toLowerCase());
+        });
+        if (match) realClick(match);
+        else {
+          const yes = radios.find(r => /yes|true/i.test(r.value || $(`label[for="${CSS.escape(r.id)}"]`)?.textContent || ''));
+          if (yes) realClick(yes);
+        }
+      }
+
+      // Look for Next / Review / Submit
+      const nextBtn = modal.querySelector('button[aria-label*="next" i],button[aria-label*="Continue" i],button[data-easy-apply-next-button]');
+      const reviewBtn = modal.querySelector('button[aria-label*="Review" i]');
+      const submitBtn = modal.querySelector('button[aria-label*="Submit" i],button[data-control-name="submit_unify"]');
+
+      if (submitBtn && isVisible(submitBtn)) {
+        LOG('LinkedIn: clicking Submit');
+        await sleep(500);
+        realClick(submitBtn);
+        await sleep(2000);
+        // Check for success
+        const dismiss = modal.querySelector('button[aria-label*="Dismiss" i],button[data-control-name="close_artdeco_modal"]');
+        if (dismiss) { LOG('LinkedIn: Application submitted successfully!'); realClick(dismiss); }
+        return;
+      }
+      if (reviewBtn && isVisible(reviewBtn)) {
+        LOG('LinkedIn: clicking Review');
+        realClick(reviewBtn);
+        await sleep(2000);
+        continue;
+      }
+      if (nextBtn && isVisible(nextBtn)) {
+        LOG('LinkedIn: clicking Next');
+        realClick(nextBtn);
+        await sleep(2000);
+        continue;
+      }
+
+      // Fallback: text-based button search
+      const allBtns = $$('button', modal).filter(isVisible);
+      const txtBtn = allBtns.find(b => /^(submit|next|continue|review)\b/i.test((b.textContent||'').trim()));
+      if (txtBtn) { realClick(txtBtn); await sleep(2000); continue; }
+
+      LOG('LinkedIn: No next/submit button found — stopping');
+      break;
+    }
+  }
+
+  // ===================== RESUME/FILE UPLOAD AUTOMATION =====================
+  async function tryResumeUpload() {
+    // Look for file input fields (resume, cover letter)
+    const fileInputs = $$('input[type="file"]').filter(el => {
+      const lbl = getLabel(el);
+      return /resume|cv|cover.?letter|document|upload/i.test(lbl || el.name || el.id || el.accept || '');
+    });
+    if (!fileInputs.length) return false;
+
+    // Check if Jobright sidebar has a resume ready
+    const sidebar = $('#jobright-helper-id');
+    if (!sidebar) return false;
+
+    // Look for "Download Resume" or similar button in sidebar
+    const dlBtn = sidebar.querySelector('a[download],a[href*="resume"],button[class*="download"],.download-resume-button');
+    if (dlBtn) {
+      LOG('Found resume download button in Jobright sidebar — resume upload handled by sidebar');
+      return true;
+    }
+
+    // Check for drag-and-drop upload zones
+    const dropZones = $$('[class*="dropzone"],[class*="upload-area"],[class*="file-drop"],[class*="dz-clickable"],.upload-container,.file-upload-area')
+      .filter(isVisible);
+    if (dropZones.length) {
+      LOG('Drop zones found — Jobright sidebar handles resume upload');
+    }
+    return false;
+  }
+
+  // ===================== FORM VALIDATION ERROR HANDLER =====================
+  async function handleValidationErrors() {
+    // Wait a moment for validation to trigger
+    await sleep(500);
+    const errors = $$('.error,.field-error,.error-message,.validation-error,[class*="error"],[class*="Error"],.invalid-feedback,.help-block.with-errors,.field-validation-error,[aria-invalid="true"],[data-error]')
+      .filter(el => isVisible(el) && el.textContent?.trim());
+
+    if (!errors.length) return 0;
+    LOG(`Found ${errors.length} validation errors — attempting to fix`);
+
+    let fixed = 0;
+    const p = await getProfile();
+    for (const errEl of errors) {
+      // Find the associated input
+      const container = errEl.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],li,.form-item,.ant-form-item,.MuiFormControl-root,fieldset,div');
+      if (!container) continue;
+      const inp = container.querySelector('input:not([type=hidden]):not([type=file]),textarea,select');
+      if (!inp || hasFieldValue(inp)) continue;
+
+      const lbl = getLabel(inp);
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', {bubbles:true})); fixed++; }
+      } else {
+        inp.focus(); nativeSet(inp, val); fixed++;
+      }
+      await sleep(60);
+    }
+
+    // Also handle aria-invalid fields directly
+    const invalidFields = $$('[aria-invalid="true"]').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of invalidFields) {
+      const lbl = getLabel(inp);
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      inp.focus(); nativeSet(inp, val); fixed++;
+      await sleep(60);
+    }
+
+    LOG(`Fixed ${fixed} validation errors`);
+    return fixed;
+  }
+
+  // ===================== ERROR RECOVERY & RETRY =====================
+  async function withRetry(fn, label, maxRetries) {
+    maxRetries = maxRetries || 2;
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        LOG(`${label} failed (attempt ${attempt}/${maxRetries + 1}):`, err?.message || err);
+        if (attempt <= maxRetries) {
+          await sleep(1000 * attempt); // Progressive backoff
+          // Check for validation errors and try to fix them
+          await handleValidationErrors();
+        } else {
+          throw err;
+        }
+      }
+    }
+  }
+
+  // ===================== KEYBOARD SHORTCUTS =====================
+  function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      // Only when no input is focused
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      if (!e.altKey) return;
+
+      switch (e.key.toLowerCase()) {
+        case 'a': // Alt+A: Toggle auto-apply
+          e.preventDefault();
+          const tog = document.getElementById('ua-aa');
+          if (tog) { tog.checked = !tog.checked; tog.dispatchEvent(new Event('change')); }
+          break;
+        case 'q': // Alt+Q: Toggle drawer
+          e.preventDefault();
+          const d = document.getElementById('ua-drawer');
+          if (d) { d.classList.toggle('open'); positionDrawer(); }
+          break;
+        case 'f': // Alt+F: Run fallback fill
+          e.preventDefault();
+          LOG('Manual fallback fill triggered via Alt+F');
+          fallbackFill();
+          break;
+        case 's': // Alt+S: Start/stop queue
+          e.preventDefault();
+          if (qActive) stopQ(); else startQ();
+          break;
+        case 'j': // Alt+J: Add current page to queue
+          e.preventDefault();
+          addJob(location.href, document.title);
+          break;
+        case 'p': // Alt+P: Pause/resume queue
+          e.preventDefault();
+          if (qPaused) resumeQ(); else if (qActive) pauseQ();
+          break;
+        case 'n': // Alt+N: Skip current job
+          e.preventDefault();
+          if (qActive) skipJob();
+          break;
+        case 'e': // Alt+E: Export queue to CSV
+          e.preventDefault();
+          exportQueueCSV();
+          break;
+      }
+    });
+  }
+
+  // ===================== EXPORT QUEUE TO CSV =====================
+  function exportQueueCSV() {
+    if (!queue.length) { LOG('No jobs to export'); return; }
+    const header = 'URL,Title,Status,Added\n';
+    const rows = queue.map(j => {
+      const url = j.url.replace(/"/g, '""');
+      const title = (j.title || '').replace(/"/g, '""');
+      const date = j.addedAt ? new Date(j.addedAt).toISOString() : '';
+      return `"${url}","${title}","${j.status}","${date}"`;
+    }).join('\n');
+    const csv = header + rows;
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `job-queue-${new Date().toISOString().slice(0,10)}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    LOG(`Exported ${queue.length} jobs to CSV`);
+  }
+
   // ===================== RESUME TAILORING (on Jobright website) =====================
   async function resumeTailoringAutomation() {
     if (!isJobright() || (!location.href.includes('plugin_tailor=1') && !location.href.includes('/jobs/info/'))) return;
@@ -828,9 +1151,15 @@
       try {
         const p = new URL(c.url).pathname;
         if (location.href.includes(p.slice(0, Math.min(p.length, 25)))) {
-          // We're on the right page — run tailor-first flow
-          if (isWorkday()) await workdayAutomation();
-          else await tailorFirstFlow();
+          // We're on the right page — run ATS-specific flow
+          await withRetry(async () => {
+            if (isWorkday()) await workdayAutomation();
+            else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+            else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+            else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+            else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+            else await tailorFirstFlow();
+          }, 'Queue job automation');
 
           // Wait and check success — try multiple times
           let success = false;
@@ -1085,6 +1414,18 @@
           <div class="ua-qlist" id="ua-qlist"></div>
           <div class="ua-qsum" id="ua-qsum"></div>
           <div class="ua-qbtns" id="ua-qbtns"></div>
+          <button id="ua-export" style="width:100%;margin-top:6px;padding:6px;background:none;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280">Export Queue to CSV</button>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Keyboard Shortcuts</div>
+          <div style="font-size:10px;color:#6b7280;line-height:1.8">
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+Q</kbd> Toggle panel</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+A</kbd> Auto-apply on/off</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+F</kbd> Fill form now</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+J</kbd> Add page to queue</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+S</kbd> Start/stop queue</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+E</kbd> Export CSV</div>
+          </div>
         </div>
       </div>`;
     document.body.appendChild(dw);
@@ -1149,6 +1490,10 @@
       autoApply = e.target.checked; await st.set(SK.AA, autoApply); updateStat();
       if (autoApply && detectATS()) {
         if (isWorkday()) workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) leverAutomation();
+        else if (/icims\.com/i.test(location.href)) icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) linkedinEasyApply();
         else tailorFirstFlow();
       }
     });
@@ -1163,6 +1508,7 @@
     document.getElementById('ua-add').addEventListener('click', () => { const i = document.getElementById('ua-url'); if (i.value.trim()) { addJob(i.value.trim()); i.value = ''; } });
     document.getElementById('ua-url').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('ua-add').click(); });
     document.getElementById('ua-selall').addEventListener('change', e => { if (e.target.checked) queue.forEach(j => selected.add(j.id)); else selected.clear(); renderQ(); });
+    document.getElementById('ua-export')?.addEventListener('click', exportQueueCSV);
     document.getElementById('ua-del').addEventListener('click', removeSelected);
 
     // Answer bank
@@ -1270,7 +1616,7 @@
   // ===================== INIT =====================
   async function init() {
     if (window.self !== window.top) return;
-    await load(); await loadAnswerBank(); injectCSS(); buildUI();
+    await load(); await loadAnswerBank(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
     // Update answer bank count in UI
@@ -1280,10 +1626,14 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // Auto-start tailor-first flow when ATS is detected and auto-apply is on
+      // Auto-start ATS-specific flow when detected and auto-apply is on
       if (autoApply) {
         await sleep(2000);
         if (isWorkday()) await workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+        else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
         else await tailorFirstFlow();
       }
     }
