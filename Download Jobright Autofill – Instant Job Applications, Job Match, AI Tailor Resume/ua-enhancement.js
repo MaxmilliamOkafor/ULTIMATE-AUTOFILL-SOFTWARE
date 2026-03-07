@@ -1148,7 +1148,7 @@
     const gpaInput = $('input[data-automation-id="gpa"], [data-automation-id="formField-gradeAverage"] input');
     if (gpaInput && !gpaInput.value && p.gpa) nativeSet(gpaInput, p.gpa);
 
-    // Date fields (firstYearAttended, lastYearAttended)
+    // Date fields — Strategy 1: firstYearAttended/lastYearAttended
     const startYear = $('[data-automation-id="formField-firstYearAttended"] input, [data-automation-id="formField-startDate"] input');
     const endYear = $('[data-automation-id="formField-lastYearAttended"] input, [data-automation-id="formField-endDate"] input');
     if (startYear && !startYear.value && p.graduation_year) {
@@ -1156,6 +1156,27 @@
       nativeSet(startYear, start.toString());
     }
     if (endYear && !endYear.value && p.graduation_year) nativeSet(endYear, p.graduation_year);
+
+    // Date fields — Strategy 2: SpeedyApply dateSectionMonth/Year-input pattern
+    const eduDateStartYear = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const eduDateStartMonth = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    const eduDateEndYear = xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const eduDateEndMonth = xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (eduDateStartYear && !eduDateStartYear.value && p.graduation_year) nativeSet(eduDateStartYear, (parseInt(p.graduation_year)-4).toString());
+    if (eduDateStartMonth && !eduDateStartMonth.value) nativeSet(eduDateStartMonth, '09');
+    if (eduDateEndYear && !eduDateEndYear.value && p.graduation_year) nativeSet(eduDateEndYear, p.graduation_year);
+    if (eduDateEndMonth && !eduDateEndMonth.value) nativeSet(eduDateEndMonth, '05');
+
+    // Strategy 3: SpeedyApply indexed education sections (education-1, education-2, etc.)
+    const eduSections = xpathAll('//div[starts-with(@data-automation-id,"education-")]');
+    if (eduSections.length) {
+      for (const sec of eduSections) {
+        const secSchool = sec.querySelector('input[data-automation-id="school"]');
+        if (secSchool && !secSchool.value && school) { nativeSet(secSchool, school); await sleep(100); }
+        const secDegree = sec.querySelector('button[data-automation-id="degree"]:not([disabled])');
+        if (secDegree) await selectFromWorkdayDropdown(secDegree, degree);
+      }
+    }
 
     // iCIMS date fields (Month/Day/Year selects)
     const icimsStartMonth = xpath("//select[contains(@id,'CandProfileFields.EducationStartDate_Month')]");
@@ -1230,6 +1251,23 @@
     if (expEndMonth) { expEndMonth.value = '12'; expEndMonth.dispatchEvent(new Event('change',{bubbles:true})); }
     if (expEndYear && !expEndYear.value) nativeSet(expEndYear, new Date().getFullYear().toString());
 
+    // SpeedyApply dateSectionMonth/Year-input for experience dates
+    const expDateStartYear = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const expDateStartMonth = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (expDateStartYear && !expDateStartYear.value && p.work_start_year) nativeSet(expDateStartYear, p.work_start_year);
+    if (expDateStartMonth && !expDateStartMonth.value) nativeSet(expDateStartMonth, '01');
+
+    // SpeedyApply indexed workExperience sections
+    const expSections = xpathAll('//div[starts-with(@data-automation-id,"workExperience-")]');
+    for (const sec of expSections) {
+      const secTitle = sec.querySelector('input[data-automation-id="jobTitle"]');
+      const secCompany = sec.querySelector('input[data-automation-id="company"]');
+      const secLoc = sec.querySelector('input[data-automation-id="location"]');
+      if (secTitle && !secTitle.value && title) nativeSet(secTitle, title);
+      if (secCompany && !secCompany.value && company) nativeSet(secCompany, company);
+      if (secLoc && !secLoc.value && loc) nativeSet(secLoc, loc);
+    }
+
     LOG('Workday: experience fields filled (enhanced)');
   }
 
@@ -1247,25 +1285,81 @@
     // Disability
     const disBtn = $('button[data-automation-id="disabilityStatus"]:not([disabled])');
     if (disBtn) await selectFromWorkdayDropdown(disBtn, DEFAULTS.disability);
+    // Hispanic/Latino dropdown (SpeedyApply pattern)
+    const hispBtn = $('button[data-automation-id="hispanicOrLatino"]:not([disabled]), [name="hispanicOrLatino"]');
+    if (hispBtn) await selectFromWorkdayDropdown(hispBtn, 'I choose not to disclose');
+
+    // SpeedyApply: ethnicity multi-checkbox groups
+    const ethCheckboxes = $$('[data-automation-id="ethnicityPrompt"] [role="cell"],[data-automation-id="ethnicityMulti-CheckboxGroup"] [role="cell"]');
+    if (ethCheckboxes.length) {
+      for (const cell of ethCheckboxes) {
+        const lbl = cell.querySelector('label');
+        const cb = cell.querySelector('input[type="checkbox"]');
+        if (lbl && cb && /choose not|decline|prefer not/i.test(lbl.textContent || '')) {
+          if (!cb.checked) { lbl.click(); await sleep(100); }
+          break;
+        }
+      }
+    }
+
     // Radio-based EEO (some Workday sites use radios)
     const eeoRadios = $$('input[type="radio"]').filter(r => {
       const lbl = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
       return /prefer not|decline|choose not|do not wish/i.test(lbl);
     });
     for (const r of eeoRadios) { if (!r.checked) { realClick(r); await sleep(100); } }
-    LOG('Workday: EEO section filled');
+
+    // SpeedyApply: agreement checkboxes on self-identify pages
+    const agreeCheckbox = $('input[data-automation-id="agreementCheckbox"], input[name="acceptTermsAndAgreements"]');
+    if (agreeCheckbox && !agreeCheckbox.checked) { realClick(agreeCheckbox); await sleep(100); }
+
+    LOG('Workday: EEO section filled (enhanced)');
   }
 
-  // SpeedyApply Workday: resume upload via file input
+  // SpeedyApply Workday: resume upload via DataTransfer file injection
   async function workdayResumeUpload() {
-    const fileInput = $('input[data-automation-id="file-upload-input-ref"], input[data-automation-id="select-files"], input[data-automation-id="resumeUpload"]');
-    if (fileInput) {
-      LOG('Workday: resume file input found — Jobright sidebar handles upload');
-      // The sidebar injects resume, we just ensure the input is visible
+    // SpeedyApply containers for resume section
+    const containers = [
+      'div[aria-labelledby="Resume/CV-section"]',
+      'div[data-automation-id="resumeUpload"]',
+      '[data-automation-id="quickApplyPage"]',
+      '[data-fkit-id="resumeAttachments--attachments"]'
+    ];
+    const container = $(containers.join(','));
+
+    // Find file input within container or globally
+    const fileInput = container?.querySelector('input[data-automation-id="file-upload-input-ref"],input[type="file"]') ||
+                      $('input[data-automation-id="file-upload-input-ref"], input[data-automation-id="select-files"], input[type="file"][accept*="pdf"]');
+    if (!fileInput) { LOG('Workday: no resume file input found'); return false; }
+
+    // Check if resume already uploaded (file name visible)
+    const existingFile = container?.querySelector('[data-automation-id="file-name"],.file-name,.upload-filename');
+    if (existingFile?.textContent?.trim()) { LOG('Workday: resume already uploaded'); return true; }
+
+    // Try to get resume from storage (base64 encoded)
+    const resumeData = await st.get('ua_resume_data');
+    if (resumeData?.base64 && resumeData?.fileName) {
+      try {
+        // SpeedyApply pattern: Convert base64 to File, inject via DataTransfer
+        const byteString = atob(resumeData.base64.split(',').pop() || resumeData.base64);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const mime = resumeData.mimeType || 'application/pdf';
+        const file = new File([ab], resumeData.fileName, { type: mime });
+
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        LOG(`Workday: resume injected via DataTransfer — ${resumeData.fileName}`);
+        await sleep(1500);
+        return true;
+      } catch (err) { LOG('Workday: resume injection failed — ' + err.message); }
     }
-    // Delete existing resume if needed (to replace with tailored one)
-    const deleteBtn = $('button[data-automation-id="delete-file"]');
-    // Don't auto-delete — let the sidebar handle it
+
+    // If no stored resume, let Jobright sidebar handle it
+    LOG('Workday: resume file input found — waiting for sidebar upload');
     return !!fileInput;
   }
 
@@ -1343,11 +1437,16 @@
   // SpeedyApply Workday: multi-page navigation with page type detection (enhanced)
   async function workdayMultiPageFlow() {
     const MAX_PAGES = 12;
+    // SpeedyApply: both old and new Workday page naming variants
     const pageTypes = [
       'applyFlowAutoFillPage', 'applyFlowMyInfoPage', 'contactInformationPage',
-      'applyFlowMyExpPage', 'applyFlowPrimaryQuestionsPage', 'applyFlowSecondaryQuestionsPage',
-      'applyFlowSelfIdentifyPage', 'applyFlowVoluntaryDisclosuresPage',
-      'applyFlowSupplementaryQuestionsPage', 'applyFlowReviewPage'
+      'applyFlowMyExpPage', 'myExperiencePage',
+      'applyFlowPrimaryQuestionsPage', 'primaryQuestionnairePage',
+      'applyFlowSecondaryQuestionsPage', 'secondaryQuestionnairePage',
+      'applyFlowSelfIdentifyPage', 'selfIdentificationPage',
+      'applyFlowVoluntaryDisclosuresPage', 'voluntaryDisclosuresPage',
+      'applyFlowSupplementaryQuestionsPage',
+      'applyFlowReviewPage', 'reviewJobApplicationPage'
     ];
     const p = await getProfile();
     let lastPageType = '';
