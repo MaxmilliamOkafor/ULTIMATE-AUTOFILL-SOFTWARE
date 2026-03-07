@@ -3,6 +3,10 @@ import * as store from '../savedResponses/storage';
 import { findMatches } from '../savedResponses/matcher';
 import { findDuplicates } from '../utils/fuzzy';
 import * as queue from '../jobQueue/storage';
+import * as settings from '../settings/storage';
+import * as autoApply from '../autoApply/engine';
+import * as scraper from '../autoApply/scraper';
+import * as answerBankModule from '../answerBank/index';
 
 // ─── CSV Queue State ────────────────────────────────────────────
 const CSV_QUEUE_KEY = 'csvJobQueue';
@@ -136,9 +140,8 @@ async function handleMessage(msg: ExtMessage, sender?: chrome.runtime.MessageSen
     case 'ADD_JOB_URLS':
       return { ok: true, data: await queue.addUrls(p.urls) };
     case 'IMPORT_JOB_CSV': {
-      const parsed = queue.parseJobCSV(p.csv);
-      const added = await queue.addUrls(parsed);
-      return { ok: true, data: { parsed: parsed.length, added } };
+      const stats = await queue.importCSVJobs(p.csv);
+      return { ok: true, data: stats };
     }
     case 'UPDATE_JOB_STATUS':
       await queue.updateStatus(p.id, p.status, p.reason);
@@ -150,12 +153,78 @@ async function handleMessage(msg: ExtMessage, sender?: chrome.runtime.MessageSen
       await chrome.tabs.create({ url: p.url, active: true });
       await queue.updateStatus(p.id, 'opened');
       return { ok: true };
+    case 'REMOVE_JOB':
+      await queue.removeItem(p.id);
+      return { ok: true };
+    case 'RETRY_FAILED_JOBS': {
+      const retried = await queue.retryFailed();
+      return { ok: true, data: retried };
+    }
+    case 'GET_IMPORT_STATS':
+      return { ok: true, data: await queue.getImportStats() };
+    case 'EXPORT_JOB_RESULTS': {
+      const csv = await queue.exportQueue();
+      return { ok: true, data: csv };
+    }
+
+    // ─── Auto-Apply Pipeline ───
+    case 'START_AUTO_APPLY':
+      autoApply.startAutoApply(p?.source || 'all');
+      return { ok: true };
+    case 'STOP_AUTO_APPLY':
+      autoApply.stopAutoApply();
+      return { ok: true };
+    case 'PAUSE_AUTO_APPLY':
+      autoApply.pauseAutoApply();
+      return { ok: true };
+    case 'RESUME_AUTO_APPLY':
+      autoApply.resumeAutoApply();
+      return { ok: true };
+    case 'GET_AUTO_APPLY_STATUS':
+      return { ok: true, data: autoApply.getStatus() };
+
+    // ─── Settings ───
+    case 'GET_SETTINGS':
+      return { ok: true, data: await settings.loadSettings() };
+    case 'SAVE_SETTINGS':
+      await settings.saveSettings(p);
+      return { ok: true };
+
+    // ─── Applications Account ───
+    case 'SAVE_APP_ACCOUNT':
+      await settings.saveAppAccount(p.email, p.password, p.passphrase);
+      return { ok: true };
+    case 'GET_APP_ACCOUNT': {
+      const account = await settings.getAppAccount(p.passphrase);
+      if (account) return { ok: true, data: { email: account.email } }; // Never return password to UI
+      return { ok: false, error: 'Invalid passphrase or no account saved' };
+    }
+    case 'CLEAR_APP_ACCOUNT':
+      await settings.clearAppAccount();
+      return { ok: true };
+
+    // ─── Credits ───
+    case 'GET_CREDITS':
+    case 'CHECK_CREDITS':
+      return { ok: true, data: await settings.checkCredits() };
+
+    // ─── Scraper ───
+    case 'START_SCRAPER':
+      await scraper.startScraper();
+      return { ok: true };
+    case 'STOP_SCRAPER':
+      scraper.stopScraper();
+      return { ok: true };
+    case 'GET_SCRAPED_JOBS': {
+      const jobs = await scraper.getRankedJobs(p?.targetCount);
+      return { ok: true, data: jobs };
+    }
 
     // ─── Autofill (forwarded to content script via tabs) ───
     case 'START_AUTOFILL': {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, { type: 'START_AUTOFILL' });
+        await chrome.tabs.sendMessage(tab.id, { type: 'START_AUTOFILL', payload: p });
       }
       return { ok: true };
     }
@@ -174,6 +243,69 @@ async function handleMessage(msg: ExtMessage, sender?: chrome.runtime.MessageSen
       }
       return { ok: false, error: 'No active tab' };
     }
+    case 'AUTO_DETECT_FILL': {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: 'AUTO_DETECT_FILL' });
+      }
+      return { ok: true };
+    }
+    case 'PAGE_AUTOFILL_COMPLETE':
+      // Content script reports completion - forwarded to auto-apply engine
+      return { ok: true };
+
+    // ─── One-click add current page to queue ───
+    case 'ADD_CURRENT_PAGE_TO_QUEUE': {
+      const url = p?.url;
+      if (!url) return { ok: false, error: 'No URL provided' };
+      // Check for duplicates
+      const existing = await queue.getItems();
+      const normalized = queue.normalizeUrl(url);
+      const isDuplicate = existing.some((i) => queue.normalizeUrl(i.url) === normalized);
+      if (isDuplicate) return { ok: false, error: 'Already in queue' };
+      const added = await queue.addUrls([{
+        url,
+        company: p.company || undefined,
+        role: p.role || undefined,
+      }]);
+      // Override source to 'one_click' by updating the just-added item
+      if (added > 0 && p.source === 'one_click') {
+        const items = await queue.getItems();
+        const item = items.find((i) => queue.normalizeUrl(i.url) === normalized);
+        if (item) {
+          item.source = 'one_click';
+          // Save directly since addUrls set it as 'manual'
+          const state = await queue.loadQueue();
+          const stateItem = state.items.find((i) => i.id === item.id);
+          if (stateItem) stateItem.source = 'one_click';
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      }
+      return { ok: true, data: { added } };
+    }
+
+    // ─── AI Tailoring ───
+    case 'TAILOR_RESPONSE':
+      return { ok: true }; // Tailoring is handled in content script
+    case 'GET_TAILORING_STATUS': {
+      const s = await settings.loadSettings();
+      return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
+    }
+
+    // ─── Answer Bank & Profile ───
+    case 'GET_ANSWER_BANK':
+      return { ok: true, data: await answerBankModule.loadAnswerBank() };
+    case 'SAVE_ANSWER':
+      await answerBankModule.learnAnswer(p.label, p.value);
+      return { ok: true };
+    case 'CLEAR_ANSWER_BANK':
+      await chrome.storage.local.remove('ua_answer_bank');
+      return { ok: true };
+    case 'GET_PROFILE':
+      return { ok: true, data: await answerBankModule.loadProfile() };
+    case 'SAVE_PROFILE':
+      await answerBankModule.saveProfile(p);
+      return { ok: true };
 
     // ─── CSV Queue Commands ───
     case 'START_CSV_QUEUE' as any:
@@ -433,5 +565,38 @@ chrome.runtime.onInstalled?.addListener(async () => {
       activeLibraryId: 'default',
       domainMappings: {},
     });
+  }
+  // Initialize settings with defaults
+  await settings.loadSettings();
+});
+
+// Auto-detect ATS on tab updates and trigger autofill if enabled
+// Now works universally on ALL pages (not just domain allowlist) when universal mode is on
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete' || !tab.url) return;
+  // Skip chrome:// and extension pages
+  if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+
+  try {
+    const s = await settings.loadSettings();
+    if (!s.autoDetectAndFill) return;
+
+    const url = tab.url;
+
+    // If universal form detection is enabled, try on ALL pages
+    // Otherwise, only on domain-allowlisted pages
+    if (!s.universalFormDetection) {
+      const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
+      if (!isSupported) return;
+    }
+
+    // Send auto-detect-and-fill to the content script
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'AUTO_DETECT_FILL' });
+    } catch {
+      // Content script not yet loaded, ignore
+    }
+  } catch {
+    // Settings not yet initialized, ignore
   }
 });

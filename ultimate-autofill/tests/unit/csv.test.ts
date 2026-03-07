@@ -62,11 +62,12 @@ describe('CSV Parsing', () => {
       expect(result).toHaveLength(2);
     });
 
-    it('should reject non-https URLs', () => {
+    it('should accept http and https URLs but reject others', () => {
       const csv = 'url\nhttp://example.com/job1\nhttps://example.com/job2\nftp://bad.com';
       const result = parseJobCSV(csv);
-      expect(result).toHaveLength(1);
-      expect(result[0].url).toBe('https://example.com/job2');
+      expect(result).toHaveLength(2);
+      expect(result[0].url).toBe('http://example.com/job1');
+      expect(result[1].url).toBe('https://example.com/job2');
     });
 
     it('should handle optional columns', () => {

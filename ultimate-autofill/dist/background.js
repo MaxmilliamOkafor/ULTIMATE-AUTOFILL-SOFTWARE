@@ -52,13 +52,6 @@ function parseCSV(text) {
     rows.push(row);
   return rows;
 }
-function isValidHttpsUrl(url) {
-  try {
-    return new URL(url).protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // src/utils/crypto.ts
 var SALT_LEN = 16;
@@ -494,22 +487,51 @@ async function saveQueue(state) {
 async function getItems() {
   return (await loadQueue()).items;
 }
+function normalizeUrl(urlStr) {
+  try {
+    const url = new URL(urlStr.trim());
+    url.hostname = url.hostname.toLowerCase();
+    const trackingParams = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref", "fbclid", "gclid", "source", "trackingId"];
+    for (const p of trackingParams) {
+      url.searchParams.delete(p);
+    }
+    let path = url.pathname;
+    if (path.length > 1 && path.endsWith("/"))
+      path = path.slice(0, -1);
+    url.pathname = path;
+    return url.toString();
+  } catch {
+    return urlStr.trim();
+  }
+}
+function isValidUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
 async function addUrls(urls) {
   const s = await loadQueue();
-  const existing = new Set(s.items.map((i) => i.url));
+  const existing = new Set(s.items.map((i) => normalizeUrl(i.url)));
   let added = 0;
   for (const u of urls) {
-    if (!isValidHttpsUrl(u.url) || existing.has(u.url))
+    const normalized = normalizeUrl(u.url);
+    if (!isValidUrl(normalized) || existing.has(normalized))
       continue;
-    existing.add(u.url);
+    existing.add(normalized);
     s.items.push({
       id: generateId(),
-      url: u.url,
+      url: u.url.trim(),
+      normalizedUrl: normalized,
       company: u.company,
       role: u.role,
       priority: u.priority,
       notes: u.notes,
       status: "not_started",
+      source: "manual",
+      retryCount: 0,
       createdAt: now(),
       updatedAt: now()
     });
@@ -524,42 +546,153 @@ async function updateStatus(itemId, status, reason) {
   if (item) {
     item.status = status;
     item.updatedAt = now();
-    if (reason)
-      item.blockedReason = reason;
-    if (status === "opened" || status === "prefilled")
+    if (reason) {
+      if (status === "blocked")
+        item.blockedReason = reason;
+      if (status === "failed")
+        item.failReason = reason;
+    }
+    if (status === "applied")
+      item.appliedAt = now();
+    if (status === "opened" || status === "applying" || status === "prefilled")
       s.currentItemId = itemId;
-    if (status === "completed" || status === "blocked") {
+    if (status === "completed" || status === "blocked" || status === "applied" || status === "failed" || status === "skipped") {
       if (s.currentItemId === itemId)
         s.currentItemId = null;
     }
     await saveQueue(s);
   }
 }
+async function removeItem(itemId) {
+  const s = await loadQueue();
+  s.items = s.items.filter((i) => i.id !== itemId);
+  if (s.currentItemId === itemId)
+    s.currentItemId = null;
+  await saveQueue(s);
+}
 async function clearQueue() {
   await saveQueue(defaultState2());
 }
+async function retryFailed() {
+  const s = await loadQueue();
+  let count = 0;
+  for (const item of s.items) {
+    if (item.status === "failed" && (item.retryCount || 0) < 3) {
+      item.status = "not_started";
+      item.retryCount = (item.retryCount || 0) + 1;
+      item.failReason = void 0;
+      item.updatedAt = now();
+      count++;
+    }
+  }
+  await saveQueue(s);
+  return count;
+}
+async function getNextJob() {
+  const s = await loadQueue();
+  const pending = s.items.filter((i) => i.status === "not_started").sort((a, b) => {
+    const pa = a.priority ?? 0;
+    const pb = b.priority ?? 0;
+    if (pb !== pa)
+      return pb - pa;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+  return pending[0] || null;
+}
+async function exportQueue() {
+  const items = await getItems();
+  const header = "url,company,role,priority,notes,status,source,applied_at,fail_reason";
+  const rows = items.map(
+    (i) => [i.url, i.company || "", i.role || "", i.priority ?? "", i.notes || "", i.status, i.source || "", i.appliedAt || "", i.failReason || ""].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")
+  );
+  return [header, ...rows].join("\n");
+}
+function parseJobCSVWithStats(text) {
+  const stats = {
+    totalParsed: 0,
+    validUrls: 0,
+    invalidUrls: 0,
+    duplicates: 0,
+    added: 0,
+    invalidRows: []
+  };
+  const rows = parseCSV(text);
+  if (rows.length < 1)
+    return stats;
+  const firstRow = rows[0].map((h) => h.toLowerCase().trim());
+  let urlIdx = firstRow.findIndex((h) => ["url", "job_url", "link", "job_link", "application_url"].includes(h));
+  let hasHeader = urlIdx >= 0;
+  if (!hasHeader) {
+    if (rows[0].length === 1 && isValidUrl(rows[0][0].trim())) {
+      urlIdx = 0;
+      hasHeader = false;
+    } else {
+      urlIdx = 0;
+      hasHeader = false;
+    }
+  }
+  const companyIdx = hasHeader ? firstRow.indexOf("company") : -1;
+  const roleIdx = hasHeader ? firstRow.findIndex((h) => ["role", "title", "job_title", "position"].includes(h)) : -1;
+  const priorityIdx = hasHeader ? firstRow.indexOf("priority") : -1;
+  const notesIdx = hasHeader ? firstRow.indexOf("notes") : -1;
+  const seen = /* @__PURE__ */ new Set();
+  const startRow = hasHeader ? 1 : 0;
+  for (let i = startRow; i < rows.length; i++) {
+    const row = rows[i];
+    stats.totalParsed++;
+    const rawUrl = row[urlIdx]?.trim();
+    if (!rawUrl) {
+      stats.invalidUrls++;
+      stats.invalidRows.push({ row: i + 1, url: rawUrl || "(empty)", reason: "Empty URL" });
+      continue;
+    }
+    if (!isValidUrl(rawUrl)) {
+      stats.invalidUrls++;
+      stats.invalidRows.push({ row: i + 1, url: rawUrl, reason: "Invalid URL format" });
+      continue;
+    }
+    const normalized = normalizeUrl(rawUrl);
+    if (seen.has(normalized)) {
+      stats.duplicates++;
+      continue;
+    }
+    seen.add(normalized);
+    stats.validUrls++;
+  }
+  return stats;
+}
 function parseJobCSV(text) {
   const rows = parseCSV(text);
-  if (rows.length < 2)
+  if (rows.length < 1)
     return [];
-  const header = rows[0].map((h) => h.toLowerCase().trim());
-  const urlIdx = header.findIndex((h) => ["url", "job_url", "link"].includes(h));
-  if (urlIdx < 0)
-    return [];
-  const companyIdx = header.indexOf("company");
-  const roleIdx = header.indexOf("role");
-  const priorityIdx = header.indexOf("priority");
-  const notesIdx = header.indexOf("notes");
+  const firstRow = rows[0].map((h) => h.toLowerCase().trim());
+  let urlIdx = firstRow.findIndex((h) => ["url", "job_url", "link", "job_link", "application_url"].includes(h));
+  let hasHeader = urlIdx >= 0;
+  if (!hasHeader) {
+    urlIdx = 0;
+    hasHeader = false;
+    if (firstRow[0] && !isValidUrl(rows[0][0].trim())) {
+      hasHeader = true;
+    }
+  }
+  const companyIdx = hasHeader ? firstRow.indexOf("company") : -1;
+  const roleIdx = hasHeader ? firstRow.findIndex((h) => ["role", "title", "job_title", "position"].includes(h)) : -1;
+  const priorityIdx = hasHeader ? firstRow.indexOf("priority") : -1;
+  const notesIdx = hasHeader ? firstRow.indexOf("notes") : -1;
   const results = [];
   const seen = /* @__PURE__ */ new Set();
-  for (let i = 1; i < rows.length; i++) {
+  const startRow = hasHeader ? 1 : 0;
+  for (let i = startRow; i < rows.length; i++) {
     const row = rows[i];
-    const url = row[urlIdx]?.trim();
-    if (!url || !isValidHttpsUrl(url) || seen.has(url))
+    const rawUrl = row[urlIdx]?.trim();
+    if (!rawUrl || !isValidUrl(rawUrl))
       continue;
-    seen.add(url);
+    const normalized = normalizeUrl(rawUrl);
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
     results.push({
-      url,
+      url: rawUrl,
       company: companyIdx >= 0 ? row[companyIdx]?.trim() : void 0,
       role: roleIdx >= 0 ? row[roleIdx]?.trim() : void 0,
       priority: priorityIdx >= 0 ? parseInt(row[priorityIdx], 10) || void 0 : void 0,
@@ -567,6 +700,555 @@ function parseJobCSV(text) {
     });
   }
   return results;
+}
+async function importCSVJobs(text) {
+  const stats = parseJobCSVWithStats(text);
+  const parsed = parseJobCSV(text);
+  const s = await loadQueue();
+  const existing = new Set(s.items.map((i) => normalizeUrl(i.url)));
+  let added = 0;
+  for (const u of parsed) {
+    const normalized = normalizeUrl(u.url);
+    if (existing.has(normalized)) {
+      stats.duplicates++;
+      continue;
+    }
+    existing.add(normalized);
+    s.items.push({
+      id: generateId(),
+      url: u.url.trim(),
+      normalizedUrl: normalized,
+      company: u.company,
+      role: u.role,
+      priority: u.priority,
+      notes: u.notes,
+      status: "not_started",
+      source: "csv_import",
+      retryCount: 0,
+      createdAt: now(),
+      updatedAt: now()
+    });
+    added++;
+  }
+  await saveQueue(s);
+  stats.added = added;
+  return stats;
+}
+async function getImportedJobs() {
+  const s = await loadQueue();
+  return s.items.filter((i) => i.source === "csv_import");
+}
+async function getImportStats() {
+  const items = await getImportedJobs();
+  return {
+    total: items.length,
+    pending: items.filter((i) => i.status === "not_started").length,
+    applying: items.filter((i) => i.status === "applying" || i.status === "opened" || i.status === "prefilled").length,
+    applied: items.filter((i) => i.status === "applied").length,
+    failed: items.filter((i) => i.status === "failed").length,
+    skipped: items.filter((i) => i.status === "skipped").length,
+    completed: items.filter((i) => i.status === "completed").length
+  };
+}
+
+// src/settings/storage.ts
+var KEY3 = "ua_settings";
+function defaultAutoApply() {
+  return {
+    enabled: true,
+    autoSubmit: false,
+    // Default OFF for safety
+    autoSubmitPerSite: {},
+    maxConcurrency: 1,
+    delayBetweenJobs: 3e3,
+    // 3 seconds between jobs
+    humanLikePacing: true,
+    closeTabAfterApply: false,
+    retryFailedMax: 2,
+    requireResumeForSubmit: true,
+    domainAllowlist: [
+      "myworkdayjobs.com",
+      "myworkday.com",
+      "greenhouse.io",
+      "lever.co",
+      "smartrecruiters.com",
+      "icims.com",
+      "taleo.net",
+      "ashbyhq.com",
+      "bamboohr.com",
+      "oraclecloud.com",
+      "indeed.com",
+      "linkedin.com"
+    ],
+    rateLimit: { maxPerHour: 30, maxPerDay: 200 },
+    paused: false
+  };
+}
+function defaultScraper() {
+  return {
+    enabled: false,
+    intervalMinutes: 10,
+    sources: { ats: true, indeed: true, linkedinNonEasyApply: true },
+    targetCountPerSession: 50,
+    freshnessTiers: { tierA: 30, tierB: 1440, tierC: 4320 },
+    filters: {
+      keywords: [],
+      geoRadius: 50,
+      location: "",
+      seniority: [],
+      remoteOnly: false,
+      hybridAllowed: true
+    }
+  };
+}
+function defaultTailoring() {
+  return {
+    enabled: true,
+    intensity: 0.8,
+    // High tailoring by default
+    profileKeywords: [],
+    targetKeywords: [],
+    profileSummary: ""
+  };
+}
+function defaultSettings() {
+  return {
+    autoApply: defaultAutoApply(),
+    scraper: defaultScraper(),
+    tailoring: defaultTailoring(),
+    applicationsAccount: null,
+    creditsUnlimited: true,
+    // Unlimited credits by default
+    autoDetectAndFill: true,
+    // Auto-detect ATS and fill on page load
+    universalFormDetection: true,
+    // Detect ALL forms, not just known ATS
+    supportedPlatforms: {
+      workday: true,
+      greenhouse: true,
+      lever: true,
+      smartrecruiters: true,
+      icims: true,
+      taleo: true,
+      ashby: true,
+      bamboohr: true,
+      oraclecloud: true,
+      linkedin: true,
+      indeed: true,
+      companysite: true
+    }
+  };
+}
+async function loadSettings() {
+  const r = await chrome.storage.local.get(KEY3);
+  const saved = r[KEY3];
+  if (!saved)
+    return defaultSettings();
+  const defaults = defaultSettings();
+  return {
+    ...defaults,
+    ...saved,
+    autoApply: { ...defaults.autoApply, ...saved.autoApply },
+    scraper: { ...defaults.scraper, ...saved.scraper, filters: { ...defaults.scraper.filters, ...saved.scraper?.filters || {} } },
+    tailoring: { ...defaults.tailoring, ...saved.tailoring || {} },
+    supportedPlatforms: { ...defaults.supportedPlatforms, ...saved.supportedPlatforms }
+  };
+}
+async function saveSettings(settings) {
+  await chrome.storage.local.set({ [KEY3]: settings });
+}
+async function saveAppAccount(email, password, passphrase) {
+  const s = await loadSettings();
+  const encryptedPassword = await encrypt(password, passphrase);
+  s.applicationsAccount = {
+    email,
+    encryptedPassword,
+    salt: crypto.getRandomValues(new Uint8Array(16)).toString()
+  };
+  await saveSettings(s);
+}
+async function getAppAccount(passphrase) {
+  const s = await loadSettings();
+  if (!s.applicationsAccount)
+    return null;
+  try {
+    const password = await decrypt(s.applicationsAccount.encryptedPassword, passphrase);
+    return { email: s.applicationsAccount.email, password };
+  } catch {
+    return null;
+  }
+}
+async function clearAppAccount() {
+  const s = await loadSettings();
+  s.applicationsAccount = null;
+  await saveSettings(s);
+}
+async function checkCredits() {
+  const s = await loadSettings();
+  return { unlimited: s.creditsUnlimited, remaining: Infinity };
+}
+
+// src/autoApply/engine.ts
+var _status = {
+  running: false,
+  paused: false,
+  currentJobId: null,
+  currentJobUrl: null,
+  totalJobs: 0,
+  completedJobs: 0,
+  failedJobs: 0,
+  skippedJobs: 0,
+  startedAt: null,
+  estimatedRemaining: 0
+};
+var _abortController = null;
+var _appliedThisHour = 0;
+var _appliedToday = 0;
+var RATE_KEY = "ua_rate_limits";
+async function loadRateLimits() {
+  const r = await chrome.storage.local.get(RATE_KEY);
+  const data = r[RATE_KEY];
+  if (!data)
+    return { hour: 0, day: 0, hourReset: Date.now() + 36e5, dayReset: Date.now() + 864e5 };
+  const now2 = Date.now();
+  if (now2 > data.hourReset)
+    data.hour = 0;
+  if (now2 > data.dayReset)
+    data.day = 0;
+  return data;
+}
+async function incrementRateLimit() {
+  const limits = await loadRateLimits();
+  limits.hour++;
+  limits.day++;
+  if (limits.hourReset < Date.now())
+    limits.hourReset = Date.now() + 36e5;
+  if (limits.dayReset < Date.now())
+    limits.dayReset = Date.now() + 864e5;
+  await chrome.storage.local.set({ [RATE_KEY]: limits });
+  _appliedThisHour = limits.hour;
+  _appliedToday = limits.day;
+}
+async function checkRateLimit(settings) {
+  const limits = await loadRateLimits();
+  _appliedThisHour = limits.hour;
+  _appliedToday = limits.day;
+  return limits.hour < settings.rateLimit.maxPerHour && limits.day < settings.rateLimit.maxPerDay;
+}
+function getStatus() {
+  return { ..._status };
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function humanDelay(baseMs) {
+  const variance = baseMs * 0.3;
+  const actual = baseMs + (Math.random() * variance * 2 - variance);
+  return delay(Math.max(500, actual));
+}
+async function startAutoApply(source) {
+  if (_status.running)
+    return;
+  const settings = await loadSettings();
+  if (!settings.autoApply.enabled)
+    return;
+  _abortController = new AbortController();
+  const items = await getItems();
+  const pendingJobs = items.filter((j) => {
+    if (j.status !== "not_started")
+      return false;
+    if (source === "imported" && j.source !== "csv_import")
+      return false;
+    return true;
+  });
+  _status = {
+    running: true,
+    paused: false,
+    currentJobId: null,
+    currentJobUrl: null,
+    totalJobs: pendingJobs.length,
+    completedJobs: 0,
+    failedJobs: 0,
+    skippedJobs: 0,
+    startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    estimatedRemaining: pendingJobs.length
+  };
+  try {
+    await processQueue(settings.autoApply, source);
+  } finally {
+    _status.running = false;
+    _status.currentJobId = null;
+    _status.currentJobUrl = null;
+    _abortController = null;
+  }
+}
+async function processQueue(settings, source) {
+  while (_status.running && !_abortController?.signal.aborted) {
+    if (_status.paused) {
+      await delay(1e3);
+      continue;
+    }
+    const withinLimits = await checkRateLimit(settings);
+    if (!withinLimits) {
+      console.log("[UA] Rate limit reached, pausing auto-apply");
+      _status.paused = true;
+      await delay(6e4);
+      _status.paused = false;
+      continue;
+    }
+    const job = await getNextJob();
+    if (!job) {
+      console.log("[UA] No more jobs in queue");
+      break;
+    }
+    if (source === "imported" && job.source !== "csv_import") {
+      continue;
+    }
+    try {
+      const domain = new URL(job.url).hostname;
+      const isAllowed = settings.domainAllowlist.length === 0 || settings.domainAllowlist.some((d) => domain.includes(d));
+      if (!isAllowed) {
+        await updateStatus(job.id, "skipped", "Domain not in allowlist");
+        _status.skippedJobs++;
+        _status.estimatedRemaining--;
+        continue;
+      }
+    } catch {
+      await updateStatus(job.id, "failed", "Invalid URL");
+      _status.failedJobs++;
+      _status.estimatedRemaining--;
+      continue;
+    }
+    _status.currentJobId = job.id;
+    _status.currentJobUrl = job.url;
+    try {
+      await processJob(job, settings);
+      _status.completedJobs++;
+      await incrementRateLimit();
+    } catch (err) {
+      console.error("[UA] Job failed:", job.url, err);
+      const retryCount = (job.retryCount || 0) + 1;
+      if (retryCount <= settings.retryFailedMax) {
+        await updateStatus(job.id, "not_started", `Retry ${retryCount}/${settings.retryFailedMax}: ${String(err)}`);
+        const items = await getItems();
+        const item = items.find((i) => i.id === job.id);
+        if (item) {
+          item.retryCount = retryCount;
+          const state = await loadQueue();
+          const stateItem = state.items.find((i) => i.id === job.id);
+          if (stateItem)
+            stateItem.retryCount = retryCount;
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      } else {
+        await updateStatus(job.id, "failed", String(err));
+        _status.failedJobs++;
+      }
+    }
+    _status.estimatedRemaining--;
+    if (settings.humanLikePacing) {
+      await humanDelay(settings.delayBetweenJobs);
+    } else {
+      await delay(settings.delayBetweenJobs);
+    }
+  }
+}
+async function processJob(job, settings) {
+  await updateStatus(job.id, "applying");
+  const tab = await chrome.tabs.create({ url: job.url, active: false });
+  if (!tab.id)
+    throw new Error("Failed to create tab");
+  await waitForTabLoad(tab.id, 3e4);
+  await delay(2e3);
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      type: "START_AUTOFILL",
+      payload: { autoSubmit: settings.autoSubmit, jobId: job.id }
+    });
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content.js"]
+      });
+      await delay(1e3);
+      await chrome.tabs.sendMessage(tab.id, {
+        type: "START_AUTOFILL",
+        payload: { autoSubmit: settings.autoSubmit, jobId: job.id }
+      });
+    } catch (e) {
+      throw new Error(`Cannot inject content script: ${e}`);
+    }
+  }
+  const result = await waitForAutofillComplete(tab.id, job.id, 12e4);
+  if (result === "applied") {
+    await updateStatus(job.id, "applied");
+  } else if (result === "prefilled") {
+    await updateStatus(job.id, "prefilled");
+  } else if (result === "needs_input") {
+    await updateStatus(job.id, "needs_input", "Manual input required");
+  } else {
+    await updateStatus(job.id, "prefilled");
+  }
+  if (settings.closeTabAfterApply && (result === "applied" || result === "completed")) {
+    try {
+      await chrome.tabs.remove(tab.id);
+    } catch {
+    }
+  }
+}
+function waitForTabLoad(tabId, timeout) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, timeout);
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+function waitForAutofillComplete(tabId, jobId, timeout) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      chrome.runtime.onMessage.removeListener(listener);
+      resolve("prefilled");
+    }, timeout);
+    function listener(msg, sender) {
+      if (sender.tab?.id === tabId && msg.type === "PAGE_AUTOFILL_COMPLETE") {
+        clearTimeout(timer);
+        chrome.runtime.onMessage.removeListener(listener);
+        resolve(msg.payload?.status || "prefilled");
+      }
+    }
+    chrome.runtime.onMessage.addListener(listener);
+  });
+}
+function stopAutoApply() {
+  _status.running = false;
+  _abortController?.abort();
+}
+function pauseAutoApply() {
+  _status.paused = true;
+}
+function resumeAutoApply() {
+  _status.paused = false;
+}
+
+// src/autoApply/scraper.ts
+var SCRAPED_KEY = "ua_scraped_jobs";
+var _scraperInterval = null;
+var _running = false;
+function getFreshnessTier(ageMinutes, tiers) {
+  if (ageMinutes <= tiers.tierA)
+    return "A";
+  if (ageMinutes <= tiers.tierB)
+    return "B";
+  if (ageMinutes <= tiers.tierC)
+    return "C";
+  return "old";
+}
+async function loadScrapedJobs() {
+  const r = await chrome.storage.local.get(SCRAPED_KEY);
+  return r[SCRAPED_KEY] || [];
+}
+async function saveScrapedJobs(jobs) {
+  await chrome.storage.local.set({ [SCRAPED_KEY]: jobs });
+}
+async function getRankedJobs(targetCount) {
+  const settings = await loadSettings();
+  const target = targetCount || settings.scraper.targetCountPerSession;
+  const jobs = await loadScrapedJobs();
+  const now2 = Date.now();
+  for (const job of jobs) {
+    const firstSeen = new Date(job.firstSeenAt);
+    const ageMinutes = (now2 - firstSeen.getTime()) / 6e4;
+    job.freshnessTier = getFreshnessTier(ageMinutes, settings.scraper.freshnessTiers);
+  }
+  const tierOrder = { A: 0, B: 1, C: 2, old: 3 };
+  const sorted = jobs.filter((j) => j.status === "new").sort((a, b) => {
+    const tierDiff = tierOrder[a.freshnessTier] - tierOrder[b.freshnessTier];
+    if (tierDiff !== 0)
+      return tierDiff;
+    return new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();
+  });
+  const result = [];
+  for (const job of sorted) {
+    if (result.length >= target) {
+      if (job.freshnessTier === "old")
+        break;
+    }
+    result.push(job);
+  }
+  return result.slice(0, target);
+}
+async function startScraper() {
+  if (_running)
+    return;
+  _running = true;
+  const settings = await loadSettings();
+  if (!settings.scraper.enabled) {
+    _running = false;
+    return;
+  }
+  const intervalMs = settings.scraper.intervalMinutes * 60 * 1e3;
+  _scraperInterval = setInterval(async () => {
+    if (!_running)
+      return;
+    const jobs = await loadScrapedJobs();
+    const now2 = Date.now();
+    for (const job of jobs) {
+      const firstSeen = new Date(job.firstSeenAt);
+      const ageMinutes = (now2 - firstSeen.getTime()) / 6e4;
+      job.freshnessTier = getFreshnessTier(ageMinutes, settings.scraper.freshnessTiers);
+    }
+    await saveScrapedJobs(jobs);
+  }, intervalMs);
+}
+function stopScraper() {
+  _running = false;
+  if (_scraperInterval) {
+    clearInterval(_scraperInterval);
+    _scraperInterval = null;
+  }
+}
+
+// src/answerBank/index.ts
+var ANSWER_BANK_KEY = "ua_answer_bank";
+var PROFILE_KEY = "ua_user_profile";
+var _answerBank = {};
+var _loaded = false;
+function normalizeKey(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+}
+async function loadAnswerBank() {
+  if (_loaded)
+    return _answerBank;
+  const r = await chrome.storage.local.get(ANSWER_BANK_KEY);
+  _answerBank = r[ANSWER_BANK_KEY] || {};
+  _loaded = true;
+  return _answerBank;
+}
+async function learnAnswer(label, value) {
+  if (!label || !value)
+    return;
+  const key = normalizeKey(label);
+  if (!key)
+    return;
+  _answerBank[key] = value;
+  await chrome.storage.local.set({ [ANSWER_BANK_KEY]: _answerBank });
+}
+async function loadProfile() {
+  const r = await chrome.storage.local.get(PROFILE_KEY);
+  return r[PROFILE_KEY] || {};
+}
+async function saveProfile(profile) {
+  await chrome.storage.local.set({ [PROFILE_KEY]: profile });
 }
 
 // src/background/serviceWorker.ts
@@ -679,9 +1361,8 @@ async function handleMessage(msg, sender) {
     case "ADD_JOB_URLS":
       return { ok: true, data: await addUrls(p.urls) };
     case "IMPORT_JOB_CSV": {
-      const parsed = parseJobCSV(p.csv);
-      const added = await addUrls(parsed);
-      return { ok: true, data: { parsed: parsed.length, added } };
+      const stats = await importCSVJobs(p.csv);
+      return { ok: true, data: stats };
     }
     case "UPDATE_JOB_STATUS":
       await updateStatus(p.id, p.status, p.reason);
@@ -693,10 +1374,67 @@ async function handleMessage(msg, sender) {
       await chrome.tabs.create({ url: p.url, active: true });
       await updateStatus(p.id, "opened");
       return { ok: true };
+    case "REMOVE_JOB":
+      await removeItem(p.id);
+      return { ok: true };
+    case "RETRY_FAILED_JOBS": {
+      const retried = await retryFailed();
+      return { ok: true, data: retried };
+    }
+    case "GET_IMPORT_STATS":
+      return { ok: true, data: await getImportStats() };
+    case "EXPORT_JOB_RESULTS": {
+      const csv = await exportQueue();
+      return { ok: true, data: csv };
+    }
+    case "START_AUTO_APPLY":
+      startAutoApply(p?.source || "all");
+      return { ok: true };
+    case "STOP_AUTO_APPLY":
+      stopAutoApply();
+      return { ok: true };
+    case "PAUSE_AUTO_APPLY":
+      pauseAutoApply();
+      return { ok: true };
+    case "RESUME_AUTO_APPLY":
+      resumeAutoApply();
+      return { ok: true };
+    case "GET_AUTO_APPLY_STATUS":
+      return { ok: true, data: getStatus() };
+    case "GET_SETTINGS":
+      return { ok: true, data: await loadSettings() };
+    case "SAVE_SETTINGS":
+      await saveSettings(p);
+      return { ok: true };
+    case "SAVE_APP_ACCOUNT":
+      await saveAppAccount(p.email, p.password, p.passphrase);
+      return { ok: true };
+    case "GET_APP_ACCOUNT": {
+      const account = await getAppAccount(p.passphrase);
+      if (account)
+        return { ok: true, data: { email: account.email } };
+      return { ok: false, error: "Invalid passphrase or no account saved" };
+    }
+    case "CLEAR_APP_ACCOUNT":
+      await clearAppAccount();
+      return { ok: true };
+    case "GET_CREDITS":
+    case "CHECK_CREDITS":
+      return { ok: true, data: await checkCredits() };
+    case "START_SCRAPER":
+      await startScraper();
+      return { ok: true };
+    case "STOP_SCRAPER":
+      stopScraper();
+      return { ok: true };
+    case "GET_SCRAPED_JOBS": {
+      const jobs = await getRankedJobs(p?.targetCount);
+      return { ok: true, data: jobs };
+    }
     case "START_AUTOFILL": {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, { type: "START_AUTOFILL" });
+        await chrome.tabs.sendMessage(tab.id, { type: "START_AUTOFILL", payload: p });
       }
       return { ok: true };
     }
@@ -715,6 +1453,62 @@ async function handleMessage(msg, sender) {
       }
       return { ok: false, error: "No active tab" };
     }
+    case "AUTO_DETECT_FILL": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: "AUTO_DETECT_FILL" });
+      }
+      return { ok: true };
+    }
+    case "PAGE_AUTOFILL_COMPLETE":
+      return { ok: true };
+    case "ADD_CURRENT_PAGE_TO_QUEUE": {
+      const url = p?.url;
+      if (!url)
+        return { ok: false, error: "No URL provided" };
+      const existing = await getItems();
+      const normalized = normalizeUrl(url);
+      const isDuplicate = existing.some((i) => normalizeUrl(i.url) === normalized);
+      if (isDuplicate)
+        return { ok: false, error: "Already in queue" };
+      const added = await addUrls([{
+        url,
+        company: p.company || void 0,
+        role: p.role || void 0
+      }]);
+      if (added > 0 && p.source === "one_click") {
+        const items = await getItems();
+        const item = items.find((i) => normalizeUrl(i.url) === normalized);
+        if (item) {
+          item.source = "one_click";
+          const state = await loadQueue();
+          const stateItem = state.items.find((i) => i.id === item.id);
+          if (stateItem)
+            stateItem.source = "one_click";
+          await chrome.storage.local.set({ ua_job_queue: state });
+        }
+      }
+      return { ok: true, data: { added } };
+    }
+    case "TAILOR_RESPONSE":
+      return { ok: true };
+    case "GET_TAILORING_STATUS": {
+      const s = await loadSettings();
+      return { ok: true, data: { enabled: s.tailoring.enabled, intensity: s.tailoring.intensity } };
+    }
+    case "GET_ANSWER_BANK":
+      return { ok: true, data: await loadAnswerBank() };
+    case "SAVE_ANSWER":
+      await learnAnswer(p.label, p.value);
+      return { ok: true };
+    case "CLEAR_ANSWER_BANK":
+      await chrome.storage.local.remove("ua_answer_bank");
+      return { ok: true };
+    case "GET_PROFILE":
+      return { ok: true, data: await loadProfile() };
+    case "SAVE_PROFILE":
+      await saveProfile(p);
+      return { ok: true };
     case "START_CSV_QUEUE":
       startCsvQueue();
       return { ok: true };
@@ -933,6 +1727,29 @@ chrome.runtime.onInstalled?.addListener(async () => {
       activeLibraryId: "default",
       domainMappings: {}
     });
+  }
+  await loadSettings();
+});
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !tab.url)
+    return;
+  if (tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://"))
+    return;
+  try {
+    const s = await loadSettings();
+    if (!s.autoDetectAndFill)
+      return;
+    const url = tab.url;
+    if (!s.universalFormDetection) {
+      const isSupported = s.autoApply.domainAllowlist.some((d) => url.includes(d));
+      if (!isSupported)
+        return;
+    }
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: "AUTO_DETECT_FILL" });
+    } catch {
+    }
+  } catch {
   }
 });
 //# sourceMappingURL=background.js.map

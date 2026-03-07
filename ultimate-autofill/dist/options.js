@@ -182,7 +182,7 @@
     selected.clear();
     if (checked)
       currentResponses.forEach((r) => selected.add(r.id));
-    renderResponses(checked ? currentResponses : currentResponses);
+    renderResponses(currentResponses);
     updateBulkUI();
   });
   function openEditModal(id) {
@@ -348,7 +348,12 @@
     prefilled: "badge-s",
     needs_input: "badge-w",
     blocked: "badge-d",
-    completed: "badge-s"
+    completed: "badge-s",
+    applying: "badge-p",
+    applied: "badge-s",
+    failed: "badge-d",
+    skipped: "badge-w",
+    paused: "badge-w"
   };
   function renderQueue(items) {
     const body = $("qBody");
@@ -361,14 +366,18 @@
       return;
     }
     noQ.style.display = "none";
-    stats.textContent = `${items.length} total | ${items.filter((i) => i.status === "completed").length} completed`;
+    const applied = items.filter((i) => i.status === "applied" || i.status === "completed").length;
+    const failed = items.filter((i) => i.status === "failed").length;
+    stats.textContent = `${items.length} total | ${applied} applied | ${failed} failed`;
     body.innerHTML = items.map((it, idx) => {
-      const urlShort = it.url.length > 50 ? it.url.slice(0, 50) + "..." : it.url;
+      const urlShort = it.url.length > 40 ? it.url.slice(0, 40) + "..." : it.url;
+      const src = it.source === "csv_import" ? '<span class="badge badge-i">CSV</span>' : it.source === "scraper" ? '<span class="badge badge-p">Scraper</span>' : '<span class="badge badge-g">Manual</span>';
       return `<tr>
       <td>${idx + 1}</td>
       <td><a href="${escHtml(it.url)}" target="_blank" rel="noopener">${escHtml(urlShort)}</a></td>
       <td>${escHtml(it.company || "-")}</td>
       <td>${escHtml(it.role || "-")}</td>
+      <td>${src}</td>
       <td><span class="badge ${STATUS_BADGE[it.status] || "badge-g"}">${it.status.replace(/_/g, " ")}</span></td>
       <td>
         <button class="btn btn-s btn-p open-job" data-id="${it.id}" data-url="${escHtml(it.url)}">Open</button>
@@ -388,7 +397,7 @@
       await loadQueue();
     }));
     body.querySelectorAll(".rm-job").forEach((b) => b.addEventListener("click", async () => {
-      await send({ type: "UPDATE_JOB_STATUS", payload: { id: b.dataset.id, status: "completed" } });
+      await send({ type: "REMOVE_JOB", payload: { id: b.dataset.id } });
       toast("Removed");
       await loadQueue();
     }));
@@ -407,24 +416,32 @@
       }
       const text = await file.text();
       const r = await send({ type: "IMPORT_JOB_CSV", payload: { csv: text } });
-      toast(r?.ok ? `Added ${r.data.added} jobs (${r.data.parsed} parsed)` : r?.error || "Failed");
+      if (r?.ok) {
+        const stats = r.data;
+        toast(`Added ${stats.added} jobs (${stats.totalParsed} parsed, ${stats.duplicates} duplicates, ${stats.invalidUrls} invalid)`);
+      } else {
+        toast(r?.error || "Failed");
+      }
       $("impModal").classList.remove("on");
       await loadQueue();
       $("impOk").onclick = null;
     };
   });
   $("btnExportQ").addEventListener("click", async () => {
-    const items = (await send({ type: "GET_JOB_QUEUE" }))?.data;
-    if (!items?.length) {
+    const r = await send({ type: "EXPORT_JOB_RESULTS" });
+    if (!r?.ok || !r.data) {
       toast("Queue is empty");
       return;
     }
-    const header = "url,company,role,priority,notes,status";
-    const rows = items.map(
-      (i) => [i.url, i.company || "", i.role || "", i.priority ?? "", i.notes || "", i.status].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")
-    );
-    download([header, ...rows].join("\n"), "job-queue.csv", "text/csv");
+    download(r.data, "job-queue.csv", "text/csv");
     toast("Exported");
+  });
+  $("btnRetryFailed").addEventListener("click", async () => {
+    const r = await send({ type: "RETRY_FAILED_JOBS" });
+    if (r?.ok) {
+      toast(`Retried ${r.data} jobs`);
+      await loadQueue();
+    }
   });
   $("btnClearQ").addEventListener("click", async () => {
     if (!confirm("Clear entire queue?"))
@@ -432,6 +449,290 @@
     await send({ type: "CLEAR_JOB_QUEUE" });
     toast("Cleared");
     await loadQueue();
+  });
+  function setupCSVDropZone() {
+    const dropZone = $("csvDropZone");
+    const fileInput = $("csvFileInput");
+    dropZone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      if (file)
+        await handleCSVFile(file);
+      fileInput.value = "";
+    });
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add("drag-over");
+    });
+    dropZone.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("drag-over");
+    });
+    dropZone.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("drag-over");
+      const files = e.dataTransfer?.files;
+      if (files?.length) {
+        const file = files[0];
+        if (file.name.endsWith(".csv") || file.name.endsWith(".txt") || file.type === "text/csv" || file.type === "text/plain") {
+          await handleCSVFile(file);
+        } else {
+          toast("Please drop a .csv or .txt file");
+        }
+      }
+    });
+  }
+  async function handleCSVFile(file) {
+    const text = await file.text();
+    const r = await send({ type: "IMPORT_JOB_CSV", payload: { csv: text } });
+    if (!r?.ok) {
+      toast(r?.error || "Import failed");
+      return;
+    }
+    const stats = r.data;
+    $("importStatsPanel").style.display = "block";
+    $("isParsed").textContent = String(stats.totalParsed);
+    $("isValid").textContent = String(stats.validUrls);
+    $("isInvalid").textContent = String(stats.invalidUrls);
+    $("isDups").textContent = String(stats.duplicates);
+    $("isAdded").textContent = String(stats.added);
+    if (stats.invalidRows.length) {
+      $("invalidRowsPanel").style.display = "block";
+      $("invalidRowsBody").innerHTML = stats.invalidRows.map(
+        (r2) => `<tr><td>${r2.row}</td><td>${escHtml(r2.url)}</td><td>${escHtml(r2.reason)}</td></tr>`
+      ).join("");
+    } else {
+      $("invalidRowsPanel").style.display = "none";
+    }
+    toast(`Imported ${stats.added} jobs from CSV`);
+    await loadImportedJobs();
+    await loadQueue();
+  }
+  async function loadImportedJobs() {
+    const sr = await send({ type: "GET_IMPORT_STATS" });
+    if (sr?.ok) {
+      const s = sr.data;
+      $("impTotal").textContent = String(s.total);
+      $("impPending").textContent = String(s.pending);
+      $("impApplied").textContent = String(s.applied);
+      $("impFailed").textContent = String(s.failed);
+      $("impSkipped").textContent = String(s.skipped);
+    }
+    const r = await send({ type: "GET_JOB_QUEUE" });
+    if (!r?.ok)
+      return;
+    const allItems = r.data;
+    const imported = allItems.filter((i) => i.source === "csv_import");
+    renderImportedJobs(imported);
+  }
+  function renderImportedJobs(items) {
+    const body = $("impBody");
+    const noImp = $("noImp");
+    if (!items.length) {
+      body.innerHTML = "";
+      noImp.style.display = "block";
+      return;
+    }
+    noImp.style.display = "none";
+    body.innerHTML = items.map((it, idx) => {
+      const urlShort = it.url.length > 40 ? it.url.slice(0, 40) + "..." : it.url;
+      return `<tr>
+      <td>${idx + 1}</td>
+      <td><a href="${escHtml(it.url)}" target="_blank" rel="noopener">${escHtml(urlShort)}</a></td>
+      <td>${escHtml(it.company || "-")}</td>
+      <td>${escHtml(it.role || "-")}</td>
+      <td><span class="badge ${STATUS_BADGE[it.status] || "badge-g"}">${it.status.replace(/_/g, " ")}</span></td>
+      <td>
+        <button class="btn btn-s btn-p open-imp" data-id="${it.id}" data-url="${escHtml(it.url)}">Open</button>
+        <button class="btn btn-s btn-d rm-imp" data-id="${it.id}">Del</button>
+      </td>
+    </tr>`;
+    }).join("");
+    body.querySelectorAll(".open-imp").forEach((b) => b.addEventListener("click", async () => {
+      await send({ type: "OPEN_JOB_TAB", payload: { id: b.dataset.id, url: b.dataset.url } });
+      toast("Opened");
+      await loadImportedJobs();
+    }));
+    body.querySelectorAll(".rm-imp").forEach((b) => b.addEventListener("click", async () => {
+      await send({ type: "REMOVE_JOB", payload: { id: b.dataset.id } });
+      toast("Removed");
+      await loadImportedJobs();
+    }));
+  }
+  $("btnStartImported").addEventListener("click", async () => {
+    await send({ type: "START_AUTO_APPLY", payload: { source: "imported" } });
+    $("btnStartImported").style.display = "none";
+    $("btnStopImported").style.display = "";
+    $("btnPauseImported").style.display = "";
+    toast("Auto-apply started for imported jobs");
+  });
+  $("btnStopImported").addEventListener("click", async () => {
+    await send({ type: "STOP_AUTO_APPLY" });
+    $("btnStopImported").style.display = "none";
+    $("btnPauseImported").style.display = "none";
+    $("btnStartImported").style.display = "";
+    toast("Auto-apply stopped");
+  });
+  $("btnPauseImported").addEventListener("click", async () => {
+    await send({ type: "PAUSE_AUTO_APPLY" });
+    toast("Auto-apply paused");
+  });
+  $("btnExportResults").addEventListener("click", async () => {
+    const r = await send({ type: "EXPORT_JOB_RESULTS" });
+    if (!r?.ok || !r.data) {
+      toast("No results to export");
+      return;
+    }
+    download(r.data, "import-results.csv", "text/csv");
+    toast("Exported results");
+  });
+  $("btnClearImported").addEventListener("click", async () => {
+    if (!confirm("Clear all imported jobs?"))
+      return;
+    const r = await send({ type: "GET_JOB_QUEUE" });
+    if (!r?.ok)
+      return;
+    const imported = r.data.filter((i) => i.source === "csv_import");
+    for (const job of imported) {
+      await send({ type: "REMOVE_JOB", payload: { id: job.id } });
+    }
+    toast("Cleared imported jobs");
+    await loadImportedJobs();
+    await loadQueue();
+  });
+  async function loadSettingsUI() {
+    const r = await send({ type: "GET_SETTINGS" });
+    if (!r?.ok)
+      return;
+    const s = r.data;
+    $("sAutoApplyEnabled").checked = s.autoApply.enabled;
+    $("sAutoSubmit").checked = s.autoApply.autoSubmit;
+    $("sAutoDetect").checked = s.autoDetectAndFill;
+    $("sHumanPacing").checked = s.autoApply.humanLikePacing;
+    $("sCloseTab").checked = s.autoApply.closeTabAfterApply;
+    $("sRequireResume").checked = s.autoApply.requireResumeForSubmit;
+    $("sUniversalForm").checked = s.universalFormDetection !== false;
+    $("sTailoringEnabled").checked = s.tailoring?.enabled !== false;
+    const intensitySlider = $("sTailoringIntensity");
+    intensitySlider.value = String(Math.round((s.tailoring?.intensity ?? 0.8) * 100));
+    $("sTailoringIntensityVal").textContent = `${intensitySlider.value}%`;
+    intensitySlider.addEventListener("input", () => {
+      $("sTailoringIntensityVal").textContent = `${intensitySlider.value}%`;
+    });
+    $("sTailoringKeywords").value = (s.tailoring?.profileKeywords || []).join(", ");
+    $("sTailoringTargetKw").value = (s.tailoring?.targetKeywords || []).join(", ");
+    $("sTailoringProfile").value = s.tailoring?.profileSummary || "";
+    $("sMaxHour").value = String(s.autoApply.rateLimit.maxPerHour);
+    $("sMaxDay").value = String(s.autoApply.rateLimit.maxPerDay);
+    $("sDelay").value = String(s.autoApply.delayBetweenJobs / 1e3);
+    $("sScraperEnabled").checked = s.scraper.enabled;
+    $("sSourceAts").checked = s.scraper.sources.ats;
+    $("sSourceIndeed").checked = s.scraper.sources.indeed;
+    $("sSourceLinkedin").checked = s.scraper.sources.linkedinNonEasyApply;
+    $("sTargetCount").value = String(s.scraper.targetCountPerSession);
+    $("sInterval").value = String(s.scraper.intervalMinutes);
+    $("hdrCredits").textContent = s.creditsUnlimited ? "Credits: Unlimited" : "Credits: Limited";
+    if (s.applicationsAccount) {
+      $("accountStatus").textContent = `Account saved: ${s.applicationsAccount.email}`;
+      $("appEmail").value = s.applicationsAccount.email;
+    }
+    renderPlatformList(s.supportedPlatforms);
+  }
+  function renderPlatformList(platforms) {
+    const platformData = [
+      { id: "workday", name: "Workday", domains: ["myworkdayjobs.com", "myworkday.com"] },
+      { id: "greenhouse", name: "Greenhouse", domains: ["greenhouse.io"] },
+      { id: "lever", name: "Lever", domains: ["lever.co"] },
+      { id: "smartrecruiters", name: "SmartRecruiters", domains: ["smartrecruiters.com"] },
+      { id: "icims", name: "iCIMS", domains: ["icims.com"] },
+      { id: "taleo", name: "Taleo", domains: ["taleo.net"] },
+      { id: "ashby", name: "Ashby", domains: ["ashbyhq.com"] },
+      { id: "bamboohr", name: "BambooHR", domains: ["bamboohr.com"] },
+      { id: "oraclecloud", name: "Oracle Cloud HCM", domains: ["oraclecloud.com"] },
+      { id: "linkedin", name: "LinkedIn (Non-Easy Apply)", domains: ["linkedin.com"] },
+      { id: "indeed", name: "Indeed", domains: ["indeed.com"] },
+      { id: "companysite", name: "Company Career Sites (Universal)", domains: ["any career/jobs page"] }
+    ];
+    const el = $("platformList");
+    el.innerHTML = platformData.map((p) => `
+    <div class="platform-row">
+      <label class="toggle"><input type="checkbox" class="platform-toggle" data-id="${p.id}" ${platforms[p.id] !== false ? "checked" : ""}><span class="slider"></span></label>
+      <span class="platform-name">${escHtml(p.name)}</span>
+      <span class="platform-domains">${p.domains.map((d) => `<code>${escHtml(d)}</code>`).join(", ")}</span>
+    </div>
+  `).join("");
+  }
+  $("btnSaveAllSettings").addEventListener("click", async () => {
+    const r = await send({ type: "GET_SETTINGS" });
+    if (!r?.ok)
+      return;
+    const s = r.data;
+    s.autoApply.enabled = $("sAutoApplyEnabled").checked;
+    s.autoApply.autoSubmit = $("sAutoSubmit").checked;
+    s.autoDetectAndFill = $("sAutoDetect").checked;
+    s.autoApply.humanLikePacing = $("sHumanPacing").checked;
+    s.autoApply.closeTabAfterApply = $("sCloseTab").checked;
+    s.autoApply.requireResumeForSubmit = $("sRequireResume").checked;
+    s.universalFormDetection = $("sUniversalForm").checked;
+    s.tailoring = s.tailoring || { enabled: true, intensity: 0.8, profileKeywords: [], targetKeywords: [], profileSummary: "" };
+    s.tailoring.enabled = $("sTailoringEnabled").checked;
+    s.tailoring.intensity = parseInt($("sTailoringIntensity").value) / 100;
+    s.tailoring.profileKeywords = $("sTailoringKeywords").value.split(",").map((s2) => s2.trim()).filter(Boolean);
+    s.tailoring.targetKeywords = $("sTailoringTargetKw").value.split(",").map((s2) => s2.trim()).filter(Boolean);
+    s.tailoring.profileSummary = $("sTailoringProfile").value.trim();
+    s.autoApply.rateLimit.maxPerHour = parseInt($("sMaxHour").value) || 30;
+    s.autoApply.rateLimit.maxPerDay = parseInt($("sMaxDay").value) || 200;
+    s.autoApply.delayBetweenJobs = (parseInt($("sDelay").value) || 3) * 1e3;
+    s.scraper.enabled = $("sScraperEnabled").checked;
+    s.scraper.sources.ats = $("sSourceAts").checked;
+    s.scraper.sources.indeed = $("sSourceIndeed").checked;
+    s.scraper.sources.linkedinNonEasyApply = $("sSourceLinkedin").checked;
+    s.scraper.targetCountPerSession = parseInt($("sTargetCount").value) || 50;
+    s.scraper.intervalMinutes = parseInt($("sInterval").value) || 10;
+    document.querySelectorAll(".platform-toggle").forEach((toggle) => {
+      const id = toggle.dataset.id;
+      s.supportedPlatforms[id] = toggle.checked;
+    });
+    s.creditsUnlimited = true;
+    await send({ type: "SAVE_SETTINGS", payload: s });
+    toast("Settings saved");
+  });
+  $("btnSaveAccount").addEventListener("click", async () => {
+    const email = $("appEmail").value.trim();
+    const password = $("appPassword").value;
+    const passphrase = $("appPassphrase").value;
+    if (!email) {
+      toast("Email is required");
+      return;
+    }
+    if (!password) {
+      toast("Password is required");
+      return;
+    }
+    if (!passphrase) {
+      toast("Encryption passphrase is required");
+      return;
+    }
+    if (passphrase.length < 8) {
+      toast("Passphrase must be at least 8 characters");
+      return;
+    }
+    await send({ type: "SAVE_APP_ACCOUNT", payload: { email, password, passphrase } });
+    $("appPassword").value = "";
+    $("appPassphrase").value = "";
+    $("accountStatus").textContent = `Account saved: ${email}`;
+    toast("Account saved (encrypted)");
+  });
+  $("btnClearAccount").addEventListener("click", async () => {
+    if (!confirm("Clear saved account credentials?"))
+      return;
+    await send({ type: "CLEAR_APP_ACCOUNT" });
+    $("appEmail").value = "";
+    $("accountStatus").textContent = "";
+    toast("Account cleared");
   });
   $("btnNewLib").addEventListener("click", async () => {
     const name = prompt("Library name:");
@@ -488,7 +789,10 @@
     await loadLibraries();
     await loadResponses();
     await loadQueue();
+    await loadImportedJobs();
     await loadDomainMappings();
+    await loadSettingsUI();
+    setupCSVDropZone();
   }
   init();
 })();
