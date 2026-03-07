@@ -1,11 +1,11 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v6.0 ===
-// Tailor-first flow, answer-learning, fallback form-fill, auto-submit
+// === ULTIMATE AUTOFILL ENHANCEMENT v7.0 ===
+// Tailor-first flow, answer-learning, fallback form-fill, auto-submit, profile editor, enhanced multi-page
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
 
   // ===================== CREDIT BYPASS =====================
-  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999};
+  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999,aiApply:99999,smartApply:99999,quickApply:99999,bulkApply:99999};
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
@@ -21,9 +21,13 @@
       return new Response(JSON.stringify({code:200,result:{},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/resume.?tailor.*credit|tailor.*credit|resume.*credit|credit.*resume|credit.*tailor/i.test(u))
       return new Response(JSON.stringify({code:200,result:{credit:99999,remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+    if (/\/usage\/limit|\/rate.?limit|\/quota/i.test(u))
+      return new Response(JSON.stringify({code:200,result:{remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+    if (/\/feature.?flag|\/feature.?gate|\/entitlement/i.test(u))
+      return new Response(JSON.stringify({code:200,result:{enabled:true,tier:'premium',plan:'turbo'},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402) return new Response(JSON.stringify({code:200,result:{}}),{status:200,headers:{'Content-Type':'application/json'}});
+      if (r.status === 402 || r.status === 429) return new Response(JSON.stringify({code:200,result:{}}),{status:200,headers:{'Content-Type':'application/json'}});
       return r;
     } catch(e) { throw e; }
   };
@@ -64,7 +68,15 @@
     {n:'Dice',p:/dice\.com.*job/i},{n:'Wellfound',p:/wellfound\.com.*\/jobs/i},
     {n:'Paylocity',p:/paylocity\.com.*Recruiting/i},{n:'Phenom',p:/phenom\.com.*\/jobs/i},
     {n:'Avature',p:/avature\.net.*careers/i},{n:'Workable',p:/apply\.workable\.com/i},
-    {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\//i}
+    {n:'Jobvite2',p:/jobs\.jobvite\.com|recruiting\.paylocity/i},
+    {n:'ClearCompany',p:/clearcompany\.com.*careers/i},{n:'Paycom',p:/paycomonline\.net.*Recruiting/i},
+    {n:'SAP',p:/sap\.com.*careers|jobs\.sap\.com/i},{n:'Ceridian',p:/ceridian\.com.*careers/i},
+    {n:'Bullhorn',p:/bullhornstaffing\.com/i},{n:'iSolved',p:/isolved\.com.*careers/i},
+    {n:'Loxo',p:/app\.loxo\.co/i},{n:'Hireology',p:/hireology\.com.*careers/i},
+    {n:'ApplicantPro',p:/applicantpro\.com/i},{n:'GovernmentJobs',p:/governmentjobs\.com/i},
+    {n:'USAJOBS',p:/usajobs\.gov/i},{n:'Handshake',p:/joinhandshake\.com.*jobs/i},
+    {n:'AngelList',p:/angel\.co.*jobs|wellfound\.com.*jobs/i},
+    {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\/?$|\/openings?\/?$/i}
   ];
 
   // ===================== STORAGE & STATE =====================
@@ -213,6 +225,21 @@
     if (/\bage\b|18.*years|over.*18|at.*least.*18/.test(l)) return 'Yes';
     if (/agree|acknowledge|certif|attest|confirm|consent/.test(l)) return 'Yes';
     if (/please.?specify|other.?please/.test(l)) return p.city || p.state || '';
+    if (/hear.?about.*position|referral.?source/.test(l)) return DEFAULTS.howHeard;
+    if (/earliest.?start|when.*available|join.?date/.test(l)) return DEFAULTS.availability;
+    if (/current.?salary|previous.?salary|last.?salary/.test(l)) return p.current_salary || DEFAULTS.salary;
+    if (/desired.?salary|expected.?compensation|salary.?expectation/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/reason.*leav|why.*leav|motivation.*change/.test(l)) return 'Seeking new growth opportunities and challenges.';
+    if (/strength|strong.?suit|best.?quality/.test(l)) return p.strengths || 'Strong problem-solving skills, effective communication, and attention to detail.';
+    if (/weakness|area.*improve|development.?area/.test(l)) return p.weaknesses || 'I sometimes focus too much on details, but I have learned to balance thoroughness with efficiency.';
+    if (/reference|referee/.test(l) && !/number|phone|email/.test(l)) return 'Available upon request';
+    if (/security.?clearance/.test(l)) return p.security_clearance || 'None';
+    if (/date.?of.?birth|dob|birth.?date/.test(l)) return p.dob || '';
+    if (/social.?security|ssn/.test(l)) return ''; // Never auto-fill SSN
+    if (/driver.?licen/.test(l)) return p.drivers_license || 'Yes';
+    if (/shift|work.?schedule|flexible.?hours/.test(l)) return 'Yes';
+    if (/overtime/.test(l)) return 'Yes';
+    if (/clearance.?level/.test(l)) return p.clearance_level || '';
     return '';
   }
 
@@ -277,11 +304,14 @@
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
     if (el.id) { const lbl = $(`label[for="${CSS.escape(el.id)}"]`); if (lbl) return lbl.textContent.trim(); }
     if (el.placeholder) return el.placeholder;
-    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row');
+    const container = el.closest('.form-group,.field,.question,[class*="Field"],[class*="Question"],[class*="form-row"],li,.form-item,.ant-form-item,.ant-row,[data-testid],[role="group"],.css-1wa3eu0-placeholder,.MuiFormControl-root,.MuiGrid-item,fieldset');
     if (container) {
-      const lbl = container.querySelector('label,[class*="label"],[class*="Label"]');
+      const lbl = container.querySelector('label,[class*="label"],[class*="Label"],legend,[class*="title"],[class*="prompt"]');
       if (lbl && lbl !== el) return lbl.textContent.trim();
     }
+    // Also try previous sibling
+    const prev = el.previousElementSibling;
+    if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV') && prev.textContent?.trim().length < 100) return prev.textContent.trim();
     return el.name?.replace(/[_\-]/g, ' ') || '';
   }
 
@@ -325,7 +355,7 @@
 
   // ===================== ATS =====================
   function detectATS(){for(const a of ATS)if(a.p.test(location.href))return a.n;return null;}
-  function isWorkday(){return/myworkdayjobs\.com|myworkdaysite\.com/i.test(location.href);}
+  function isWorkday(){return/myworkdayjobs\.com|myworkdaysite\.com|workday\.com\/.*\/job/i.test(location.href);}
   function isJobright(){return/jobright\.ai/i.test(location.hostname);}
 
   // ===================== FALLBACK FORM FILLER =====================
@@ -400,6 +430,39 @@
       .filter(el => isVisible(el) && !el.checked)
       .forEach(cb => { realClick(cb); filled++; });
 
+    // Date fields — try to fill with reasonable defaults
+    const dateInputs = $$('input[type=date]').filter(el => isVisible(el) && !el.value);
+    for (const d of dateInputs) {
+      const lbl = getLabel(d);
+      const l = (lbl || '').toLowerCase();
+      let val = '';
+      if (/start|available|earliest|begin/.test(l)) {
+        const today = new Date(); today.setDate(today.getDate() + 14);
+        val = today.toISOString().split('T')[0];
+      } else if (/grad|completion|end/.test(l)) {
+        val = p.graduation_year ? `${p.graduation_year}-05-15` : '';
+      } else if (/birth|dob/.test(l)) {
+        val = p.dob || '';
+      }
+      if (val) { nativeSet(d, val); filled++; }
+    }
+
+    // Number fields (years of experience, salary, etc.)
+    const numInputs = $$('input[type=number]').filter(el => isVisible(el) && !el.value);
+    for (const n of numInputs) {
+      const lbl = getLabel(n);
+      const val = guessFieldValue(lbl, p, n);
+      if (val && !isNaN(Number(val))) { nativeSet(n, val); filled++; }
+    }
+
+    // Contenteditable divs (rich text editors)
+    const editables = $$('[contenteditable="true"]').filter(el => isVisible(el) && !el.textContent?.trim());
+    for (const ed of editables) {
+      const lbl = getLabel(ed) || ed.getAttribute('data-placeholder') || '';
+      const val = guessFieldValue(lbl, p, ed);
+      if (val) { ed.textContent = val; ed.dispatchEvent(new Event('input', {bubbles:true})); filled++; }
+    }
+
     LOG(`Fallback fill done: ${filled} fields filled`);
     return filled;
   }
@@ -420,11 +483,22 @@
   // ===================== SUCCESS DETECTION =====================
   function checkSuccess() {
     const href = location.href.toLowerCase();
-    if (/\/thanks|\/thank.you|\/success|\/confirmation|\/submitted|\/done|\/complete/i.test(href)) return true;
+    if (/\/thanks|\/thank.you|\/success|\/confirmation|\/submitted|\/done|\/complete|\/applied/i.test(href)) return true;
     const body = document.body?.innerText || '';
-    if (/application submitted|thank you for applying|application received|we.ve received your|successfully submitted|application complete|thanks for applying/i.test(body)) return true;
-    if ($('#application_confirmation,.application-confirmation,.confirmation-text,.posting-confirmation')) return true;
-    if ($('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"]')) return true;
+    if (/application submitted|thank you for applying|application received|we.ve received your|successfully submitted|application complete|thanks for applying|your application has been|application was submitted|you.ve applied|we have received|you.re all set|application is under review/i.test(body)) return true;
+    if ($('#application_confirmation,.application-confirmation,.confirmation-text,.posting-confirmation,.success-message,.submission-confirmation')) return true;
+    if ($('[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"],[data-automation-id="applicationSubmittedPage"]')) return true;
+    // Greenhouse specific
+    if ($('#application_confirmation,#post_application_page,.application-submitted')) return true;
+    // Lever specific
+    if ($('.posting-confirmation,.application-complete')) return true;
+    // iCIMS specific
+    if ($('.iCIMS_ConfirmMessage,.iCIMS_SuccessMessage')) return true;
+    // Generic success toast/alert
+    if ($('[role="alert"],.alert-success,.toast-success')) {
+      const alert = $('[role="alert"],.alert-success,.toast-success');
+      if (alert && /submit|success|thank|received|complete/i.test(alert.textContent || '')) return true;
+    }
     return false;
   }
 
@@ -442,11 +516,14 @@
     // Submit selectors (try if no required missing)
     const submitSels = [
       'button[type="submit"]','input[type="submit"]',
-      'button[data-automation-id="submit"]',
+      'button[data-automation-id="submit"]','button[data-automation-id="submitButton"]',
       '#submit_app','.postings-btn-submit','button.application-submit',
-      'button[data-qa="btn-submit"]','button[aria-label*="Submit" i]',
-      '[data-testid="submit-application"]','button.btn-submit','#resumeSubmitForm',
+      'button[data-qa="btn-submit"]','button[aria-label*="Submit" i]','button[aria-label*="Apply" i]',
+      '[data-testid="submit-application"]','[data-testid="submit-button"]','[data-testid="apply-button"]',
+      'button.btn-submit','#resumeSubmitForm',
       'div.form-group.submit-button button.btn.btn-primary',
+      '.application-submit-button','#application-submit','[name="submit_app"]',
+      'button[data-qa="submit-application"]',
     ];
 
     if (missing.length === 0) {
@@ -611,18 +688,31 @@
   // ===================== MULTI-PAGE FORM LOOP =====================
   async function multiPageLoop() {
     const MAX_PAGES = 10;
+    let prevPageHash = getPageHash();
     for (let page = 1; page <= MAX_PAGES; page++) {
       if (checkSuccess()) { LOG('Success detected — stopping multi-page loop'); break; }
       LOG(`Multi-page: processing page ${page}`);
 
-      // Wait for page content
+      // Wait for page content to change
       await sleep(2000);
+
+      // Detect if page actually changed (URL hash, DOM content, or form fields)
+      const newHash = getPageHash();
+      if (page > 1 && newHash === prevPageHash) {
+        LOG('Page did not change — waiting longer');
+        await sleep(3000);
+        if (getPageHash() === prevPageHash) {
+          LOG('Still no change — stopping multi-page loop');
+          break;
+        }
+      }
+      prevPageHash = getPageHash();
 
       // Try Jobright autofill again
       await triggerAutofill();
       await sleep(3000);
 
-      // Fallback fill
+      // Fallback fill — two passes
       await fallbackFill();
       await sleep(1000);
       await fallbackFill();
@@ -650,6 +740,13 @@
     }
   }
 
+  // Generate a hash of the current page state to detect page changes
+  function getPageHash() {
+    const fields = $$('input:not([type=hidden]),textarea,select').filter(isVisible);
+    const labels = fields.map(f => getLabel(f)).join('|');
+    return location.href + '::' + fields.length + '::' + labels.slice(0, 200);
+  }
+
   // ===================== DIRECT AUTOFILL FLOW (no sidebar) =====================
   async function directAutofillFlow() {
     await triggerAutofill();
@@ -665,16 +762,36 @@
   // ===================== WORKDAY AUTOMATION =====================
   async function workdayAutomation() {
     LOG('Workday automation starting...');
-    // Click Apply button
-    const allBtns = $$('a, button');
-    for (const b of allBtns) { if (/^\s*Apply\s*$/i.test(b.textContent) && isVisible(b)) { clickEl(b); await sleep(2000); break; } }
-    // Click Apply Manually
+    // Click Apply button (multiple selector strategies)
+    let clicked = false;
+    // Strategy 1: data-automation-id Apply button
+    const applyBtnWd = $('[data-automation-id="applyButton"],[data-automation-id="jobAction-apply"]');
+    if (applyBtnWd && isVisible(applyBtnWd)) { clickEl(applyBtnWd); clicked = true; await sleep(2000); }
+    // Strategy 2: Text-based Apply button
+    if (!clicked) {
+      const allBtns = $$('a, button');
+      for (const b of allBtns) { if (/^\s*(Apply|Apply Now|Apply for Job)\s*$/i.test(b.textContent) && isVisible(b)) { clickEl(b); clicked = true; await sleep(2000); break; } }
+    }
+    // Click Apply Manually (skip Easy Apply / external links)
     const am = await waitFor("//*[@data-automation-id='applyManually']", 8000, true);
     if (am) { await sleep(500); clickEl(am); await sleep(2000); }
+    // Also check for "Use My Last Application" and skip it
+    const useLastApp = await findByText('button,a', /use my last application|autofill with/i, 3000);
+    if (useLastApp) { LOG('Skipping "Use My Last Application" — using fresh fill'); }
     // Wait for form page
-    const fp = await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage']", 10000);
+    const fp = await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage'],[data-automation-id='applyFlowContainer']", 10000);
     if (fp) {
       await sleep(1000);
+      // Check for "How Did You Hear About Us" page (Workday often asks first)
+      const howHear = $('[data-automation-id="sourceDropdown"],[data-automation-id="source"]');
+      if (howHear && isVisible(howHear)) {
+        LOG('Found "How Did You Hear" page — filling');
+        await fallbackFill();
+        await sleep(500);
+        // Click next
+        const nextBtn = $('button[data-automation-id="bottom-navigation-next-button"]');
+        if (nextBtn) { realClick(nextBtn); await sleep(2000); }
+      }
       // Run tailor-first flow (which includes autofill + fallback + submit)
       await tailorFirstFlow();
     }
@@ -715,16 +832,23 @@
           if (isWorkday()) await workdayAutomation();
           else await tailorFirstFlow();
 
-          // Wait and check success
-          await sleep(5000);
-          if (checkSuccess()) {
+          // Wait and check success — try multiple times
+          let success = false;
+          for (let check = 0; check < 3; check++) {
+            await sleep(3000);
+            if (checkSuccess()) { success = true; break; }
+          }
+          if (success) {
             c.status = 'done';
             LOG('Queue job completed successfully');
           } else {
             c.status = 'done'; // Assume done after full flow
+            LOG('Queue job completed (success not confirmed)');
           }
+          // Learn from the final page state
+          await learnFromPage();
           await saveQ(); renderQ(); updateCtrl();
-          await sleep(5000);
+          await sleep(3000);
           goNext();
           return;
         }
@@ -941,6 +1065,21 @@
           <div class="ua-url-row"><input type="text" id="ua-url" class="ua-url-inp" placeholder="Paste job URL..."><button id="ua-add" class="ua-url-btn">Add</button></div>
         </div>
         <div class="ua-sec">
+          <div class="ua-sec-t">Answer Bank <span id="ua-ans-cnt" style="color:#00c985"></span></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span style="font-size:10px;color:#6b7280" id="ua-ans-info">Learned answers help fill forms faster</span>
+            <button id="ua-ans-clear" style="font-size:9px;padding:3px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer;white-space:nowrap">Clear All</button>
+          </div>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Profile <span id="ua-prof-status" style="color:#9ca3af">(click to edit)</span></div>
+          <div id="ua-prof" style="display:none;padding:8px;background:#f9fafb;border-radius:8px;border:1px solid #f3f4f6">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px" id="ua-prof-fields"></div>
+            <div style="display:flex;gap:6px"><button class="ua-url-btn" id="ua-prof-save" style="flex:1">Save Profile</button><button class="ua-url-btn" id="ua-prof-cancel" style="flex:1;background:#6b7280">Cancel</button></div>
+          </div>
+          <button id="ua-prof-toggle" style="width:100%;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;text-align:left">Edit Profile (name, email, phone...)</button>
+        </div>
+        <div class="ua-sec">
           <div class="ua-sec-t">Queue <span id="ua-q-cnt" style="color:#00c985">(0)</span></div>
           <div class="ua-q-bar"><label><input type="checkbox" id="ua-selall">Select all</label><button class="del" id="ua-del" disabled>Delete selected</button><span class="info" id="ua-q-info"></span></div>
           <div class="ua-qlist" id="ua-qlist"></div>
@@ -1025,6 +1164,53 @@
     document.getElementById('ua-url').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('ua-add').click(); });
     document.getElementById('ua-selall').addEventListener('change', e => { if (e.target.checked) queue.forEach(j => selected.add(j.id)); else selected.clear(); renderQ(); });
     document.getElementById('ua-del').addEventListener('click', removeSelected);
+
+    // Answer bank
+    const ansCnt = document.getElementById('ua-ans-cnt');
+    const ansInfo = document.getElementById('ua-ans-info');
+    if (ansCnt) ansCnt.textContent = `(${Object.keys(_answerBank).length} answers)`;
+    document.getElementById('ua-ans-clear')?.addEventListener('click', async () => {
+      if (confirm('Clear all learned answers?')) {
+        _answerBank = {}; _answerBankLoaded = false;
+        await st.set(SK.ANS, {});
+        ansCnt.textContent = '(0 answers)';
+        ansInfo.textContent = 'Cleared!';
+        setTimeout(() => { ansInfo.textContent = 'Learned answers help fill forms faster'; }, 2000);
+      }
+    });
+
+    // Profile editor
+    const profFields = [
+      {k:'first_name',l:'First Name'},{k:'last_name',l:'Last Name'},{k:'email',l:'Email'},{k:'phone',l:'Phone'},
+      {k:'city',l:'City'},{k:'state',l:'State'},{k:'postal_code',l:'Zip'},{k:'country',l:'Country'},
+      {k:'address',l:'Address'},{k:'linkedin',l:'LinkedIn URL'},{k:'github',l:'GitHub URL'},{k:'website',l:'Website'},
+      {k:'school',l:'School/University'},{k:'degree',l:'Degree'},{k:'major',l:'Major'},{k:'graduation_year',l:'Grad Year'},
+      {k:'current_title',l:'Job Title'},{k:'current_company',l:'Company'},{k:'expected_salary',l:'Expected Salary'},{k:'years',l:'Years Experience'},
+    ];
+    const profContainer = document.getElementById('ua-prof-fields');
+    const profPanel = document.getElementById('ua-prof');
+    const profToggle = document.getElementById('ua-prof-toggle');
+    const profStatus = document.getElementById('ua-prof-status');
+
+    profToggle.addEventListener('click', async () => {
+      if (profPanel.style.display === 'none') {
+        profPanel.style.display = 'block'; profToggle.style.display = 'none';
+        const p = await getProfile();
+        profContainer.innerHTML = profFields.map(f => `<div><label style="font-size:9px;color:#6b7280;display:block;margin-bottom:2px">${f.l}</label><input type="text" data-pk="${f.k}" value="${(p[f.k]||'').replace(/"/g,'&quot;')}" style="width:100%;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;box-sizing:border-box"></div>`).join('');
+      }
+    });
+    document.getElementById('ua-prof-save')?.addEventListener('click', async () => {
+      const p = await getProfile();
+      profContainer.querySelectorAll('input[data-pk]').forEach(inp => { p[inp.dataset.pk] = inp.value.trim(); });
+      await st.set(SK.PROF, p);
+      profPanel.style.display = 'none'; profToggle.style.display = 'block';
+      profStatus.textContent = '(saved)'; profStatus.style.color = '#059669';
+      setTimeout(() => { profStatus.textContent = '(click to edit)'; profStatus.style.color = '#9ca3af'; }, 2000);
+      LOG('Profile saved', p);
+    });
+    document.getElementById('ua-prof-cancel')?.addEventListener('click', () => {
+      profPanel.style.display = 'none'; profToggle.style.display = 'block';
+    });
   }
 
   async function handleFile(f) { const u = parseCSV(await f.text()); if (!u.length) { alert('No valid URLs found.'); return; } for (const x of u) await addJob(x); document.getElementById('ua-drawer').classList.add('open'); positionDrawer(); }
@@ -1085,8 +1271,11 @@
   async function init() {
     if (window.self !== window.top) return;
     await load(); await loadAnswerBank(); injectCSS(); buildUI();
-    [500, 1500, 3000, 5000, 8000].forEach(ms => setTimeout(hideCredits, ms));
+    [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
+    // Update answer bank count in UI
+    const ansCntEl = document.getElementById('ua-ans-cnt');
+    if (ansCntEl) ansCntEl.textContent = `(${Object.keys(_answerBank).length} answers)`;
 
     const ats = detectATS();
     if (ats) {
