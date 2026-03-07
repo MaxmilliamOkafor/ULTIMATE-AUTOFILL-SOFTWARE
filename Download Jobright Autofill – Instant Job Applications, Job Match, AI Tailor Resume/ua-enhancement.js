@@ -116,8 +116,19 @@
     getMulti:keys=>new Promise(r=>chrome.storage.local.get(keys,d=>r(d)))
   };
   let queue=[],qActive=false,qPaused=false,autoApply=false,selected=new Set();
-  async function load(){queue=(await st.get(SK.Q))||[];qActive=(await st.get(SK.QA))||false;qPaused=(await st.get(SK.QP))||false;autoApply=(await st.get(SK.AA))||false;}
+  // LazyApply-enhanced state tracking
+  let qStats = { completed:0, failed:0, skipped:0, timedOut:0, totalTime:0 };
+  let qStoppedAt = -1; // LazyApply session resumption index
+  async function load(){
+    queue=(await st.get(SK.Q))||[];
+    qActive=(await st.get(SK.QA))||false;
+    qPaused=(await st.get(SK.QP))||false;
+    autoApply=(await st.get(SK.AA))||false;
+    qStats=(await st.get('ua_q_stats'))||qStats;
+    qStoppedAt=(await st.get('ua_q_stopped_at'))||-1;
+  }
   async function saveQ(){await st.set(SK.Q,queue);}
+  async function saveStats(){await st.set('ua_q_stats',qStats);}
 
   // ===================== ANSWER LEARNING SYSTEM =====================
   // Stores answers keyed by normalized field label for future reuse
@@ -378,7 +389,7 @@
   }
 
   // ===================== QUEUE OPS =====================
-  async function addJob(url,title){if(!url||queue.some(j=>j.url===url))return;queue.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),url,title:title||shortUrl(url),status:'pending',addedAt:Date.now()});await saveQ();renderQ();updateCtrl();}
+  async function addJob(url,title,meta){if(!url||queue.some(j=>j.url===url))return;queue.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),url,title:title||shortUrl(url),status:'pending',addedAt:Date.now(),jobBoard:detectJobBoard(url),companyName:meta?.companyName||'',error:null,startedAt:null,completedAt:null,duration:null,...(meta||{})});await saveQ();renderQ();updateCtrl();}
   async function removeJob(id){queue=queue.filter(j=>j.id!==id);selected.delete(id);await saveQ();renderQ();updateCtrl();}
   async function clearQ(){queue=[];selected.clear();await saveQ();renderQ();updateCtrl();}
   async function removeSelected(){queue=queue.filter(j=>!selected.has(j.id));selected.clear();await saveQ();renderQ();updateCtrl();}
@@ -886,22 +897,77 @@
 
   // Helper: select value from Workday popup dropdown
   async function selectFromWorkdayDropdown(btn, value) {
+    if (!btn) return false;
+    // Handle <select> elements directly
+    if (btn.tagName === 'SELECT') {
+      const opt = $$('option', btn).find(o => o.text.toLowerCase().includes(value.toLowerCase()));
+      if (opt) { btn.value = opt.value; btn.dispatchEvent(new Event('change', {bubbles:true})); return true; }
+      return false;
+    }
     realClick(btn);
     await sleep(600);
-    const popup = $('[data-automation-widget="wd-popup"][data-automation-activepopup="true"]');
+    const popup = $('[data-automation-widget="wd-popup"][data-automation-activepopup="true"]') ||
+                  $('[role="listbox"]:not([hidden])') || $('ul[role="listbox"]');
     if (!popup) return false;
-    const items = $$('[data-automation-id="menuItem"],li[role="option"],li', popup);
+    const items = $$('[data-automation-id="menuItem"],li[role="option"],li[role="menuitem"],li', popup);
     const match = items.find(i => i.textContent?.toLowerCase().includes(value.toLowerCase()));
     if (match) { realClick(match); await sleep(300); return true; }
     // Try search input within popup
-    const searchInput = popup.querySelector('input[type="text"],input[type="search"]');
+    const searchInput = popup.querySelector('input[type="text"],input[type="search"]') ||
+                        $('[data-automation-id="searchBox"] input');
     if (searchInput) {
       nativeSet(searchInput, value);
-      await sleep(500);
-      const filtered = $$('[data-automation-id="menuItem"],li[role="option"],li', popup).filter(isVisible);
+      await sleep(800);
+      const filtered = $$('[data-automation-id="menuItem"],li[role="option"],li[role="menuitem"],li', popup).filter(isVisible);
       if (filtered.length) { realClick(filtered[0]); await sleep(300); return true; }
     }
+    // Escape to close popup if nothing matched
+    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}));
     return false;
+  }
+
+  // SpeedyApply XPath helper — evaluate XPath and return first matching element
+  function xpath(expr, ctx) {
+    try { return document.evaluate(expr, ctx || document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; }
+    catch(_) { return null; }
+  }
+  function xpathAll(expr, ctx) {
+    try {
+      const r = document.evaluate(expr, ctx || document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      const out = []; for (let i = 0; i < r.snapshotLength; i++) out.push(r.snapshotItem(i)); return out;
+    } catch(_) { return []; }
+  }
+
+  // SpeedyApply iCIMS-style dropdown interaction: click input → wait for UL → click matching LI
+  async function icimsDropdownSelect(containerXPath, value) {
+    if (!value) return false;
+    const input = xpath(`${containerXPath}//input`);
+    if (!input) return false;
+    input.focus(); nativeSet(input, value); await sleep(500);
+    const ul = xpath(`${containerXPath}//ul`);
+    if (!ul) return false;
+    await sleep(300);
+    // Try exact title match first, then partial
+    const li = xpath(`${containerXPath}//li[contains(@title, '${value.replace(/'/g, "\\'")}')]`) ||
+               xpathAll(`${containerXPath}//li`, null).find(l => l.textContent?.toLowerCase().includes(value.toLowerCase()));
+    if (li) { realClick(li); await sleep(300); return true; }
+    return false;
+  }
+
+  // SpeedyApply: Workday degree mapping with fuzzy matching
+  function mapDegree(degree) {
+    if (!degree) return '';
+    const d = degree.toLowerCase();
+    const map = [
+      [/bachelor|b\.?s\.?|b\.?a\.?|b\.?eng|bsc|undergrad/i, "Bachelor's Degree"],
+      [/master|m\.?s\.?|m\.?a\.?|m\.?eng|msc|mba/i, "Master's Degree"],
+      [/ph\.?d|doctor|doctoral/i, 'Doctorate'],
+      [/associate|a\.?s\.?|a\.?a\./i, "Associate's Degree"],
+      [/high.?school|secondary|ged|diploma/i, 'High School Diploma'],
+      [/mba/i, 'MBA'],
+    ];
+    for (const [re, val] of map) if (re.test(d)) return val;
+    return degree;
   }
 
   // ===================== WORKDAY AUTOMATION (SpeedyApply-enhanced) =====================
@@ -1035,16 +1101,54 @@
     LOG('Workday: source filled');
   }
 
-  // SpeedyApply Workday: education section fill
+  // SpeedyApply Workday: education section fill (enhanced with iCIMS dropdowns + multi-entry)
   async function workdayFillEducation(p) {
+    // Click "Add Education" if no education section exists yet
+    const addEduBtn = $('button[data-automation-id="btnAddEducationHistory"],button[data-automation-id="add-button"]');
+    const eduSection = $('[data-automation-id="educationSection"],[data-automation-id="formField-school"]');
+    if (!eduSection && addEduBtn && isVisible(addEduBtn)) {
+      realClick(addEduBtn); await sleep(1500);
+    }
+
+    const school = p.school || p.university || '';
+    const degree = mapDegree(p.degree || "Bachelor's");
+
+    // Strategy 1: Modern Workday data-automation-id inputs
     const schoolInput = $('input[data-automation-id="school"], [data-automation-id="formField-school"] input');
-    if (schoolInput && !schoolInput.value) { nativeSet(schoolInput, p.school || p.university || ''); await sleep(100); }
+    if (schoolInput && !schoolInput.value && school) {
+      nativeSet(schoolInput, school); await sleep(500);
+      // Handle autocomplete dropdown (type → wait → click match)
+      const autoList = await waitFor('[data-automation-id="school"] [role="listbox"] li, [role="option"]', 1500);
+      if (autoList) { realClick(autoList); await sleep(300); }
+    }
     const degreeInput = $('input[data-automation-id="degree"], [data-automation-id="formField-degree"] input');
-    if (degreeInput && !degreeInput.value) nativeSet(degreeInput, p.degree || "Bachelor's");
+    if (degreeInput && !degreeInput.value) nativeSet(degreeInput, degree);
+    // Degree dropdown button
+    const degreeBtn = $('button[data-automation-id="degree"]:not([disabled])');
+    if (degreeBtn) await selectFromWorkdayDropdown(degreeBtn, degree);
+    // Field of study / Major
+    const majorInput = $('input[data-automation-id="fieldOfStudy"], [data-automation-id="formField-fieldOfStudy"] input, input[data-automation-id="major"]');
+    if (majorInput && !majorInput.value && p.major) nativeSet(majorInput, p.major);
+
+    // Strategy 2: iCIMS-style CandProfileFields dropdowns (SpeedyApply XPath)
+    if (!schoolInput && school) {
+      await icimsDropdownSelect("//div[contains(@id,'CandProfileFields.School_icimsDropdown_ctnr')]", school);
+    }
+    if (!degreeInput && !degreeBtn) {
+      await icimsDropdownSelect("//div[contains(@id,'CandProfileFields.Degree_icimsDropdown_ctnr')]", degree);
+    }
+    if (p.major) {
+      await icimsDropdownSelect("//div[contains(@id,'CandProfileFields.Major_icimsDropdown_ctnr')]", p.major);
+    }
+    // iCIMS GPA
+    const icimsGpa = xpath("//div[contains(@id,'CandProfileFields.GPA')]//input");
+    if (icimsGpa && !icimsGpa.value && p.gpa) nativeSet(icimsGpa, p.gpa);
+
     // GPA
     const gpaInput = $('input[data-automation-id="gpa"], [data-automation-id="formField-gradeAverage"] input');
     if (gpaInput && !gpaInput.value && p.gpa) nativeSet(gpaInput, p.gpa);
-    // Date fields (firstYearAttended, lastYearAttended)
+
+    // Date fields — Strategy 1: firstYearAttended/lastYearAttended
     const startYear = $('[data-automation-id="formField-firstYearAttended"] input, [data-automation-id="formField-startDate"] input');
     const endYear = $('[data-automation-id="formField-lastYearAttended"] input, [data-automation-id="formField-endDate"] input');
     if (startYear && !startYear.value && p.graduation_year) {
@@ -1052,21 +1156,119 @@
       nativeSet(startYear, start.toString());
     }
     if (endYear && !endYear.value && p.graduation_year) nativeSet(endYear, p.graduation_year);
-    LOG('Workday: education fields filled');
+
+    // Date fields — Strategy 2: SpeedyApply dateSectionMonth/Year-input pattern
+    const eduDateStartYear = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const eduDateStartMonth = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    const eduDateEndYear = xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const eduDateEndMonth = xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (eduDateStartYear && !eduDateStartYear.value && p.graduation_year) nativeSet(eduDateStartYear, (parseInt(p.graduation_year)-4).toString());
+    if (eduDateStartMonth && !eduDateStartMonth.value) nativeSet(eduDateStartMonth, '09');
+    if (eduDateEndYear && !eduDateEndYear.value && p.graduation_year) nativeSet(eduDateEndYear, p.graduation_year);
+    if (eduDateEndMonth && !eduDateEndMonth.value) nativeSet(eduDateEndMonth, '05');
+
+    // Strategy 3: SpeedyApply indexed education sections (education-1, education-2, etc.)
+    const eduSections = xpathAll('//div[starts-with(@data-automation-id,"education-")]');
+    if (eduSections.length) {
+      for (const sec of eduSections) {
+        const secSchool = sec.querySelector('input[data-automation-id="school"]');
+        if (secSchool && !secSchool.value && school) { nativeSet(secSchool, school); await sleep(100); }
+        const secDegree = sec.querySelector('button[data-automation-id="degree"]:not([disabled])');
+        if (secDegree) await selectFromWorkdayDropdown(secDegree, degree);
+      }
+    }
+
+    // iCIMS date fields (Month/Day/Year selects)
+    const icimsStartMonth = xpath("//select[contains(@id,'CandProfileFields.EducationStartDate_Month')]");
+    const icimsStartYear = xpath("//input[contains(@id,'CandProfileFields.EducationStartDate_Year')]");
+    const icimsEndMonth = xpath("//select[contains(@id,'CandProfileFields.EducationEndDate_Month')]");
+    const icimsEndYear = xpath("//input[contains(@id,'CandProfileFields.EducationEndDate_Year')]");
+    if (icimsStartMonth && p.graduation_year) { icimsStartMonth.value = '09'; icimsStartMonth.dispatchEvent(new Event('change',{bubbles:true})); }
+    if (icimsStartYear && !icimsStartYear.value && p.graduation_year) nativeSet(icimsStartYear, (parseInt(p.graduation_year)-4).toString());
+    if (icimsEndMonth && p.graduation_year) { icimsEndMonth.value = '05'; icimsEndMonth.dispatchEvent(new Event('change',{bubbles:true})); }
+    if (icimsEndYear && !icimsEndYear.value && p.graduation_year) nativeSet(icimsEndYear, p.graduation_year);
+
+    // Graduated status
+    const gradSelect = xpath("//select[contains(@id,'CandProfileFields.IsGraduated')]") || $('select[data-automation-id="isGraduated"]');
+    if (gradSelect) { const opt = $$('option',gradSelect).find(o => /yes|complete|graduated/i.test(o.text)); if (opt) { gradSelect.value = opt.value; gradSelect.dispatchEvent(new Event('change',{bubbles:true})); } }
+
+    LOG('Workday: education fields filled (enhanced)');
   }
 
-  // SpeedyApply Workday: experience section fill
+  // SpeedyApply Workday: experience section fill (enhanced with iCIMS + multi-entry + description)
   async function workdayFillExperience(p) {
+    // Click "Add Work Experience" if no experience section exists
+    const addExpBtn = $('button[data-automation-id="btnAddWorkHistory"],button[data-automation-id="add-button"]');
+    const expSection = $('[data-automation-id="workSection"],[data-automation-id="formField-jobTitle"]');
+    if (!expSection && addExpBtn && isVisible(addExpBtn)) {
+      realClick(addExpBtn); await sleep(1500);
+    }
+
+    const title = p.current_title || p.title || '';
+    const company = p.current_company || p.company || '';
+    const loc = p.city ? `${p.city}, ${p.country || DEFAULTS.country}` : '';
+
+    // Strategy 1: Modern Workday data-automation-id
     const titleInput = $('[data-automation-id="jobTitle"] input, [data-automation-id="formField-jobTitle"] input');
     const companyInput = $('[data-automation-id="company"] input, [data-automation-id="formField-company"] input');
     const locInput = $('[data-automation-id="location"] input, [data-automation-id="formField-location"] input');
-    if (titleInput && !titleInput.value) nativeSet(titleInput, p.current_title || p.title || '');
-    if (companyInput && !companyInput.value) nativeSet(companyInput, p.current_company || p.company || '');
-    if (locInput && !locInput.value) {
-      const loc = p.city ? `${p.city}, ${p.country || DEFAULTS.country}` : '';
-      nativeSet(locInput, loc);
+    if (titleInput && !titleInput.value && title) nativeSet(titleInput, title);
+    if (companyInput && !companyInput.value && company) nativeSet(companyInput, company);
+    if (locInput && !locInput.value && loc) nativeSet(locInput, loc);
+
+    // Description / responsibilities (textarea)
+    const descInput = $('[data-automation-id="description"] textarea, textarea[data-automation-id="workDescription"], [data-automation-id="formField-description"] textarea');
+    if (descInput && !descInput.value?.trim() && p.work_description) nativeSet(descInput, p.work_description);
+
+    // Currently work here checkbox
+    const currentCheckbox = $('input[data-automation-id="currentlyWorkHere"], input[data-automation-id="currentJob"]');
+    if (currentCheckbox && !currentCheckbox.checked && p.currently_employed !== false) {
+      realClick(currentCheckbox); await sleep(200);
     }
-    LOG('Workday: experience fields filled');
+
+    // Strategy 2: iCIMS-style XPath fields (SpeedyApply pattern)
+    if (!companyInput && company) {
+      const icimsEmployer = xpath("//label[span[text() = 'Employer']]/../following-sibling::div/input");
+      if (icimsEmployer && !icimsEmployer.value) nativeSet(icimsEmployer, company);
+    }
+    if (!titleInput && title) {
+      const icimsTitle = xpath("//label[span[text() = 'Title']]/../following-sibling::div/input");
+      if (icimsTitle && !icimsTitle.value) nativeSet(icimsTitle, title);
+    }
+    if (!locInput && loc) {
+      const icimsLoc = xpath("//label[span[text() = 'Location' or text() = 'City']]/../following-sibling::div/input");
+      if (icimsLoc && !icimsLoc.value) nativeSet(icimsLoc, loc);
+    }
+
+    // iCIMS date fields for experience
+    const expStartMonth = xpath("//select[contains(@id,'CandProfileFields.WorkStartDate_Month')]") ||
+                          xpath("//label[span[text() = 'Start Date']]/../following-sibling::div//label[text()='Month']/following-sibling::select");
+    const expStartYear = xpath("//input[contains(@id,'CandProfileFields.WorkStartDate_Year')]");
+    const expEndMonth = xpath("//select[contains(@id,'CandProfileFields.WorkEndDate_Month')]");
+    const expEndYear = xpath("//input[contains(@id,'CandProfileFields.WorkEndDate_Year')]");
+    if (expStartMonth && p.work_start_year) { expStartMonth.value = '01'; expStartMonth.dispatchEvent(new Event('change',{bubbles:true})); }
+    if (expStartYear && !expStartYear.value && p.work_start_year) nativeSet(expStartYear, p.work_start_year);
+    if (expEndMonth) { expEndMonth.value = '12'; expEndMonth.dispatchEvent(new Event('change',{bubbles:true})); }
+    if (expEndYear && !expEndYear.value) nativeSet(expEndYear, new Date().getFullYear().toString());
+
+    // SpeedyApply dateSectionMonth/Year-input for experience dates
+    const expDateStartYear = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const expDateStartMonth = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (expDateStartYear && !expDateStartYear.value && p.work_start_year) nativeSet(expDateStartYear, p.work_start_year);
+    if (expDateStartMonth && !expDateStartMonth.value) nativeSet(expDateStartMonth, '01');
+
+    // SpeedyApply indexed workExperience sections
+    const expSections = xpathAll('//div[starts-with(@data-automation-id,"workExperience-")]');
+    for (const sec of expSections) {
+      const secTitle = sec.querySelector('input[data-automation-id="jobTitle"]');
+      const secCompany = sec.querySelector('input[data-automation-id="company"]');
+      const secLoc = sec.querySelector('input[data-automation-id="location"]');
+      if (secTitle && !secTitle.value && title) nativeSet(secTitle, title);
+      if (secCompany && !secCompany.value && company) nativeSet(secCompany, company);
+      if (secLoc && !secLoc.value && loc) nativeSet(secLoc, loc);
+    }
+
+    LOG('Workday: experience fields filled (enhanced)');
   }
 
   // SpeedyApply Workday: self-identify / EEO section
@@ -1083,38 +1285,171 @@
     // Disability
     const disBtn = $('button[data-automation-id="disabilityStatus"]:not([disabled])');
     if (disBtn) await selectFromWorkdayDropdown(disBtn, DEFAULTS.disability);
+    // Hispanic/Latino dropdown (SpeedyApply pattern)
+    const hispBtn = $('button[data-automation-id="hispanicOrLatino"]:not([disabled]), [name="hispanicOrLatino"]');
+    if (hispBtn) await selectFromWorkdayDropdown(hispBtn, 'I choose not to disclose');
+
+    // SpeedyApply: ethnicity multi-checkbox groups
+    const ethCheckboxes = $$('[data-automation-id="ethnicityPrompt"] [role="cell"],[data-automation-id="ethnicityMulti-CheckboxGroup"] [role="cell"]');
+    if (ethCheckboxes.length) {
+      for (const cell of ethCheckboxes) {
+        const lbl = cell.querySelector('label');
+        const cb = cell.querySelector('input[type="checkbox"]');
+        if (lbl && cb && /choose not|decline|prefer not/i.test(lbl.textContent || '')) {
+          if (!cb.checked) { lbl.click(); await sleep(100); }
+          break;
+        }
+      }
+    }
+
     // Radio-based EEO (some Workday sites use radios)
     const eeoRadios = $$('input[type="radio"]').filter(r => {
       const lbl = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
       return /prefer not|decline|choose not|do not wish/i.test(lbl);
     });
     for (const r of eeoRadios) { if (!r.checked) { realClick(r); await sleep(100); } }
-    LOG('Workday: EEO section filled');
+
+    // SpeedyApply: agreement checkboxes on self-identify pages
+    const agreeCheckbox = $('input[data-automation-id="agreementCheckbox"], input[name="acceptTermsAndAgreements"]');
+    if (agreeCheckbox && !agreeCheckbox.checked) { realClick(agreeCheckbox); await sleep(100); }
+
+    LOG('Workday: EEO section filled (enhanced)');
   }
 
-  // SpeedyApply Workday: resume upload via file input
+  // SpeedyApply Workday: resume upload via DataTransfer file injection
   async function workdayResumeUpload() {
-    const fileInput = $('input[data-automation-id="file-upload-input-ref"], input[data-automation-id="select-files"], input[data-automation-id="resumeUpload"]');
-    if (fileInput) {
-      LOG('Workday: resume file input found — Jobright sidebar handles upload');
-      // The sidebar injects resume, we just ensure the input is visible
+    // SpeedyApply containers for resume section
+    const containers = [
+      'div[aria-labelledby="Resume/CV-section"]',
+      'div[data-automation-id="resumeUpload"]',
+      '[data-automation-id="quickApplyPage"]',
+      '[data-fkit-id="resumeAttachments--attachments"]'
+    ];
+    const container = $(containers.join(','));
+
+    // Find file input within container or globally
+    const fileInput = container?.querySelector('input[data-automation-id="file-upload-input-ref"],input[type="file"]') ||
+                      $('input[data-automation-id="file-upload-input-ref"], input[data-automation-id="select-files"], input[type="file"][accept*="pdf"]');
+    if (!fileInput) { LOG('Workday: no resume file input found'); return false; }
+
+    // Check if resume already uploaded (file name visible)
+    const existingFile = container?.querySelector('[data-automation-id="file-name"],.file-name,.upload-filename');
+    if (existingFile?.textContent?.trim()) { LOG('Workday: resume already uploaded'); return true; }
+
+    // Try to get resume from storage (base64 encoded)
+    const resumeData = await st.get('ua_resume_data');
+    if (resumeData?.base64 && resumeData?.fileName) {
+      try {
+        // SpeedyApply pattern: Convert base64 to File, inject via DataTransfer
+        const byteString = atob(resumeData.base64.split(',').pop() || resumeData.base64);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const mime = resumeData.mimeType || 'application/pdf';
+        const file = new File([ab], resumeData.fileName, { type: mime });
+
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        LOG(`Workday: resume injected via DataTransfer — ${resumeData.fileName}`);
+        await sleep(1500);
+        return true;
+      } catch (err) { LOG('Workday: resume injection failed — ' + err.message); }
     }
-    // Delete existing resume if needed (to replace with tailored one)
-    const deleteBtn = $('button[data-automation-id="delete-file"]');
-    // Don't auto-delete — let the sidebar handle it
+
+    // If no stored resume, let Jobright sidebar handle it
+    LOG('Workday: resume file input found — waiting for sidebar upload');
     return !!fileInput;
   }
 
-  // SpeedyApply Workday: multi-page navigation with page type detection
+  // SpeedyApply Workday: fill question pages (Primary, Secondary, Supplementary questions)
+  async function workdayFillQuestions(p) {
+    await loadAnswerBank();
+    // Workday question inputs (text, textarea, select, radio)
+    const qInputs = $$('[data-automation-id^="formField-"] input:not([type=hidden]):not([type=file]),[data-automation-id^="formField-"] textarea,[data-automation-id^="formField-"] select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of qInputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change',{bubbles:true})); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+    // Workday radio/checkbox groups in question pages
+    const radioGroups = {};
+    $$('[data-automation-id^="formField-"] input[type=radio]').filter(isVisible).forEach(r => { (radioGroups[r.name||r.id]||=[]).push(r); });
+    for (const [, radios] of Object.entries(radioGroups)) {
+      if (radios.some(r => r.checked)) continue;
+      const lbl = getLabel(radios[0]);
+      const guess = guessFieldValue(lbl, p, radios[0]);
+      const match = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+        return guess && t.includes(guess.toLowerCase());
+      });
+      if (match) { realClick(match); await sleep(80); continue; }
+      const yes = radios.find(r => /\byes\b/i.test($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || ''));
+      if (yes) realClick(yes);
+    }
+    // Workday dropdowns (button-based) in question areas
+    const qDropdowns = $$('[data-automation-id^="formField-"] button:not([disabled])').filter(btn => {
+      const txt = (btn.textContent || '').toLowerCase();
+      return isVisible(btn) && (txt.includes('select') || txt.includes('choose') || txt === '');
+    });
+    for (const btn of qDropdowns) {
+      const lbl = getLabel(btn);
+      const val = guessFieldValue(lbl, p, btn);
+      if (val) await selectFromWorkdayDropdown(btn, val);
+    }
+    // Rich text areas (Workday uses contenteditable divs for some responses)
+    const richTexts = $$('[data-automation-id="richText"] [contenteditable="true"]').filter(el => isVisible(el) && !el.textContent?.trim());
+    for (const rt of richTexts) {
+      const lbl = getLabel(rt);
+      const val = guessFieldValue(lbl, p, rt);
+      if (val) { rt.textContent = val; rt.dispatchEvent(new Event('input',{bubbles:true})); }
+    }
+    LOG('Workday: question page filled');
+  }
+
+  // SpeedyApply Workday: fill website/link fields (GitHub, LinkedIn, etc.)
+  async function workdayFillLinks(p) {
+    const linkMap = {
+      'githubQuestion': p.github_url || p.github || '',
+      'linkedinQuestion': p.linkedin_profile_url || p.linkedin || '',
+      'twitterQuestion': p.twitter_url || p.twitter || '',
+      'personalWebsiteQuestion': p.website_url || p.website || '',
+    };
+    for (const [aid, val] of Object.entries(linkMap)) {
+      if (!val) continue;
+      const inp = $(`[data-automation-id="${aid}"] input, input[data-automation-id="${aid}"]`);
+      if (inp && !inp.value) nativeSet(inp, val);
+    }
+    // formField-skills
+    const skillsInput = $('[data-automation-id="formField-skills"] input, [data-automation-id="formField-skillsPrompt"] input');
+    if (skillsInput && !skillsInput.value && p.skills) nativeSet(skillsInput, Array.isArray(p.skills) ? p.skills.join(', ') : p.skills);
+    LOG('Workday: links/skills filled');
+  }
+
+  // SpeedyApply Workday: multi-page navigation with page type detection (enhanced)
   async function workdayMultiPageFlow() {
     const MAX_PAGES = 12;
+    // SpeedyApply: both old and new Workday page naming variants
     const pageTypes = [
       'applyFlowAutoFillPage', 'applyFlowMyInfoPage', 'contactInformationPage',
-      'applyFlowMyExpPage', 'applyFlowPrimaryQuestionsPage', 'applyFlowSecondaryQuestionsPage',
-      'applyFlowSelfIdentifyPage', 'applyFlowVoluntaryDisclosuresPage',
-      'applyFlowSupplementaryQuestionsPage', 'applyFlowReviewPage'
+      'applyFlowMyExpPage', 'myExperiencePage',
+      'applyFlowPrimaryQuestionsPage', 'primaryQuestionnairePage',
+      'applyFlowSecondaryQuestionsPage', 'secondaryQuestionnairePage',
+      'applyFlowSelfIdentifyPage', 'selfIdentificationPage',
+      'applyFlowVoluntaryDisclosuresPage', 'voluntaryDisclosuresPage',
+      'applyFlowSupplementaryQuestionsPage',
+      'applyFlowReviewPage', 'reviewJobApplicationPage'
     ];
     const p = await getProfile();
+    let lastPageType = '';
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       if (checkSuccess()) { LOG('Workday: success detected'); break; }
@@ -1127,20 +1462,32 @@
       }
       LOG(`Workday multi-page: page ${page} — ${currentPageType}`);
 
+      // Detect stuck on same page (validation error likely)
+      if (page > 1 && currentPageType === lastPageType) {
+        LOG('Workday: stuck on same page — running validation fix');
+        await handleValidationErrors();
+        await fallbackFill();
+        await sleep(1000);
+      }
+      lastPageType = currentPageType;
+
       // Fill based on page type
       if (/MyInfo|contactInformation|AutoFill/.test(currentPageType)) {
         await workdayFillName(p);
         await workdayFillContact(p);
         await workdayFillAddress(p);
         await workdayFillSource();
+        await workdayFillLinks(p);
         await fixPhoneCountryCode();
       } else if (/MyExp/.test(currentPageType)) {
         await workdayFillEducation(p);
         await workdayFillExperience(p);
+      } else if (/Questions|Supplementary/.test(currentPageType)) {
+        await workdayFillQuestions(p);
+        await workdayFillLinks(p);
       } else if (/SelfIdentify|VoluntaryDisclosure/.test(currentPageType)) {
         await workdayFillEEO();
       } else if (/Review/.test(currentPageType)) {
-        // Review page — just submit
         const submitBtn = $('button[data-automation-id="btnSubmit"]');
         if (submitBtn && isVisible(submitBtn)) {
           LOG('Workday: clicking Submit on review page');
@@ -1151,7 +1498,7 @@
         }
       }
 
-      // Also run generic fallback
+      // Also run generic fallback on every page
       await fallbackFill();
       await sleep(500);
       await handleValidationErrors();
@@ -1162,10 +1509,8 @@
         realClick(nextBtn);
         await sleep(2500);
       } else {
-        // Try submit
         const sub = $('button[data-automation-id="btnSubmit"]');
         if (sub && isVisible(sub)) { realClick(sub); await sleep(2000); break; }
-        // No button found — stop
         LOG('Workday: no next/submit button found');
         break;
       }
@@ -1645,7 +1990,13 @@
     return false;
   }
 
-  // ===================== QUEUE ENGINE =====================
+  // ===================== QUEUE ENGINE (LazyApply-enhanced) =====================
+  // LazyApply-inspired: configurable delays and timeout
+  const QUEUE_DELAYS = {1:2000, 1.5:1500, 2:1000, 3:500};
+  let qSpeed = 1;
+  let qTimeout = 90000; // 90s timeout per job (LazyApply default ~60s, we're more generous)
+  let _qTimeoutId = null;
+
   async function processQ() {
     if (!qActive || qPaused || !queue.length) return;
     const c = queue.find(j => j.status === 'applying');
@@ -1653,7 +2004,20 @@
       try {
         const p = new URL(c.url).pathname;
         if (location.href.includes(p.slice(0, Math.min(p.length, 25)))) {
-          // We're on the right page — run ATS-specific flow
+          // LazyApply: start timeout timer — auto-skip if job stalls
+          clearTimeout(_qTimeoutId);
+          _qTimeoutId = setTimeout(async () => {
+            LOG(`Queue: job timed out after ${qTimeout/1000}s — auto-skipping`);
+            c.status = 'timeout';
+            c.error = `Timed out after ${qTimeout/1000}s`;
+            c.completedAt = Date.now();
+            qStats.timedOut++;
+            await saveQ(); await saveStats();
+            renderQ(); updateCtrl();
+            goNext();
+          }, qTimeout);
+
+          // Run ATS-specific flow
           await withRetry(async () => {
             if (isWorkday()) await workdayAutomation();
             else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
@@ -1665,34 +2029,49 @@
             else await tailorFirstFlow();
           }, 'Queue job automation');
 
-          // Wait and check success — try multiple times
+          // Clear timeout — job completed normally
+          clearTimeout(_qTimeoutId);
+
+          // Wait and check success
           let success = false;
           for (let check = 0; check < 3; check++) {
-            await sleep(3000);
+            await sleep(2000);
             if (checkSuccess()) { success = true; break; }
           }
+
+          // LazyApply-enhanced status tracking
+          c.completedAt = Date.now();
+          c.duration = c.completedAt - (c.startedAt || c.completedAt);
           if (success) {
             c.status = 'done';
+            qStats.completed++;
             LOG('Queue job completed successfully');
           } else {
-            c.status = 'done'; // Assume done after full flow
+            c.status = 'done';
+            qStats.completed++;
             LOG('Queue job completed (success not confirmed)');
           }
-          // Learn from the final page state
+          qStats.totalTime += c.duration;
+
           await learnFromPage();
-          await saveQ(); renderQ(); updateCtrl();
-          await sleep(3000);
+          await saveQ(); await saveStats(); renderQ(); updateCtrl();
+          await sleep(2000);
           goNext();
           return;
         }
-      } catch {}
+      } catch (err) {
+        clearTimeout(_qTimeoutId);
+        c.status = 'failed';
+        c.error = err?.message || 'Unknown error';
+        c.completedAt = Date.now();
+        qStats.failed++;
+        await saveQ(); await saveStats(); renderQ(); updateCtrl();
+        goNext();
+        return;
+      }
     }
     goNext();
   }
-  // LazyApply-inspired: configurable delays between applications
-  const QUEUE_DELAYS = {1:2000, 1.5:1500, 2:1000, 3:500};
-  let qSpeed = 1; // 1x speed
-  let qTimeout = 120000; // 2-min timeout per job (LazyApply uses similar)
 
   function goNext() {
     if (qPaused) return;
@@ -1700,27 +2079,90 @@
     if (n) {
       n.status = 'applying';
       n.startedAt = Date.now();
+      // LazyApply: save stoppedAt index for session resumption
+      const idx = queue.indexOf(n);
+      st.set('ua_q_stopped_at', idx);
       saveQ().then(() => {
-        // LazyApply-style: delay between jobs to avoid rate limiting
         const delay = QUEUE_DELAYS[qSpeed] || 2000;
         setTimeout(() => { location.href = n.url; }, delay);
       });
     } else {
       qActive = false;
       st.set(SK.QA, false);
-      // LazyApply-style: send automation complete notification
+      st.set('ua_q_stopped_at', -1);
+      // LazyApply-style: completion summary
       LOG('Queue complete — all jobs processed');
       const done = queue.filter(j => j.status === 'done').length;
       const failed = queue.filter(j => j.status === 'failed').length;
-      LOG(`Results: ${done} done, ${failed} failed out of ${queue.length} total`);
+      const timedOut = queue.filter(j => j.status === 'timeout').length;
+      const skipped = queue.filter(j => j.status === 'skipped').length;
+      LOG(`Results: ${done} done, ${failed} failed, ${timedOut} timed out, ${skipped} skipped of ${queue.length} total`);
+      if (qStats.totalTime > 0) LOG(`Average time: ${Math.round(qStats.totalTime / Math.max(done,1) / 1000)}s per application`);
       renderQ(); updateCtrl();
     }
   }
-  async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
-  async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
+
+  async function startQ() {
+    const pending = queue.filter(j => j.status === 'pending');
+    if (!pending.length) return;
+    qActive = true; qPaused = false;
+    qStats = { completed:0, failed:0, skipped:0, timedOut:0, totalTime:0 };
+    await st.set(SK.QA, true); await st.set(SK.QP, false); await saveStats();
+    updateCtrl(); goNext();
+  }
+  // LazyApply: resume from where we stopped (session resumption)
+  async function resumeFromStopped() {
+    if (qStoppedAt < 0 || qStoppedAt >= queue.length) return false;
+    // Reset jobs from stoppedAt onwards to pending
+    for (let i = qStoppedAt; i < queue.length; i++) {
+      if (queue[i].status === 'applying' || queue[i].status === 'timeout') queue[i].status = 'pending';
+    }
+    qActive = true; qPaused = false;
+    await st.set(SK.QA, true); await st.set(SK.QP, false);
+    await saveQ(); updateCtrl(); goNext();
+    LOG(`Resumed queue from job #${qStoppedAt + 1}`);
+    return true;
+  }
+  async function stopQ() {
+    clearTimeout(_qTimeoutId);
+    qActive = false; qPaused = false;
+    await st.set(SK.QA, false); await st.set(SK.QP, false);
+    // LazyApply: save stop point for session resumption
+    const applyingIdx = queue.findIndex(j => j.status === 'applying');
+    if (applyingIdx >= 0) { queue[applyingIdx].status = 'pending'; st.set('ua_q_stopped_at', applyingIdx); }
+    await saveQ(); renderQ(); updateCtrl();
+  }
   async function pauseQ() { qPaused = true; await st.set(SK.QP, true); renderQ(); updateCtrl(); }
   async function resumeQ() { qPaused = false; await st.set(SK.QP, false); processQ(); renderQ(); updateCtrl(); }
-  async function skipJob() { const c = queue.find(j => j.status === 'applying'); if (c) { c.status = 'failed'; c.error = 'Skipped by user'; await saveQ(); } goNext(); }
+  async function skipJob() {
+    clearTimeout(_qTimeoutId);
+    const c = queue.find(j => j.status === 'applying');
+    if (c) { c.status = 'skipped'; c.error = 'Skipped by user'; c.completedAt = Date.now(); qStats.skipped++; await saveQ(); await saveStats(); }
+    goNext();
+  }
+
+  // LazyApply: detect job board from URL for analytics
+  function detectJobBoard(url) {
+    try {
+      const u = new URL(url);
+      const h = u.hostname;
+      if (/myworkday/i.test(h)) return 'workday';
+      if (/greenhouse/i.test(h)) return 'greenhouse';
+      if (/lever\.co/i.test(h)) return 'lever';
+      if (/icims/i.test(h)) return 'icims';
+      if (/linkedin/i.test(h)) return 'linkedin';
+      if (/indeed/i.test(h)) return 'indeed';
+      if (/glassdoor/i.test(h)) return 'glassdoor';
+      if (/ziprecruiter/i.test(h)) return 'ziprecruiter';
+      if (/dice/i.test(h)) return 'dice';
+      if (/ashby/i.test(h)) return 'ashby';
+      if (/bamboohr/i.test(h)) return 'bamboohr';
+      if (/smartrecruiters/i.test(h)) return 'smartrecruiters';
+      if (/wellfound/i.test(h)) return 'wellfound';
+      if (/rippling/i.test(h)) return 'rippling';
+      return 'other';
+    } catch { return 'other'; }
+  }
 
   // LazyApply-inspired: bulk URL import from text (supports various formats)
   function parseBulkUrls(text) {
@@ -1882,6 +2324,8 @@
 .ua-qi .st.applying{background:#dbeafe;color:#1e40af}
 .ua-qi .st.done{background:#d1fae5;color:#065f46}
 .ua-qi .st.failed{background:#fee2e2;color:#991b1b}
+.ua-qi .st.timeout{background:#fef3c7;color:#78350f}
+.ua-qi .st.skipped{background:#e5e7eb;color:#4b5563}
 .ua-qi .rm{width:18px;height:18px;border:none;background:none;cursor:pointer;color:#d1d5db;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}
 .ua-qi .rm:hover{background:#fee2e2;color:#ef4444}
 
@@ -2177,12 +2621,18 @@
     list.querySelectorAll('.rm').forEach(b => b.addEventListener('click', e => removeJob(e.currentTarget.dataset.id)));
 
     const pn = queue.filter(j => j.status === 'pending').length, dn = queue.filter(j => j.status === 'done').length, fl = queue.filter(j => j.status === 'failed').length, ap = queue.filter(j => j.status === 'applying').length;
-    sum.innerHTML = queue.length ? `<span><i style="background:#f59e0b"></i>${pn} pending</span><span><i style="background:#3b82f6"></i>${ap} active</span><span><i style="background:#10b981"></i>${dn} done</span>${fl ? `<span><i style="background:#ef4444"></i>${fl} failed</span>` : ''}` : '';
+    const to = queue.filter(j => j.status === 'timeout').length, sk = queue.filter(j => j.status === 'skipped').length;
+    sum.innerHTML = queue.length ? `<span><i style="background:#f59e0b"></i>${pn} pending</span><span><i style="background:#3b82f6"></i>${ap} active</span><span><i style="background:#10b981"></i>${dn} done</span>${fl ? `<span><i style="background:#ef4444"></i>${fl} failed</span>` : ''}${to ? `<span><i style="background:#f97316"></i>${to} timeout</span>` : ''}${sk ? `<span><i style="background:#9ca3af"></i>${sk} skipped</span>` : ''}` : '';
 
     if (!queue.length) { btns.innerHTML = ''; return; }
-    if (!qActive) { btns.innerHTML = `<button class="pri" id="uq-start" ${pn ? '' : 'disabled'}>Start Applying</button><button class="sec" id="uq-clear">Clear All</button>`; }
+    if (!qActive) {
+      // LazyApply: show Resume button if there's a saved stop point
+      const hasResumable = qStoppedAt >= 0 && qStoppedAt < queue.length;
+      btns.innerHTML = `<button class="pri" id="uq-start" ${pn ? '' : 'disabled'}>Start Applying</button>${hasResumable ? '<button class="pri" id="uq-resume" style="background:#3b82f6">Resume</button>' : ''}<button class="sec" id="uq-clear">Clear All</button>`;
+    }
     else { btns.innerHTML = `<button class="dan" id="uq-stop">Stop</button>`; }
     document.getElementById('uq-start')?.addEventListener('click', startQ);
+    document.getElementById('uq-resume')?.addEventListener('click', resumeFromStopped);
     document.getElementById('uq-stop')?.addEventListener('click', stopQ);
     document.getElementById('uq-clear')?.addEventListener('click', clearQ);
   }
@@ -2194,7 +2644,7 @@
     if (!ctrl) return;
     if (qActive) {
       ctrl.classList.add('show');
-      const dn = queue.filter(j => j.status === 'done').length;
+      const dn = queue.filter(j => ['done','failed','timeout','skipped'].includes(j.status)).length;
       prog.textContent = dn + '/' + queue.length;
       if (qPaused) { pauseBtn.innerHTML = ico('play', 14, 14, '#34d399'); pauseBtn.className = 'uc-btn resume'; pauseBtn.title = 'Resume'; }
       else { pauseBtn.innerHTML = ico('pause', 14, 14, '#fbbf24'); pauseBtn.className = 'uc-btn pause'; pauseBtn.title = 'Pause'; }
