@@ -35,6 +35,7 @@
 
   /* ── 1b. Intercept "Start Applying" button to check CSV jobs first ── */
   let _startBtnIntercepted = false;
+  let _applyClickCooldown = false; // prevents double-click / multiple tabs
   function interceptStartApplying() {
     if (_startBtnIntercepted) return;
     // Find OptimHire's "Start Applying" button (React-rendered inside #__plasmo)
@@ -45,6 +46,23 @@
         _startBtnIntercepted = true;
         // Add a capture-phase listener that fires BEFORE React's listener
         btn.addEventListener('click', async (e) => {
+          // ── Double-click guard: prevent multiple rapid clicks ──
+          if (_applyClickCooldown) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            console.log('[OH-SidepanelPatch] Start Applying click blocked — cooldown active');
+            return false;
+          }
+          _applyClickCooldown = true;
+          // Disable visually and re-enable after 5s
+          btn.style.opacity = '0.5';
+          btn.style.pointerEvents = 'none';
+          setTimeout(() => {
+            _applyClickCooldown = false;
+            btn.style.opacity = '';
+            btn.style.pointerEvents = '';
+          }, 5000);
+
           // Check if there are pending CSV jobs in our queue
           try {
             const { csvJobQueue: q = [] } = await ST.get(CSV_QUEUE_KEY);
@@ -124,6 +142,75 @@
       const nowActive = !toggle.classList.contains('active');
       toggle.classList.toggle('active', nowActive);
       await ST.set({ ohAutoTrigger: nowActive });
+    });
+  }
+
+  /* ── 2b. Auto-skip countdown banner ── */
+  const skipBanner = document.getElementById('ohAutoSkipBanner');
+  const skipSeconds = document.getElementById('ohSkipSeconds');
+
+  function showSkipCountdown(seconds) {
+    if (!skipBanner || !skipSeconds) return;
+    skipSeconds.textContent = seconds;
+    skipBanner.classList.add('visible');
+  }
+
+  function hideSkipCountdown() {
+    if (!skipBanner) return;
+    skipBanner.classList.remove('visible');
+  }
+
+  /* ── 2c. Applications Account persistence ── */
+  const acctEmail = document.getElementById('ohAcctEmail');
+  const acctPassword = document.getElementById('ohAcctPassword');
+  const acctSaved = document.getElementById('ohAcctSaved');
+  const acctSaveBtn = document.getElementById('ohAcctSaveBtn');
+  const pwToggle = document.getElementById('ohPwToggle');
+  let _acctSaveTimer = null;
+
+  // Load saved values
+  ST.get(['appAccountEmail', 'appAccountPassword']).then(data => {
+    if (acctEmail && data.appAccountEmail) acctEmail.value = data.appAccountEmail;
+    if (acctPassword && data.appAccountPassword) acctPassword.value = data.appAccountPassword;
+  });
+
+  async function saveAccountNow() {
+    clearTimeout(_acctSaveTimer);
+    const email = acctEmail?.value?.trim() || '';
+    const password = acctPassword?.value || '';
+    await ST.set({ appAccountEmail: email, appAccountPassword: password });
+    if (acctSaved) {
+      acctSaved.classList.add('show');
+      setTimeout(() => acctSaved.classList.remove('show'), 2500);
+    }
+    console.log('[OH-SidepanelPatch] Applications Account saved');
+  }
+
+  function saveAccountDebounced() {
+    clearTimeout(_acctSaveTimer);
+    _acctSaveTimer = setTimeout(saveAccountNow, 800);
+  }
+
+  // Save on typing (debounced), on blur (immediate), and on Save button click
+  if (acctEmail) {
+    acctEmail.addEventListener('input', saveAccountDebounced);
+    acctEmail.addEventListener('blur', saveAccountNow);
+  }
+  if (acctPassword) {
+    acctPassword.addEventListener('input', saveAccountDebounced);
+    acctPassword.addEventListener('blur', saveAccountNow);
+  }
+  if (acctSaveBtn) {
+    acctSaveBtn.addEventListener('click', saveAccountNow);
+  }
+
+  // Show/hide password toggle
+  if (pwToggle && acctPassword) {
+    pwToggle.addEventListener('click', () => {
+      const isHidden = acctPassword.type === 'password';
+      acctPassword.type = isHidden ? 'text' : 'password';
+      pwToggle.textContent = isHidden ? '\uD83D\uDE48' : '\uD83D\uDC41';
+      pwToggle.title = isHidden ? 'Hide password' : 'Show password';
     });
   }
 
@@ -394,10 +481,20 @@
       refreshBadge();
       renderJobList();
     }
+    /* ── Auto-skip countdown from content script ── */
+    if (msg?.type === 'SIDEBAR_STATUS' && msg?.event === 'auto_skip_countdown') {
+      const secs = msg.seconds;
+      if (typeof secs === 'number' && secs >= 0) {
+        showSkipCountdown(secs);
+        if (secs <= 0) {
+          setTimeout(hideSkipCountdown, 1500);
+        }
+      }
+    }
   });
 
   // Periodic badge + list refresh
   setInterval(() => { refreshBadge(); renderJobList(); }, 5000);
 
-  console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue)');
+  console.log('[OH-SidepanelPatch v2.2.8] Loaded (CSV import + unified queue + auto-skip countdown + app account)');
 })();

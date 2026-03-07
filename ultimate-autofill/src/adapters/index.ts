@@ -7,6 +7,10 @@ import { oraclecloudAdapter } from './oraclecloud/index';
 import { indeedAdapter } from './indeed/index';
 import { linkedinAdapter } from './linkedin/index';
 import { genericAdapter } from './generic/index';
+import { leverAdapter } from './lever/index';
+import { icimsAdapter } from './icims/index';
+import { smartRecruitersAdapter } from './smartrecruiters/index';
+import { taleoAdapter } from './taleo/index';
 
 const adapters: Record<string, ATSAdapter> = {
   workday: workdayAdapter,
@@ -17,6 +21,9 @@ const adapters: Record<string, ATSAdapter> = {
   indeed: indeedAdapter,
   linkedin: linkedinAdapter,
   companysite: genericAdapter,   // company sites use the universal generic adapter
+  icims: icimsAdapter,
+  smartrecruiters: smartRecruitersAdapter,
+  taleo: taleoAdapter,
   generic: genericAdapter,
 };
 
@@ -33,4 +40,11 @@ export {
   indeedAdapter,
   linkedinAdapter,
   genericAdapter,
+export function getAllAdapters(): ATSAdapter[] {
+  return Object.values(adapters);
+}
+
+export {
+  workdayAdapter, greenhouseAdapter, genericAdapter,
+  leverAdapter, icimsAdapter, smartRecruitersAdapter, taleoAdapter,
 };

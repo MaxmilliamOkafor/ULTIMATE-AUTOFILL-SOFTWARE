@@ -61,6 +61,9 @@ export type ATSType =
   | 'oraclecloud' | 'linkedin' | 'indeed'
   | 'companysite'   // any company career site not matching a known ATS
   | 'generic';
+  | 'icims' | 'taleo' | 'ashby' | 'bamboohr' | 'generic'
+  | 'indeed' | 'linkedin' | 'hiringcafe' | 'jobvite' | 'workable'
+  | 'paylocity' | 'jazzhr' | 'ziprecruiter' | 'dice' | 'ukg';
 
 export interface ATSDetectionResult {
   type: ATSType;
@@ -172,6 +175,32 @@ export interface ScraperSettings {
 }
 
 export interface ScrapedJob {
+// ─── Enhanced Adapter Interface (for unified autofill engine) ───
+
+export interface FieldResult {
+  label: string;
+  value: string;
+  status: 'filled' | 'skipped' | 'failed';
+}
+
+export interface AdapterResult {
+  fields: FieldResult[];
+  success: boolean;
+  atsName: string;
+}
+
+export interface AtsAdapter {
+  name: string;
+  detect: () => boolean;
+  fill: (responses?: Array<{ question: string; answer: string }>) => Promise<AdapterResult>;
+}
+
+// ─── CSV Queue ───
+
+export type CsvJobStatus =
+  | 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'duplicate';
+
+export interface CsvJobItem {
   id: string;
   url: string;
   title?: string;
@@ -196,6 +225,13 @@ export interface ExtensionSettings {
   autoDetectAndFill: boolean;
   universalFormDetection: boolean;   // detect ALL forms, not just known ATS
   supportedPlatforms: Record<string, boolean>;
+  status: CsvJobStatus;
+  addedAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  lastError?: string;
+  attempts?: number;
+  source?: string;
 }
 
 // ─── Messaging ───
@@ -236,6 +272,13 @@ export type MessageType =
   // Answer Bank & Profile
   | 'GET_ANSWER_BANK' | 'SAVE_ANSWER' | 'CLEAR_ANSWER_BANK'
   | 'GET_PROFILE' | 'SAVE_PROFILE' | 'LEARN_FROM_PAGE';
+  | 'TRIGGER_AUTOFILL' | 'START_CSV_QUEUE' | 'STOP_CSV_QUEUE'
+  | 'PAUSE_CSV_QUEUE' | 'RESUME_CSV_QUEUE' | 'SKIP_CSV_JOB'
+  | 'CSV_JOB_COMPLETE' | 'CSV_JOB_STARTED' | 'CSV_QUEUE_DONE'
+  | 'AUTOFILL_COMPLETE' | 'AUTOFILL_PROGRESS'
+  | 'SIDEBAR_STATUS' | 'SIDEBAR_FIELD_UPDATE' | 'SIDEBAR_FIELD_LIST'
+  | 'TRIGGER_TAILORING' | 'COMPLEX_FORM_SUCCESS' | 'COMPLEX_FORM_ERROR'
+  | 'FILL_COMPLEX_FORM' | 'PING' | 'SOLVE_CAPTCHA';
 
 export interface ExtMessage {
   type: MessageType;
