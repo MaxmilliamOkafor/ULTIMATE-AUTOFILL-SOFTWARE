@@ -653,7 +653,7 @@
 
       // Wait for tailoring to complete (watch for loading to finish)
       LOG('Waiting for resume tailoring to complete...');
-      const maxWait = 120000; // 2 min max
+      const maxWait = 30000; // 30s max (reduced from 120s to prevent freezing)
       const start = Date.now();
       while (Date.now() - start < maxWait) {
         // Check if loading indicator is gone
@@ -662,8 +662,10 @@
           // Check if tailored resume is ready (button text changed or autofill button available)
           const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
           if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
+          // If no loading and no button, don't spin forever
+          if (!loading) { LOG('No loading indicator and no autofill button — moving on'); break; }
         }
-        await sleep(2000);
+        await sleep(1500);
       }
       await sleep(1500);
     } else {
@@ -684,17 +686,17 @@
 
     // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
     LOG('Waiting for Jobright autofill to complete...');
-    await sleep(3000);
+    await sleep(2000);
     const fillStart = Date.now();
-    while (Date.now() - fillStart < 60000) {
+    while (Date.now() - fillStart < 15000) { // 15s max (reduced from 60s)
       const afBtn = sidebar.querySelector('.auto-fill-button');
       if (afBtn) {
         const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '') break; // Done filling
-      }
-      await sleep(1500);
+        if (txt === 'autofill' || txt === '' || txt === 'filled') break; // Done filling
+      } else break; // Button gone — don't wait forever
+      await sleep(1000);
     }
-    await sleep(2000);
+    await sleep(1000);
 
     // Step 5: Try resume upload if needed
     await tryResumeUpload();
@@ -1205,12 +1207,114 @@
       realClick(applyLink);
       await sleep(3000);
     }
-    // Wait for form
-    const form = await waitFor('.application-form,#application-form,.postings-form,form[action*="apply"]', 10000);
+    // Wait for form — Lever uses many different form selectors
+    const form = await waitFor('.application-form,#application-form,.postings-form,form[action*="apply"],.application-page,.content form,.main-content form,form', 8000);
     if (!form) { LOG('No Lever form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
+    await sleep(1000);
+
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Phase 1: Lever-specific named fields (Lever uses name= attributes)
+    const leverFields = {
+      'name': `${p.first_name || p.firstName || ''} ${p.last_name || p.lastName || ''}`.trim(),
+      'email': p.email || '',
+      'phone': p.phone || '',
+      'org': p.current_company || p.company || '',
+      'urls[LinkedIn]': p.linkedin_profile_url || p.linkedin || '',
+      'urls[GitHub]': p.github_url || p.github || '',
+      'urls[Portfolio]': p.website_url || p.website || '',
+      'urls[Twitter]': p.twitter_url || p.twitter || '',
+      'urls[Other]': p.website_url || '',
+    };
+    for (const [name, val] of Object.entries(leverFields)) {
+      if (!val) continue;
+      const inp = $(`input[name="${name}"],textarea[name="${name}"]`);
+      if (inp && !inp.value?.trim()) { inp.focus(); nativeSet(inp, val); await sleep(50); }
+    }
+
+    // Phase 2: Fill by label matching for custom Lever fields
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !el.value?.trim());
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', {bubbles:true})); }
+      } else {
+        inp.focus(); nativeSet(inp, val);
+      }
+      await sleep(50);
+    }
+
+    // Phase 3: Location field (Lever has "Where in the US are you located?" etc.)
+    const locInputs = $$('input,textarea').filter(el => {
+      const l = (getLabel(el) || '').toLowerCase();
+      return isVisible(el) && !el.value?.trim() && /where.*(located|live|based)|current.?location|location/i.test(l);
+    });
+    for (const loc of locInputs) {
+      const locVal = p.city ? `${p.city}, ${p.state || p.country || ''}`.trim().replace(/,$/, '') : '';
+      if (locVal) { loc.focus(); nativeSet(loc, locVal); }
+    }
+
+    // Phase 4: Sponsorship / authorization questions (common on Lever)
+    const sponsorInputs = $$('input,textarea,select').filter(el => {
+      const l = (getLabel(el) || '').toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) && /sponsor|visa|immigration|employment.?benefit|h-1b/i.test(l);
+    });
+    for (const sp of sponsorInputs) {
+      if (sp.tagName === 'SELECT') {
+        const opt = $$('option', sp).find(o => /no/i.test(o.text));
+        if (opt) { sp.value = opt.value; sp.dispatchEvent(new Event('change', {bubbles:true})); }
+      } else {
+        sp.focus(); nativeSet(sp, DEFAULTS.sponsorship);
+      }
+    }
+
+    // Phase 5: Radio buttons and checkboxes (pronouns, eligibility, etc.)
+    const groups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
+    for (const [, radios] of Object.entries(groups)) {
+      if (radios.some(r => r.checked)) continue;
+      const lbl = getLabel(radios[0]);
+      const guess = guessFieldValue(lbl, p, radios[0]);
+      const match = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+        return guess && t.includes(guess.toLowerCase());
+      });
+      if (match) { realClick(match); await sleep(50); continue; }
+      // Default yes for yes/no questions
+      const yes = radios.find(r => /\byes\b/i.test($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || ''));
+      if (yes) { realClick(yes); await sleep(50); }
+    }
+
+    // Phase 6: Required checkboxes (acknowledgments, consents)
+    $$('input[type=checkbox][required],input[type=checkbox][aria-required="true"]')
+      .filter(el => isVisible(el) && !el.checked)
+      .forEach(cb => realClick(cb));
+
     await fixPhoneCountryCode();
-    await tailorFirstFlow();
+
+    // Phase 7: Trigger Jobright sidebar autofill (non-blocking with timeout)
+    await triggerAutofillQuick();
+
+    // Phase 8: Final fallback pass
+    await sleep(2000);
+    await fallbackFill();
+    await sleep(500);
+    await handleValidationErrors();
+
+    // Phase 9: Submit
+    const submitBtn = $('button[type="submit"],.postings-btn,.application-submit,button.template-btn-submit,[data-qa="btn-submit"],input[type="submit"]');
+    if (submitBtn && isVisible(submitBtn)) {
+      LOG('Lever: submit button found');
+      // Don't auto-submit — let user review
+    }
+
+    LOG('Lever automation complete');
   }
 
   // ===================== iCIMS AUTOMATION =====================
@@ -1525,6 +1629,19 @@
     b = $('.auto-fill-button');
     if (b && !b.disabled) { realClick(b); LOG('Autofill button clicked (retry)'); return true; }
     LOG('Autofill button not found or disabled');
+    return false;
+  }
+
+  // Quick autofill trigger with shorter timeout (won't freeze the flow)
+  async function triggerAutofillQuick() {
+    const sidebar = $('#jobright-helper-id');
+    if (!sidebar) { LOG('No sidebar — skipping quick autofill'); return false; }
+    const b = sidebar.querySelector('.auto-fill-button');
+    if (b && !b.disabled) { realClick(b); LOG('Quick autofill triggered'); await sleep(3000); return true; }
+    // One retry after 1.5s
+    await sleep(1500);
+    const b2 = sidebar.querySelector('.auto-fill-button');
+    if (b2 && !b2.disabled) { realClick(b2); LOG('Quick autofill triggered (retry)'); await sleep(3000); return true; }
     return false;
   }
 
