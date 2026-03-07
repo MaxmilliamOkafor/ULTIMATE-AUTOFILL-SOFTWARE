@@ -1,30 +1,45 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v8.0 ===
-// ATS-specific flows (Greenhouse, Lever, iCIMS, LinkedIn), resume upload, error recovery, keyboard shortcuts, CSV export
+// === ULTIMATE AUTOFILL ENHANCEMENT v9.0 ===
+// Simplify+ integration, SpeedyApply Workday, LazyApply automation, review bypass, Ireland locale
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
 
-  // ===================== CREDIT BYPASS =====================
-  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999,aiApply:99999,smartApply:99999,quickApply:99999,bulkApply:99999};
+  // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
+  const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999,aiApply:99999,smartApply:99999,quickApply:99999,bulkApply:99999,networkScan:99999,referralRequest:99999,aiResponse:99999,essayAnswer:99999,coins:99999,tokens:99999};
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
     if (/\/swan\/credit\/balance|\/credit\/balance/i.test(u))
       return new Response(JSON.stringify({code:200,result:{credit:_C,dailyFill:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/swan\/payment\/subscription|\/payment\/subscription/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{status:'ACTIVE',plan:'turbo',subscriptionId:'unlimited'},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({code:200,result:{status:'ACTIVE',plan:'turbo_plus',subscriptionId:'unlimited',tier:'premium',features:['unlimited_autofill','unlimited_resume','unlimited_cover_letter','unlimited_ai_response','unlimited_network','unlimited_referral']},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/cost-credit/i.test(u))
       return new Response(JSON.stringify({code:200,result:false,success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/swan\/credit\/free|\/credit\/free/i.test(u))
       return new Response(JSON.stringify({code:200,result:{dailyFill:_C,credit:_C},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/payment\/price/i.test(u))
       return new Response(JSON.stringify({code:200,result:{},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
-    if (/resume.?tailor.*credit|tailor.*credit|resume.*credit|credit.*resume|credit.*tailor/i.test(u))
+    if (/resume.?tailor.*credit|tailor.*credit|resume.*credit|credit.*resume|credit.*tailor|cover.?letter.*credit/i.test(u))
       return new Response(JSON.stringify({code:200,result:{credit:99999,remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/usage\/limit|\/rate.?limit|\/quota/i.test(u))
       return new Response(JSON.stringify({code:200,result:{remaining:99999,limit:99999,used:0},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
     if (/\/feature.?flag|\/feature.?gate|\/entitlement/i.test(u))
-      return new Response(JSON.stringify({code:200,result:{enabled:true,tier:'premium',plan:'turbo'},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({code:200,result:{enabled:true,tier:'premium',plan:'turbo_plus',simplify_plus:true,unlimited:true},success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+    // Simplify+ bypass: coin/token balance, subscription, limits
+    if (/\/api\/(coins?|tokens?|balance|credits?|subscription|plan|usage|limit)/i.test(u))
+      return new Response(JSON.stringify({coins:99999,tokens:99999,balance:99999,credits:99999,plan:'plus',tier:'premium',status:'active',unlimited:true,remaining:99999,limit:99999,used:0,success:true}),{status:200,headers:{'Content-Type':'application/json'}});
+    // Simplify+ bypass: resume generation, cover letter, AI response limits
+    if (/\/(generate|create|tailor).*(resume|cover|letter|response|essay|network|referral)/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 429 || r.status === 403)
+          return new Response(JSON.stringify({success:true,result:{},remaining:99999}),{status:200,headers:{'Content-Type':'application/json'}});
+        return r;
+      } catch(e) { throw e; }
+    }
+    // Simplify+ bypass: paywall/upgrade prompts
+    if (/\/(paywall|upgrade|pricing|checkout|subscribe)/i.test(u))
+      return new Response(JSON.stringify({success:true,bypass:true,plan:'plus',tier:'premium'}),{status:200,headers:{'Content-Type':'application/json'}});
     try {
       const r = await _fetch.apply(window, arguments);
       if (r.status === 402 || r.status === 429) return new Response(JSON.stringify({code:200,result:{}}),{status:200,headers:{'Content-Type':'application/json'}});
@@ -36,9 +51,9 @@
   XMLHttpRequest.prototype.open = function(method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function() {
     const url = this._ua_url || '';
-    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit/i.test(url)) {
+    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit|coins?\/balance|tokens?\/balance|api\/(coins|tokens|balance|credits|usage|limit)/i.test(url)) {
       const s = this;
-      Object.defineProperty(s,'responseText',{get:()=>JSON.stringify({code:200,result:{credit:_C,dailyFill:_C,remaining:99999},success:true})});
+      Object.defineProperty(s,'responseText',{get:()=>JSON.stringify({code:200,result:{credit:_C,dailyFill:_C,remaining:99999,coins:99999,tokens:99999,balance:99999},success:true})});
       Object.defineProperty(s,'status',{get:()=>200});
       Object.defineProperty(s,'readyState',{get:()=>4});
       setTimeout(()=>{s.onreadystatechange?.();s.onload?.();},50);
@@ -68,7 +83,6 @@
     {n:'Dice',p:/dice\.com.*job/i},{n:'Wellfound',p:/wellfound\.com.*\/jobs/i},
     {n:'Paylocity',p:/paylocity\.com.*Recruiting/i},{n:'Phenom',p:/phenom\.com.*\/jobs/i},
     {n:'Avature',p:/avature\.net.*careers/i},{n:'Workable',p:/apply\.workable\.com/i},
-    {n:'Jobvite2',p:/jobs\.jobvite\.com|recruiting\.paylocity/i},
     {n:'ClearCompany',p:/clearcompany\.com.*careers/i},{n:'Paycom',p:/paycomonline\.net.*Recruiting/i},
     {n:'SAP',p:/sap\.com.*careers|jobs\.sap\.com/i},{n:'Ceridian',p:/ceridian\.com.*careers/i},
     {n:'Bullhorn',p:/bullhornstaffing\.com/i},{n:'iSolved',p:/isolved\.com.*careers/i},
@@ -76,6 +90,22 @@
     {n:'ApplicantPro',p:/applicantpro\.com/i},{n:'GovernmentJobs',p:/governmentjobs\.com/i},
     {n:'USAJOBS',p:/usajobs\.gov/i},{n:'Handshake',p:/joinhandshake\.com.*jobs/i},
     {n:'AngelList',p:/angel\.co.*jobs|wellfound\.com.*jobs/i},
+    // Simplify-supported ATS platforms
+    {n:'Myworkday',p:/myworkday\.com/i},{n:'GreenhouseEmbed',p:/greenhouse\.io.*embed/i},
+    {n:'LeverEmbed',p:/lever\.co.*\/apply/i},{n:'Eightfold',p:/eightfold\.ai.*careers/i},
+    {n:'Gem',p:/gem\.com.*jobs/i},{n:'HireVue',p:/hirevue\.com/i},
+    {n:'Cornerstone',p:/csod\.com.*careers|cornerstoneondemand/i},
+    {n:'TeamTailor',p:/teamtailor\.com|career\..*\.com/i},
+    {n:'Jobscore',p:/jobscore\.com/i},{n:'RecruitCRM',p:/recruitcrm\.io/i},
+    {n:'TalentLyft',p:/talentlyft\.com/i},{n:'Homerun',p:/homerun\.co/i},
+    {n:'Traffit',p:/traffit\.com/i},{n:'Manatal',p:/manatal\.com/i},
+    // LazyApply-supported ATS platforms
+    {n:'SimplyHired',p:/simplyhired\.com/i},{n:'CareerBuilder',p:/careerbuilder\.com/i},
+    {n:'Foundit',p:/foundit\.in|iimjobs\.com/i},{n:'Seek',p:/seek\.com\.au/i},
+    {n:'Naukri',p:/naukri\.com/i},{n:'Reed',p:/reed\.co\.uk/i},
+    {n:'TotalJobs',p:/totaljobs\.com/i},{n:'Adzuna',p:/adzuna\.com/i},
+    {n:'Jobsite',p:/jobsite\.co\.uk/i},{n:'CVLibrary',p:/cv-library\.co\.uk/i},
+    // Generic career page patterns
     {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\/?$|\/openings?\/?$/i}
   ];
 
@@ -157,6 +187,7 @@
     veteran: 'I am not a protected veteran', disability: 'I do not have a disability',
     gender: 'Prefer not to say', ethnicity: 'Prefer not to say', race: 'Prefer not to say',
     years: '5', salary: '80000', notice: '2 weeks', availability: 'Immediately',
+    country: 'Ireland', phoneCountryCode: '+353', countryCode: 'IE',
     cover: 'I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.',
     why: 'I admire the company culture and the opportunity to make a meaningful impact.',
     howHeard: 'LinkedIn',
@@ -187,7 +218,7 @@
     if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
     if (/state|province|region/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
-    if (/country/.test(l)) return p.country || 'United States';
+    if (/country/.test(l) && !/code|phone|dial/.test(l)) return p.country || DEFAULTS.country;
     if (/address|street/.test(l)) return p.address || '';
     if (/location|where.*(you|do you).*live/.test(l)) return p.city ? `${p.city}, ${p.state || ''}`.trim().replace(/,$/, '') : '';
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
@@ -216,7 +247,8 @@
     if (/disabilit/.test(l)) return DEFAULTS.disability;
     if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
     if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
-    if (/nationality|citizenship/.test(l)) return p.nationality || p.country || 'United States';
+    if (/country.?code|phone.?code|dial.?code|calling.?code/.test(l)) return p.phoneCountryCode || DEFAULTS.phoneCountryCode;
+    if (/nationality|citizenship/.test(l)) return p.nationality || p.country || DEFAULTS.country;
     if (/language|fluency|fluent/.test(l)) return p.languages || 'English';
     if (/certif|license|credential/.test(l)) return p.certifications || '';
     if (/commute|travel|willing.*travel/.test(l)) return 'Yes';
@@ -462,6 +494,9 @@
       const val = guessFieldValue(lbl, p, ed);
       if (val) { ed.textContent = val; ed.dispatchEvent(new Event('input', {bubbles:true})); filled++; }
     }
+
+    // Fix phone country code on every fallback fill pass
+    await fixPhoneCountryCode();
 
     LOG(`Fallback fill done: ${filled} fields filled`);
     return filled;
@@ -759,6 +794,7 @@
   async function directAutofillFlow() {
     await triggerAutofill();
     await sleep(5000);
+    await fixPhoneCountryCode();
     await fallbackFill();
     await sleep(1000);
     await fallbackFill();
@@ -767,10 +803,111 @@
     if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
   }
 
-  // ===================== WORKDAY AUTOMATION =====================
+  // ===================== ASHBY AUTOMATION (from LazyApply) =====================
+  async function ashbyAutomation() {
+    LOG('Ashby automation starting...');
+    const form = await waitFor('form,.ashby-application-form,[data-testid="application-form"]', 10000);
+    if (!form) { LOG('No Ashby form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+  }
+
+  // ===================== BAMBOOHR AUTOMATION =====================
+  async function bamboohrAutomation() {
+    LOG('BambooHR automation starting...');
+    const form = await waitFor('.RenderForm,form#applicationForm,.positionapply', 10000);
+    if (!form) { LOG('No BambooHR form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+  }
+
+  // ===================== PHONE COUNTRY CODE FIXER (Ireland +353) =====================
+  async function fixPhoneCountryCode() {
+    const p = await getProfile();
+    const targetCountry = p.country || DEFAULTS.country;
+    const targetCode = p.phoneCountryCode || DEFAULTS.phoneCountryCode;
+    LOG(`Fixing phone country code to ${targetCountry} (${targetCode})`);
+
+    // Strategy 1: Workday country dropdown (data-automation-id)
+    const wdCountryBtn = $('button[data-automation-id="countryDropdown"]:not([disabled]), button[id="country--country"]:not([disabled])');
+    if (wdCountryBtn) {
+      const txt = (wdCountryBtn.textContent || '').toLowerCase();
+      if (!txt.includes(targetCountry.toLowerCase()) && !txt.includes('ireland')) {
+        await selectFromWorkdayDropdown(wdCountryBtn, targetCountry);
+      }
+    }
+
+    // Strategy 2: Phone country code select dropdowns
+    const countrySelects = $$('select').filter(el => {
+      const lbl = getLabel(el);
+      return /country.?code|phone.?code|dial.?code|calling.?code|country.*phone|phone.*country/i.test(lbl || el.name || el.id || el.className);
+    });
+    for (const sel of countrySelects) {
+      const ieOpt = $$('option', sel).find(o =>
+        /ireland|\+353|353|IE\b/i.test(o.text) || o.value === 'IE' || o.value === '+353' || o.value === '353'
+      );
+      if (ieOpt) {
+        sel.value = ieOpt.value;
+        sel.dispatchEvent(new Event('change', {bubbles:true}));
+        LOG('Phone country code set to Ireland via select');
+      }
+    }
+
+    // Strategy 3: Country flag/code button dropdowns (common in modern UIs)
+    const codeButtons = $$('button,div[role="button"],.country-code-selector,.phone-country,.iti__selected-flag,[class*="country-code"],[class*="countryCode"],[class*="dial-code"],[class*="phone-prefix"]')
+      .filter(el => isVisible(el) && /\+1|\+\d{1,3}|🇺🇸|flag/i.test(el.textContent + el.innerHTML));
+    for (const btn of codeButtons) {
+      if (btn.textContent?.includes('+353') || btn.innerHTML?.includes('🇮🇪')) continue; // Already Ireland
+      realClick(btn);
+      await sleep(500);
+      // Look for Ireland in the opened dropdown
+      const items = $$('li,div[role="option"],a,.iti__country,.country-option,[class*="option"],[class*="menu-item"]')
+        .filter(el => isVisible(el) && /ireland|\+353|🇮🇪/i.test(el.textContent || ''));
+      if (items.length) {
+        realClick(items[0]);
+        LOG('Phone country code set to Ireland via dropdown click');
+        await sleep(300);
+      }
+    }
+
+    // Strategy 4: intl-tel-input library (very common)
+    const itiFlag = $('.iti__selected-flag,.iti__flag-container button');
+    if (itiFlag && !itiFlag.querySelector('.iti__flag.iti__ie')) {
+      realClick(itiFlag);
+      await sleep(500);
+      const ieItem = $('[data-country-code="ie"],.iti__country[data-country-code="ie"],li[data-dial-code="353"]');
+      if (ieItem) { realClick(ieItem); LOG('Phone country code set to Ireland via intl-tel-input'); await sleep(300); }
+    }
+  }
+
+  // Helper: select value from Workday popup dropdown
+  async function selectFromWorkdayDropdown(btn, value) {
+    realClick(btn);
+    await sleep(600);
+    const popup = $('[data-automation-widget="wd-popup"][data-automation-activepopup="true"]');
+    if (!popup) return false;
+    const items = $$('[data-automation-id="menuItem"],li[role="option"],li', popup);
+    const match = items.find(i => i.textContent?.toLowerCase().includes(value.toLowerCase()));
+    if (match) { realClick(match); await sleep(300); return true; }
+    // Try search input within popup
+    const searchInput = popup.querySelector('input[type="text"],input[type="search"]');
+    if (searchInput) {
+      nativeSet(searchInput, value);
+      await sleep(500);
+      const filtered = $$('[data-automation-id="menuItem"],li[role="option"],li', popup).filter(isVisible);
+      if (filtered.length) { realClick(filtered[0]); await sleep(300); return true; }
+    }
+    return false;
+  }
+
+  // ===================== WORKDAY AUTOMATION (SpeedyApply-enhanced) =====================
   async function workdayAutomation() {
-    LOG('Workday automation starting...');
-    // Click Apply button (multiple selector strategies)
+    LOG('Workday automation starting (SpeedyApply-enhanced)...');
+    const p = await getProfile();
+
+    // Phase 1: Navigate to application form
     let clicked = false;
     // Strategy 1: data-automation-id Apply button
     const applyBtnWd = $('[data-automation-id="applyButton"],[data-automation-id="jobAction-apply"]');
@@ -783,42 +920,135 @@
     // Click Apply Manually (skip Easy Apply / external links)
     const am = await waitFor("//*[@data-automation-id='applyManually']", 8000, true);
     if (am) { await sleep(500); clickEl(am); await sleep(2000); }
-    // Also check for "Use My Last Application" and skip it
+    // Handle "Use My Last Application" — skip it for fresh fill
     const useLastApp = await findByText('button,a', /use my last application|autofill with/i, 3000);
-    if (useLastApp) { LOG('Skipping "Use My Last Application" — using fresh fill'); }
-    // Wait for form page
-    const fp = await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage'],[data-automation-id='applyFlowContainer']", 10000);
-    if (fp) {
-      await sleep(1000);
-      // Check for "How Did You Hear About Us" page (Workday often asks first)
-      const howHear = $('[data-automation-id="sourceDropdown"],[data-automation-id="source"]');
-      if (howHear && isVisible(howHear)) {
-        LOG('Found "How Did You Hear" page — filling');
-        await fallbackFill();
-        await sleep(500);
-        // Click next
-        const nextBtn = $('button[data-automation-id="bottom-navigation-next-button"]');
-        if (nextBtn) { realClick(nextBtn); await sleep(2000); }
-      }
-      // Run tailor-first flow (which includes autofill + fallback + submit)
-      await tailorFirstFlow();
+    if (useLastApp) { LOG('Skipping "Use My Last Application"'); }
+
+    // Handle sign-in/create account pages
+    const signInBtn = $('[data-automation-id="signInSubmitButton"],[data-automation-id="createAccountSubmitButton"]');
+    if (signInBtn && isVisible(signInBtn)) {
+      LOG('Workday sign-in page detected — filling credentials');
+      const emailInput = $('input[data-automation-id="email"]');
+      if (emailInput && !emailInput.value) nativeSet(emailInput, p.email || '');
+      await sleep(500);
     }
+
+    // Wait for form page
+    const fp = await waitFor("[data-automation-id='quickApplyPage'],[data-automation-id='applyFlowAutoFillPage'],[data-automation-id='contactInformationPage'],[data-automation-id='applyFlowMyInfoPage'],[data-automation-id='ApplyFlowPage'],[data-automation-id='applyFlowContainer'],[data-automation-id='applyFlowForm']", 10000);
+    if (!fp) { LOG('Workday form page not found'); return; }
+    await sleep(1000);
+
+    // Phase 2: Workday-specific field filling (from SpeedyApply)
+    await workdayFillName(p);
+    await workdayFillContact(p);
+    await workdayFillAddress(p);
+    await workdayFillSource();
+    await fixPhoneCountryCode();
+
+    // Phase 3: Tailor-first flow for remaining fields
+    await tailorFirstFlow();
   }
 
-  // ===================== GREENHOUSE AUTOMATION =====================
+  // SpeedyApply-style Workday name fill
+  async function workdayFillName(p) {
+    const first = p.first_name || p.firstName || '';
+    const last = p.last_name || p.lastName || '';
+    if (!first && !last) return;
+    // Legal name
+    const fnInput = $('input[data-automation-id="legalNameSection_firstName"], #name--legalName--firstName');
+    const lnInput = $('input[data-automation-id="legalNameSection_lastName"], #name--legalName--lastName');
+    if (fnInput && !fnInput.value) { fnInput.focus(); nativeSet(fnInput, first); await sleep(100); }
+    if (lnInput && !lnInput.value) { lnInput.focus(); nativeSet(lnInput, last); await sleep(100); }
+    // Preferred name (if checkbox or section exists)
+    const prefFn = $('input[data-automation-id="preferredNameSection_firstName"], #name--preferredName--firstName');
+    const prefLn = $('input[data-automation-id="preferredNameSection_lastName"], #name--preferredName--lastName');
+    if (prefFn && !prefFn.value) nativeSet(prefFn, p.preferred_name || first);
+    if (prefLn && !prefLn.value) nativeSet(prefLn, last);
+    LOG('Workday: name fields filled');
+  }
+
+  // SpeedyApply-style Workday contact fill
+  async function workdayFillContact(p) {
+    // Email
+    const emailInput = $('input[data-automation-id="email"], input[name="emailAddress"]');
+    if (emailInput && !emailInput.value) { nativeSet(emailInput, p.email || ''); await sleep(100); }
+    // Phone device type → Mobile
+    const phoneTypeBtn = $('button[data-automation-id="phone-device-type"]:not([disabled]), button[id="phoneNumber--phoneType"]:not([disabled])');
+    if (phoneTypeBtn) {
+      const typeTxt = (phoneTypeBtn.textContent || '').toLowerCase();
+      if (!typeTxt.includes('mobile') && !typeTxt.includes('cell')) {
+        await selectFromWorkdayDropdown(phoneTypeBtn, 'Mobile');
+      }
+    }
+    // Phone number
+    const phoneInput = $('input[data-automation-id="phone-number"], #phoneNumber--phoneNumber');
+    if (phoneInput && !phoneInput.value) { nativeSet(phoneInput, p.phone || ''); await sleep(100); }
+    // Country dropdown (set to Ireland/user country)
+    const countryBtn = $('button[data-automation-id="countryDropdown"]:not([disabled]), button[id="country--country"]:not([disabled])');
+    if (countryBtn) {
+      const country = p.country || DEFAULTS.country;
+      const txt = (countryBtn.textContent || '').toLowerCase();
+      if (!txt.includes(country.toLowerCase())) {
+        await selectFromWorkdayDropdown(countryBtn, country);
+      }
+    }
+    LOG('Workday: contact fields filled');
+  }
+
+  // SpeedyApply-style Workday address fill
+  async function workdayFillAddress(p) {
+    const line1 = $('input[data-automation-id="addressSection_addressLine1"], #address--addressLine1');
+    const line2 = $('input[data-automation-id="addressSection_addressLine2"], #address--addressLine2');
+    const city = $('input[data-automation-id="addressSection_city"], #address--city');
+    const postal = $('input[data-automation-id="addressSection_postalCode"], #address--postalCode');
+    if (line1 && !line1.value) nativeSet(line1, p.address || '');
+    if (line2 && !line2.value && p.address2) nativeSet(line2, p.address2);
+    if (city && !city.value) nativeSet(city, p.city || '');
+    if (postal && !postal.value) nativeSet(postal, p.postal_code || p.zip || '');
+    // Country/region dropdown
+    const regionBtn = $('button[data-automation-id="addressSection_countryRegion"]:not([disabled]), #address--countryRegion');
+    if (regionBtn) {
+      const state = p.state || p.county || '';
+      if (state) await selectFromWorkdayDropdown(regionBtn, state);
+    }
+    LOG('Workday: address fields filled');
+  }
+
+  // Workday "How Did You Hear" source fill
+  async function workdayFillSource() {
+    const sourceBtn = $('button[data-automation-id="sourceDropdown"]:not([disabled]), button[id="source--source"]:not([disabled])');
+    if (!sourceBtn) return;
+    const txt = (sourceBtn.textContent || '').toLowerCase();
+    if (txt && !txt.includes('select') && !txt.includes('choose')) return; // Already filled
+    await selectFromWorkdayDropdown(sourceBtn, DEFAULTS.howHeard);
+    // Also check formField-source prompt
+    const sourcePrompt = $('[data-automation-id="formField-sourcePrompt"] input,[data-automation-id="formField-source"] input');
+    if (sourcePrompt && !sourcePrompt.value) nativeSet(sourcePrompt, DEFAULTS.howHeard);
+    LOG('Workday: source filled');
+  }
+
+  // ===================== GREENHOUSE AUTOMATION (SpeedyApply-enhanced) =====================
   async function greenhouseAutomation() {
     LOG('Greenhouse automation starting...');
-    // Greenhouse has a simple single/multi-page form
-    // Wait for the application form
+    const p = await getProfile();
     const form = await waitFor('#application_form,#application,.application-form,.main-content form', 10000);
     if (!form) { LOG('No Greenhouse form found'); await directAutofillFlow(); return; }
     await sleep(1500);
 
-    // Check for "Apply with LinkedIn" or similar quick-apply buttons — skip them
-    const quickApply = $('button[data-source="LinkedIn"],a[data-source="LinkedIn"],.quick-apply-button');
-    // We want the full application form, not quick apply
+    // Greenhouse-specific field selectors (from SpeedyApply)
+    const ghFields = {
+      '#first_name': p.first_name || p.firstName || '',
+      '#last_name': p.last_name || p.lastName || '',
+      '#email': p.email || '',
+      '#phone': p.phone || '',
+      '#auto_complete_input': p.city ? `${p.city}, ${p.state || p.county || ''}, ${p.country || DEFAULTS.country}`.replace(/,\s*,/g, ',').replace(/,\s*$/, '') : '',
+    };
+    for (const [sel, val] of Object.entries(ghFields)) {
+      const el = $(sel);
+      if (el && !el.value && val) { el.focus(); nativeSet(el, val); await sleep(80); }
+    }
 
-    // Run tailor-first (sidebar autofill + fallback)
+    await fixPhoneCountryCode();
     await tailorFirstFlow();
   }
 
@@ -836,6 +1066,7 @@
     const form = await waitFor('.application-form,#application-form,.postings-form,form[action*="apply"]', 10000);
     if (!form) { LOG('No Lever form found'); await directAutofillFlow(); return; }
     await sleep(1500);
+    await fixPhoneCountryCode();
     await tailorFirstFlow();
   }
 
@@ -857,6 +1088,17 @@
     // Wait for form fields
     await waitFor('.iCIMS_InfoMsg_Job,.iCIMS_Forms_Region,form,.applicant-form', 8000);
     await sleep(1500);
+    // iCIMS-specific fields (from SpeedyApply)
+    const p = await getProfile();
+    const icimsFields = {
+      '#PersonProfileFields\\.Login': p.email || '',
+      '#PersonProfileFields\\.LastName': p.last_name || p.lastName || '',
+      '#PersonProfileFields\\.Email': p.email || '',
+    };
+    for (const [sel, val] of Object.entries(icimsFields)) {
+      try { const el = $(sel); if (el && !el.value && val) nativeSet(el, val); } catch(_) {}
+    }
+    await fixPhoneCountryCode();
     await tailorFirstFlow();
   }
 
@@ -1158,6 +1400,8 @@
             else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
             else if (/icims\.com/i.test(location.href)) await icimsAutomation();
             else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+            else if (/ashbyhq\.com/i.test(location.href)) await ashbyAutomation();
+            else if (/bamboohr\.com/i.test(location.href)) await bamboohrAutomation();
             else await tailorFirstFlow();
           }, 'Queue job automation');
 
@@ -1185,23 +1429,89 @@
     }
     goNext();
   }
+  // LazyApply-inspired: configurable delays between applications
+  const QUEUE_DELAYS = {1:2000, 1.5:1500, 2:1000, 3:500};
+  let qSpeed = 1; // 1x speed
+  let qTimeout = 120000; // 2-min timeout per job (LazyApply uses similar)
+
   function goNext() {
     if (qPaused) return;
     const n = queue.find(j => j.status === 'pending');
-    if (n) { n.status = 'applying'; saveQ().then(() => { location.href = n.url; }); }
-    else { qActive = false; st.set(SK.QA, false); renderQ(); updateCtrl(); }
+    if (n) {
+      n.status = 'applying';
+      n.startedAt = Date.now();
+      saveQ().then(() => {
+        // LazyApply-style: delay between jobs to avoid rate limiting
+        const delay = QUEUE_DELAYS[qSpeed] || 2000;
+        setTimeout(() => { location.href = n.url; }, delay);
+      });
+    } else {
+      qActive = false;
+      st.set(SK.QA, false);
+      // LazyApply-style: send automation complete notification
+      LOG('Queue complete — all jobs processed');
+      const done = queue.filter(j => j.status === 'done').length;
+      const failed = queue.filter(j => j.status === 'failed').length;
+      LOG(`Results: ${done} done, ${failed} failed out of ${queue.length} total`);
+      renderQ(); updateCtrl();
+    }
   }
   async function startQ() { if (!queue.filter(j => j.status === 'pending').length) return; qActive = true; qPaused = false; await st.set(SK.QA, true); await st.set(SK.QP, false); updateCtrl(); goNext(); }
   async function stopQ() { qActive = false; qPaused = false; await st.set(SK.QA, false); await st.set(SK.QP, false); queue.forEach(j => { if (j.status === 'applying') j.status = 'pending'; }); await saveQ(); renderQ(); updateCtrl(); }
   async function pauseQ() { qPaused = true; await st.set(SK.QP, true); renderQ(); updateCtrl(); }
   async function resumeQ() { qPaused = false; await st.set(SK.QP, false); processQ(); renderQ(); updateCtrl(); }
-  async function skipJob() { const c = queue.find(j => j.status === 'applying'); if (c) { c.status = 'failed'; await saveQ(); } goNext(); }
+  async function skipJob() { const c = queue.find(j => j.status === 'applying'); if (c) { c.status = 'failed'; c.error = 'Skipped by user'; await saveQ(); } goNext(); }
+
+  // LazyApply-inspired: bulk URL import from text (supports various formats)
+  function parseBulkUrls(text) {
+    const urls = [];
+    // Split by lines, commas, tabs, spaces
+    const tokens = text.split(/[\r\n,\t]+/).map(s => s.trim()).filter(Boolean);
+    for (const token of tokens) {
+      // Skip header rows
+      if (/^(url|link|job|title|company|status|date|source)/i.test(token)) continue;
+      // Extract URLs from mixed content
+      const urlMatch = token.match(/https?:\/\/[^\s,"'<>]+/i);
+      if (urlMatch) {
+        const clean = urlMatch[0].replace(/[)"'>\]]+$/, ''); // Clean trailing chars
+        if (!urls.includes(clean)) urls.push(clean);
+      }
+    }
+    return urls;
+  }
+
+  // LazyApply-inspired: form analysis (check how many fields are on current page)
+  function analyzeCurrentForm() {
+    const fields = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select').filter(isVisible);
+    const filled = fields.filter(hasFieldValue).length;
+    const required = fields.filter(isFieldRequired).length;
+    const requiredFilled = fields.filter(f => isFieldRequired(f) && hasFieldValue(f)).length;
+    return { total: fields.length, filled, unfilled: fields.length - filled, required, requiredFilled, requiredUnfilled: required - requiredFilled };
+  }
 
   // ===================== CREDIT HIDE =====================
   function hideCredits() {
     $$('.autofill-credit-row,.payment-entry,.plugin-setting-credits-tip').forEach(e => e.style.display = 'none');
-    $$('.ant-modal-root').forEach(m => { if (/remaining.*credit|upgrade.*turbo|out of credit|credits.*refill|get unlimited/i.test(m.textContent || '')) m.style.display = 'none'; });
+    $$('.ant-modal-root').forEach(m => {
+      const txt = m.textContent || '';
+      // Hide credit/upgrade modals
+      if (/remaining.*credit|upgrade.*turbo|out of credit|credits.*refill|get unlimited/i.test(txt)) m.style.display = 'none';
+      // TASK 4: Hide review submission prompts (GoodReviewsModel, CriticizeReviewsModal, leave-review)
+      if (/leave.*review|rate.*experience|how.*was.*your|review.*your.*experience|good.*review|criticize|feedback.*application|share.*experience/i.test(txt)) {
+        LOG('Suppressing review prompt');
+        m.style.display = 'none';
+        // Also try clicking dismiss/close button
+        const closeBtn = m.querySelector('.ant-modal-close,button[aria-label="Close" i],.close-button,[class*="close"],[class*="dismiss"]');
+        if (closeBtn) realClick(closeBtn);
+      }
+    });
+    // Hide review-related elements by class
+    $$('.good-reviews-popup-text,.good-reviews-popup-title,.leave-review-button,.leave-review-text,[class*="GoodReviewsModel"],[class*="CriticizeReviewsModal"],[class*="review-popup"],[class*="review-modal"],[class*="feedback-modal"]')
+      .forEach(e => e.style.display = 'none');
+    // Replace credit text
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
+    // Simplify+ coin/token bypass display
+    $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
   }
 
   // ===================== CSS =====================
@@ -1211,6 +1521,11 @@
     s.textContent = `
 .autofill-credit-row,.autofill-credit-text,.autofill-credit-text-right,.payment-entry,.plugin-setting-credits-tip{display:none!important}
 .ant-modal-root:has(.popup-modal-actions){display:none!important}
+/* Hide review/feedback prompts after submission */
+.ant-modal-root:has(.good-reviews-popup-text),.ant-modal-root:has(.good-reviews-popup-title),.ant-modal-root:has(.leave-review-button),.ant-modal-root:has(.leave-review-text),.ant-modal-root:has(.CriticizeReviewsModal),.ant-modal-root:has(.GoodReviewsModel){display:none!important}
+[class*="review-popup"],[class*="review-modal"],[class*="feedback-modal"],[class*="good-reviews"],[class*="leave-review"]{display:none!important}
+/* Hide Simplify paywall/upgrade prompts */
+[class*="paywall"],[class*="upgrade-modal"],[class*="coin-required"],[class*="token-required"],[class*="premium-gate"]{display:none!important}
 
 /* === DRAGGABLE FAB === */
 #ua-fab{position:fixed;bottom:28px;right:28px;width:48px;height:48px;border-radius:50%;border:none;cursor:grab;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00c985,#00b377);box-shadow:0 2px 12px rgba(0,201,133,.4);z-index:2147483647;transition:box-shadow .2s;user-select:none;-webkit-user-select:none;touch-action:none}
@@ -1390,7 +1705,7 @@
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Import Jobs</div>
-          <div id="ua-drop" class="ua-drop"><div class="ua-drop-t">Drop CSV or click to browse</div><div class="ua-drop-sub">.csv .txt .tsv with job URLs</div><input type="file" id="ua-csv" class="ua-csv-in" accept=".csv,.txt,.tsv"></div>
+          <div id="ua-drop" class="ua-drop"><div class="ua-drop-t">Drop CSV or click to browse</div><div class="ua-drop-sub">.csv .txt .tsv — or paste multiple URLs</div><input type="file" id="ua-csv" class="ua-csv-in" accept=".csv,.txt,.tsv,.json"></div>
           <div class="ua-url-row"><input type="text" id="ua-url" class="ua-url-inp" placeholder="Paste job URL..."><button id="ua-add" class="ua-url-btn">Add</button></div>
         </div>
         <div class="ua-sec">
@@ -1494,6 +1809,8 @@
         else if (/lever\.co|jobs\.lever/i.test(location.href)) leverAutomation();
         else if (/icims\.com/i.test(location.href)) icimsAutomation();
         else if (/linkedin\.com.*\/jobs/i.test(location.href)) linkedinEasyApply();
+        else if (/ashbyhq\.com/i.test(location.href)) ashbyAutomation();
+        else if (/bamboohr\.com/i.test(location.href)) bamboohrAutomation();
         else tailorFirstFlow();
       }
     });
@@ -1507,6 +1824,18 @@
 
     document.getElementById('ua-add').addEventListener('click', () => { const i = document.getElementById('ua-url'); if (i.value.trim()) { addJob(i.value.trim()); i.value = ''; } });
     document.getElementById('ua-url').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('ua-add').click(); });
+    // LazyApply-style: support pasting multiple URLs at once
+    document.getElementById('ua-url').addEventListener('paste', async e => {
+      await sleep(50);
+      const text = document.getElementById('ua-url').value;
+      const urls = parseBulkUrls(text);
+      if (urls.length > 1) {
+        e.preventDefault();
+        for (const u of urls) await addJob(u);
+        document.getElementById('ua-url').value = '';
+        LOG(`Bulk pasted ${urls.length} URLs`);
+      }
+    });
     document.getElementById('ua-selall').addEventListener('change', e => { if (e.target.checked) queue.forEach(j => selected.add(j.id)); else selected.clear(); renderQ(); });
     document.getElementById('ua-export')?.addEventListener('click', exportQueueCSV);
     document.getElementById('ua-del').addEventListener('click', removeSelected);
@@ -1528,10 +1857,11 @@
     // Profile editor
     const profFields = [
       {k:'first_name',l:'First Name'},{k:'last_name',l:'Last Name'},{k:'email',l:'Email'},{k:'phone',l:'Phone'},
-      {k:'city',l:'City'},{k:'state',l:'State'},{k:'postal_code',l:'Zip'},{k:'country',l:'Country'},
-      {k:'address',l:'Address'},{k:'linkedin',l:'LinkedIn URL'},{k:'github',l:'GitHub URL'},{k:'website',l:'Website'},
-      {k:'school',l:'School/University'},{k:'degree',l:'Degree'},{k:'major',l:'Major'},{k:'graduation_year',l:'Grad Year'},
-      {k:'current_title',l:'Job Title'},{k:'current_company',l:'Company'},{k:'expected_salary',l:'Expected Salary'},{k:'years',l:'Years Experience'},
+      {k:'phoneCountryCode',l:'Phone Code (+353)'},{k:'city',l:'City'},{k:'state',l:'State/County'},{k:'postal_code',l:'Eircode/Zip'},
+      {k:'country',l:'Country'},{k:'address',l:'Address'},{k:'linkedin',l:'LinkedIn URL'},{k:'github',l:'GitHub URL'},
+      {k:'website',l:'Website'},{k:'school',l:'School/University'},{k:'degree',l:'Degree'},{k:'major',l:'Major'},
+      {k:'graduation_year',l:'Grad Year'},{k:'current_title',l:'Job Title'},{k:'current_company',l:'Company'},
+      {k:'expected_salary',l:'Expected Salary'},{k:'years',l:'Years Experience'},{k:'nationality',l:'Nationality'},
     ];
     const profContainer = document.getElementById('ua-prof-fields');
     const profPanel = document.getElementById('ua-prof');
@@ -1559,7 +1889,17 @@
     });
   }
 
-  async function handleFile(f) { const u = parseCSV(await f.text()); if (!u.length) { alert('No valid URLs found.'); return; } for (const x of u) await addJob(x); document.getElementById('ua-drawer').classList.add('open'); positionDrawer(); }
+  async function handleFile(f) {
+    const text = await f.text();
+    // Use both parsers for maximum compatibility (LazyApply-enhanced)
+    const u1 = parseCSV(text);
+    const u2 = parseBulkUrls(text);
+    const u = [...new Set([...u1, ...u2])];
+    if (!u.length) { alert('No valid URLs found.'); return; }
+    LOG(`Imported ${u.length} URLs from file`);
+    for (const x of u) await addJob(x);
+    document.getElementById('ua-drawer').classList.add('open'); positionDrawer();
+  }
 
   // ===================== RENDER =====================
   function renderQ() {
