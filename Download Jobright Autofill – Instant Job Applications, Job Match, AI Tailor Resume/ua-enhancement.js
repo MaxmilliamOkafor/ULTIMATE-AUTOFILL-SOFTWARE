@@ -943,10 +943,16 @@
     await workdayFillContact(p);
     await workdayFillAddress(p);
     await workdayFillSource();
+    await workdayFillEducation(p);
+    await workdayFillExperience(p);
+    await workdayResumeUpload();
     await fixPhoneCountryCode();
 
-    // Phase 3: Tailor-first flow for remaining fields
+    // Phase 3: Tailor-first flow for first page
     await tailorFirstFlow();
+
+    // Phase 4: Workday multi-page navigation (handles all Workday page types)
+    await workdayMultiPageFlow();
   }
 
   // SpeedyApply-style Workday name fill
@@ -1025,6 +1031,143 @@
     const sourcePrompt = $('[data-automation-id="formField-sourcePrompt"] input,[data-automation-id="formField-source"] input');
     if (sourcePrompt && !sourcePrompt.value) nativeSet(sourcePrompt, DEFAULTS.howHeard);
     LOG('Workday: source filled');
+  }
+
+  // SpeedyApply Workday: education section fill
+  async function workdayFillEducation(p) {
+    const schoolInput = $('input[data-automation-id="school"], [data-automation-id="formField-school"] input');
+    if (schoolInput && !schoolInput.value) { nativeSet(schoolInput, p.school || p.university || ''); await sleep(100); }
+    const degreeInput = $('input[data-automation-id="degree"], [data-automation-id="formField-degree"] input');
+    if (degreeInput && !degreeInput.value) nativeSet(degreeInput, p.degree || "Bachelor's");
+    // GPA
+    const gpaInput = $('input[data-automation-id="gpa"], [data-automation-id="formField-gradeAverage"] input');
+    if (gpaInput && !gpaInput.value && p.gpa) nativeSet(gpaInput, p.gpa);
+    // Date fields (firstYearAttended, lastYearAttended)
+    const startYear = $('[data-automation-id="formField-firstYearAttended"] input, [data-automation-id="formField-startDate"] input');
+    const endYear = $('[data-automation-id="formField-lastYearAttended"] input, [data-automation-id="formField-endDate"] input');
+    if (startYear && !startYear.value && p.graduation_year) {
+      const start = parseInt(p.graduation_year) - 4;
+      nativeSet(startYear, start.toString());
+    }
+    if (endYear && !endYear.value && p.graduation_year) nativeSet(endYear, p.graduation_year);
+    LOG('Workday: education fields filled');
+  }
+
+  // SpeedyApply Workday: experience section fill
+  async function workdayFillExperience(p) {
+    const titleInput = $('[data-automation-id="jobTitle"] input, [data-automation-id="formField-jobTitle"] input');
+    const companyInput = $('[data-automation-id="company"] input, [data-automation-id="formField-company"] input');
+    const locInput = $('[data-automation-id="location"] input, [data-automation-id="formField-location"] input');
+    if (titleInput && !titleInput.value) nativeSet(titleInput, p.current_title || p.title || '');
+    if (companyInput && !companyInput.value) nativeSet(companyInput, p.current_company || p.company || '');
+    if (locInput && !locInput.value) {
+      const loc = p.city ? `${p.city}, ${p.country || DEFAULTS.country}` : '';
+      nativeSet(locInput, loc);
+    }
+    LOG('Workday: experience fields filled');
+  }
+
+  // SpeedyApply Workday: self-identify / EEO section
+  async function workdayFillEEO() {
+    // Gender
+    const genderBtn = $('button[data-automation-id="gender"]:not([disabled]), select[data-automation-id="gender"]');
+    if (genderBtn) await selectFromWorkdayDropdown(genderBtn, DEFAULTS.gender);
+    // Ethnicity/Race
+    const raceBtn = $('button[data-automation-id="ethnicity"]:not([disabled]), button[data-automation-id="race"]:not([disabled])');
+    if (raceBtn) await selectFromWorkdayDropdown(raceBtn, DEFAULTS.ethnicity);
+    // Veteran
+    const vetBtn = $('button[data-automation-id="veteranStatus"]:not([disabled])');
+    if (vetBtn) await selectFromWorkdayDropdown(vetBtn, DEFAULTS.veteran);
+    // Disability
+    const disBtn = $('button[data-automation-id="disabilityStatus"]:not([disabled])');
+    if (disBtn) await selectFromWorkdayDropdown(disBtn, DEFAULTS.disability);
+    // Radio-based EEO (some Workday sites use radios)
+    const eeoRadios = $$('input[type="radio"]').filter(r => {
+      const lbl = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+      return /prefer not|decline|choose not|do not wish/i.test(lbl);
+    });
+    for (const r of eeoRadios) { if (!r.checked) { realClick(r); await sleep(100); } }
+    LOG('Workday: EEO section filled');
+  }
+
+  // SpeedyApply Workday: resume upload via file input
+  async function workdayResumeUpload() {
+    const fileInput = $('input[data-automation-id="file-upload-input-ref"], input[data-automation-id="select-files"], input[data-automation-id="resumeUpload"]');
+    if (fileInput) {
+      LOG('Workday: resume file input found — Jobright sidebar handles upload');
+      // The sidebar injects resume, we just ensure the input is visible
+    }
+    // Delete existing resume if needed (to replace with tailored one)
+    const deleteBtn = $('button[data-automation-id="delete-file"]');
+    // Don't auto-delete — let the sidebar handle it
+    return !!fileInput;
+  }
+
+  // SpeedyApply Workday: multi-page navigation with page type detection
+  async function workdayMultiPageFlow() {
+    const MAX_PAGES = 12;
+    const pageTypes = [
+      'applyFlowAutoFillPage', 'applyFlowMyInfoPage', 'contactInformationPage',
+      'applyFlowMyExpPage', 'applyFlowPrimaryQuestionsPage', 'applyFlowSecondaryQuestionsPage',
+      'applyFlowSelfIdentifyPage', 'applyFlowVoluntaryDisclosuresPage',
+      'applyFlowSupplementaryQuestionsPage', 'applyFlowReviewPage'
+    ];
+    const p = await getProfile();
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      if (checkSuccess()) { LOG('Workday: success detected'); break; }
+      await sleep(1500);
+
+      // Detect current page type
+      let currentPageType = 'unknown';
+      for (const pt of pageTypes) {
+        if ($(`[data-automation-id="${pt}"]`)) { currentPageType = pt; break; }
+      }
+      LOG(`Workday multi-page: page ${page} — ${currentPageType}`);
+
+      // Fill based on page type
+      if (/MyInfo|contactInformation|AutoFill/.test(currentPageType)) {
+        await workdayFillName(p);
+        await workdayFillContact(p);
+        await workdayFillAddress(p);
+        await workdayFillSource();
+        await fixPhoneCountryCode();
+      } else if (/MyExp/.test(currentPageType)) {
+        await workdayFillEducation(p);
+        await workdayFillExperience(p);
+      } else if (/SelfIdentify|VoluntaryDisclosure/.test(currentPageType)) {
+        await workdayFillEEO();
+      } else if (/Review/.test(currentPageType)) {
+        // Review page — just submit
+        const submitBtn = $('button[data-automation-id="btnSubmit"]');
+        if (submitBtn && isVisible(submitBtn)) {
+          LOG('Workday: clicking Submit on review page');
+          await sleep(500);
+          realClick(submitBtn);
+          await sleep(3000);
+          break;
+        }
+      }
+
+      // Also run generic fallback
+      await fallbackFill();
+      await sleep(500);
+      await handleValidationErrors();
+
+      // Click Next
+      const nextBtn = $('button[data-automation-id="bottom-navigation-next-button"], button[data-automation-id="pageFooterNextButton"], button[data-automation-id="btnNext"]');
+      if (nextBtn && isVisible(nextBtn)) {
+        realClick(nextBtn);
+        await sleep(2500);
+      } else {
+        // Try submit
+        const sub = $('button[data-automation-id="btnSubmit"]');
+        if (sub && isVisible(sub)) { realClick(sub); await sleep(2000); break; }
+        // No button found — stop
+        LOG('Workday: no next/submit button found');
+        break;
+      }
+    }
   }
 
   // ===================== GREENHOUSE AUTOMATION (SpeedyApply-enhanced) =====================
