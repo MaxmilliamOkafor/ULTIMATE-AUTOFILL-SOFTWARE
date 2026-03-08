@@ -1,0 +1,119 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "name": "JobWizard: AI Autofill Job Applications & LinkedIn Referrals",
+  "version": "1.0.81",
+  "description": "Autofill job applications, find referrals, track applications, and generate ATS-optimized resumes with AI — apply 10x faster.",
+  "minimum_chrome_version": "108",
+  "host_permissions": [
+    "https://*.jobwizard.ai/*",
+    "https://*/*",
+    "https://api.jobwizard.ai/*"
+  ],
+  "permissions": [
+    "background",
+    "storage",
+    "cookies",
+    "scripting",
+    "activeTab",
+    "tabs"
+  ],
+  "manifest_version": 3,
+  "action": {
+    "default_icon": {
+      "16": "icons/thumbnails_16.png",
+      "32": "icons/thumbnails_32.png",
+      "48": "icons/thumbnails_48.png",
+      "128": "icons/thumbnails_128.png"
+    },
+    "default_title": "Auto Form Filler"
+  },
+  "icons": {
+    "16": "icons/thumbnails_16.png",
+    "32": "icons/thumbnails_32.png",
+    "48": "icons/thumbnails_48.png",
+    "128": "icons/thumbnails_128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  },
+  "commands": {
+    "shortcut_autofill": {
+      "suggested_key": {
+        "default": "Alt+Shift+D",
+        "mac": "Alt+Shift+D"
+      },
+      "description": "Autofill"
+    },
+    "shortcut_popup": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "Popup/Minimize"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "js/*",
+        "css/*",
+        "fonts/*",
+        "icons/*",
+        "js/marked.min.js",
+        "images/*.png",
+        "demo-job.html",
+        "js/demo-job-loader.js",
+        "js/demo-utils.js",
+        "js/demo-highlight-config.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "extension_ids": [
+        "*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "css": [
+        "/css/content_generate.css",
+        "/css/common.css"
+      ],
+      "js": [
+        "js/jquery-3.7.1.min.js",
+        "js/html2canvas.js",
+        "js/marked.min.js",
+        "js/fuse.min.js",
+        "js/custom-elements.min.js",
+        "js/patternCacheManager.js",
+        "js/chatState.js",
+        "js/bundle.js"
+      ],
+      "run_at": "document_end",
+      "type": "module",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.jobwizard.ai/demo-job*"
+      ],
+      "css": [
+        "/css/demo-highlight.css"
+      ],
+      "js": [
+        "js/demo-utils.js",
+        "js/demo-highlight-config.js",
+        "js/demoHighlight.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "author": "team@jobwizard.ai"
+}
