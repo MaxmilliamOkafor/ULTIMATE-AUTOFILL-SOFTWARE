@@ -1,4 +1,62 @@
 {
+  "manifest_version": 3,
+  "name": "JobWizard AI - Ultimate Autofill Job Applications & LinkedIn Referrals",
+  "version": "3.0.0",
+  "description": "AI-powered job application autofill with unlimited Quick Answer, CSV import, job queue automation, CTRL+Click queue, and advanced form filling for all ATS platforms.",
+  "icons": {
+    "16": "icon/logo.svg",
+    "32": "icon/logo.svg",
+    "48": "icon/logo.svg",
+    "128": "icon/logo.svg"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icon/logo.svg",
+      "32": "icon/logo.svg",
+      "48": "icon/logo.svg",
+      "128": "icon/logo.svg"
+    },
+    "default_title": "JobWizard AI Autofill"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "cookies",
+    "contextMenus",
+    "scripting",
+    "webNavigation",
+    "webRequest",
+    "alarms",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["js/jobwizard-autofill.js"],
+      "css": ["css/jobwizard.css"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icon/*", "images/*", "css/*", "js/*", "popup/*"],
+      "matches": ["*://*/*"],
+      "use_dynamic_url": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src * data:; img-src 'self' data: https:"
+  }
 "update_url": "https://clients2.google.com/service/update2/crx",
 
   "name": "JobWizard: AI Autofill Job Applications & LinkedIn Referrals",

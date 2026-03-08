@@ -1,9 +1,19 @@
 /**
- * Simplify+ Enhancement — Ultimate Autofill Integration
+ * Simplify+ Enhancement — Ultimate Autofill Integration v2.0.0
  * Unlocks Simplify+ features: unlimited tokens, AI autofill, cover letters,
  * tailored resumes, networking/referrals. Combines Jobright, OptimHire,
- * SpeedyApply, and LazyApply autofill patterns.
- * Version: 1.0.0
+ * SpeedyApply, LazyApply, and JobWizard autofill patterns.
+ *
+ * v2.1.0 Changes:
+ * - Button-style Yes/No + experience range handling (Ashby, Kraken, etc.)
+ * - Deloitte education: broad select matching (education level, major, CPA, completion)
+ * - Multiple education entry support
+ * - Fixed Education section (school name autocomplete, "Others"/"Other" fallback)
+ * - Universal date format compliance for all ATS (MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, etc.)
+ * - Advanced multi-choice question answering (Yes/No, experience ranges, radio buttons)
+ * - Removed all "Upgrade to Simplify+" prompts and modals
+ * - CSV import support and CTRL+Click to queue
+ * - Quick Answer engine with unlimited use
  */
 (function () {
   'use strict';
@@ -196,36 +206,527 @@
     return !!el.value?.trim();
   }
 
-  // ===================== SMART VALUE GUESSER =====================
+  // ===================== UNIVERSAL DATE FORMAT HANDLER =====================
+  function formatDate(dateStr, targetFormat) {
+    if (!dateStr) return '';
+    let month, day, year;
+    let m = dateStr.match(/^(\d{1,2})\/(\d{4})$/);
+    if (m) { month = parseInt(m[1]); day = 1; year = parseInt(m[2]); }
+    if (!m) { m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (m) { month = parseInt(m[1]); day = parseInt(m[2]); year = parseInt(m[3]); } }
+    if (!m) { m = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if (m) { year = parseInt(m[1]); month = parseInt(m[2]); day = parseInt(m[3]); } }
+    if (!m) {
+      const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+      m = dateStr.match(/^(\w+)\s+(\d{4})$/);
+      if (m) { month = months[m[1].toLowerCase().slice(0, 3)] || 1; day = 1; year = parseInt(m[2]); }
+    }
+    if (!m) { m = dateStr.match(/^(\d{4})$/); if (m) { year = parseInt(m[1]); month = 1; day = 1; } }
+    if (!year) return dateStr;
+    const pad = n => String(n).padStart(2, '0');
+    const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    switch (targetFormat) {
+      case 'MM/DD/YYYY': return `${pad(month)}/${pad(day)}/${year}`;
+      case 'DD/MM/YYYY': return `${pad(day)}/${pad(month)}/${year}`;
+      case 'YYYY-MM-DD': return `${year}-${pad(month)}-${pad(day)}`;
+      case 'MM/YYYY': return `${pad(month)}/${year}`;
+      case 'YYYY': return `${year}`;
+      case 'Month YYYY': return `${monthNames[month]} ${year}`;
+      case 'YYYY-MM': return `${year}-${pad(month)}`;
+      default: return `${pad(month)}/${pad(day)}/${year}`;
+    }
+  }
+
+  function detectDateFormat(el) {
+    const placeholder = (el.getAttribute('placeholder') || '').toLowerCase();
+    const type = el.type;
+    if (type === 'date') return 'YYYY-MM-DD';
+    if (type === 'month') return 'YYYY-MM';
+    if (/mm\/dd\/yyyy/i.test(placeholder)) return 'MM/DD/YYYY';
+    if (/dd\/mm\/yyyy/i.test(placeholder)) return 'DD/MM/YYYY';
+    if (/yyyy-mm-dd/i.test(placeholder)) return 'YYYY-MM-DD';
+    if (/mm\/yyyy/i.test(placeholder)) return 'MM/YYYY';
+    if (/yyyy/i.test(placeholder) && !/mm|dd/i.test(placeholder)) return 'YYYY';
+    const parent = el.closest('.form-group, .field, [class*="field"]');
+    if (parent) {
+      const hint = parent.querySelector('.hint, .helper-text, [class*="hint"], small');
+      if (hint) {
+        const h = hint.textContent.toLowerCase();
+        if (/mm\/dd\/yyyy/.test(h)) return 'MM/DD/YYYY';
+        if (/dd\/mm\/yyyy/.test(h)) return 'DD/MM/YYYY';
+        if (/yyyy-mm-dd/.test(h)) return 'YYYY-MM-DD';
+      }
+    }
+    const url = location.href.toLowerCase();
+    if (/workday/i.test(url)) return 'MM/DD/YYYY';
+    if (/greenhouse/i.test(url)) return 'MM/DD/YYYY';
+    if (/lever\.co/i.test(url)) return 'MM/YYYY';
+    if (/smartrecruiters/i.test(url)) return 'YYYY-MM-DD';
+    return 'MM/DD/YYYY';
+  }
+
+  // ===================== FULL QUESTION TEXT EXTRACTOR =====================
+  function getFullQuestionText(el) {
+    if (!el) return '';
+    const containers = ['.question', '[class*="question"]', '.field', '.form-group',
+      '[class*="FormField"]', '[data-automation-id]', 'fieldset'];
+    for (const sel of containers) {
+      const p = el.closest(sel);
+      if (p) return p.textContent?.trim().replace(/\s+/g, ' ') || '';
+    }
+    return getLabel(el);
+  }
+
+  // ===================== EDUCATION SECTION HANDLER =====================
+  async function fillEducationFields(p) {
+    let filled = 0;
+    const school = p.school || p.university || 'Imperial College London';
+    const degree = p.degree || 'Master of Science';
+    const major = p.major || 'Artificial Intelligence and Machine Learning';
+    const gpa = p.gpa || '3.9';
+    const eduStart = p.edu_start_date || '09/2019';
+    const eduEnd = p.edu_end_date || '06/2021';
+
+    // School/University selects — with "Other" fallback
+    const schoolSelects = $$('select').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) && /school|university|college|institution|alma/i.test(l);
+    });
+    for (const sel of schoolSelects) {
+      const opts = $$('option', sel);
+      let match = opts.find(o => o.text.toLowerCase().includes(school.toLowerCase()));
+      if (!match) {
+        // Try partial word match
+        const words = school.toLowerCase().split(/\s+/);
+        match = opts.find(o => words.some(w => w.length > 3 && o.text.toLowerCase().includes(w)));
+      }
+      if (!match) {
+        // Fallback to "Other" / "Others"
+        match = opts.find(o => /^others?$/i.test(o.text.trim())) ||
+          opts.find(o => /\bother\b|not listed|not found|unlisted/i.test(o.text));
+        if (match) LOG('School not found in dropdown, selected "Other"');
+      }
+      if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+      await sleep(300);
+      // After selecting "Other", fill any revealed text input
+      const otherInput = $$('input[type="text"]').find(el => {
+        const l = getLabel(el).toLowerCase();
+        return isVisible(el) && !hasFieldValue(el) && /other|specify|school|university|name/i.test(l);
+      });
+      if (otherInput) { nativeSet(otherInput, school); filled++; }
+    }
+
+    // School text inputs with autocomplete
+    const schoolInputs = $$('input[type="text"]').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) && /school|university|college|institution|alma/i.test(l);
+    });
+    for (const inp of schoolInputs) {
+      nativeSet(inp, school);
+      filled++;
+      await sleep(600);
+      // Check for autocomplete dropdown
+      const dropdown = $('[class*="autocomplete"], [class*="typeahead"], [class*="suggestion"], [role="listbox"], [class*="dropdown-menu"]:not([style*="display: none"])');
+      if (dropdown && isVisible(dropdown)) {
+        const items = $$('li, [role="option"], [class*="option"]', dropdown);
+        let match = items.find(i => i.textContent?.toLowerCase().includes(school.toLowerCase()));
+        if (!match) {
+          const words = school.toLowerCase().split(/\s+/);
+          match = items.find(i => words.some(w => w.length > 3 && i.textContent?.toLowerCase().includes(w)));
+        }
+        if (match) { realClick(match); await sleep(300); }
+        else {
+          // Click "Other" if available
+          const other = items.find(i => /^others?$/i.test(i.textContent?.trim())) ||
+            items.find(i => /\bother\b|not listed/i.test(i.textContent));
+          if (other) { realClick(other); LOG('School autocomplete: selected "Other"'); await sleep(300); }
+        }
+      }
+    }
+
+    // Degree selects
+    const degreeSelects = $$('select').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) && /\bdegree\b|education.*level|qualification/i.test(l) && !/field|major/i.test(l);
+    });
+    for (const sel of degreeSelects) {
+      const opts = $$('option', sel);
+      let match = opts.find(o => /master/i.test(o.text));
+      if (!match) match = opts.find(o => /bachelor|bs|ba|b\.s/i.test(o.text));
+      if (!match) match = opts.find(o => /degree|graduate/i.test(o.text));
+      if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+    }
+
+    // Major/Field of Study selects with "Other" fallback
+    const majorSelects = $$('select').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) && /major|field.*study|concentration|specialization|discipline/i.test(l);
+    });
+    for (const sel of majorSelects) {
+      const opts = $$('option', sel);
+      let match = opts.find(o => /artificial|intelligence|machine|learning|computer|science/i.test(o.text));
+      if (!match) match = opts.find(o => /technology|computing|engineering|stem/i.test(o.text));
+      if (!match) {
+        match = opts.find(o => /^others?$/i.test(o.text.trim())) || opts.find(o => /\bother\b/i.test(o.text));
+        if (match) LOG('Major not found in dropdown, selected "Other"');
+      }
+      if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+    }
+
+    // Education date fields — universal format compliance
+    const eduDateFields = $$('input').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      const ctx = getFullQuestionText(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) &&
+        /education|school|university|degree|academic/i.test(ctx) &&
+        /start|begin|from|end|finish|to|graduation|completion/i.test(l);
+    });
+    for (const field of eduDateFields) {
+      const l = getLabel(field).toLowerCase();
+      const isStart = /start|begin|from/i.test(l);
+      const dateStr = isStart ? eduStart : eduEnd;
+      const format = detectDateFormat(field);
+      nativeSet(field, formatDate(dateStr, format));
+      filled++;
+      await sleep(200);
+    }
+
+    // Education date selects (month/year dropdowns)
+    const eduDateSelects = $$('select').filter(el => {
+      const l = getLabel(el).toLowerCase();
+      const ctx = getFullQuestionText(el).toLowerCase();
+      return isVisible(el) && !hasFieldValue(el) &&
+        /education|school|university|degree|academic/i.test(ctx) &&
+        /start|begin|from|end|finish|to|graduation|month|year/i.test(l);
+    });
+    for (const sel of eduDateSelects) {
+      const l = getLabel(sel).toLowerCase();
+      const isStart = /start|begin|from/i.test(l);
+      const dateStr = isStart ? eduStart : eduEnd;
+      let month, year;
+      const dm = dateStr.match(/^(\d{1,2})\/(\d{4})$/);
+      if (dm) { month = parseInt(dm[1]); year = parseInt(dm[2]); }
+      const dm2 = dateStr.match(/^(\w+)\s+(\d{4})$/);
+      if (dm2) {
+        const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+        month = months[dm2[1].toLowerCase().slice(0, 3)] || 1;
+        year = parseInt(dm2[2]);
+      }
+      const opts = $$('option', sel);
+      if (/month/i.test(l) && month) {
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const match = opts.find(o => o.text.includes(monthNames[month - 1]) || o.value == month || o.value == String(month).padStart(2, '0'));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+      } else if (/year/i.test(l) && year) {
+        const match = opts.find(o => o.text.trim() == year || o.value == year);
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+      }
+      await sleep(200);
+    }
+
+    // ===== BROAD EDUCATION SELECT HANDLER (Deloitte, Workday, iCIMS, etc.) =====
+    // Catch ANY unfilled select that looks education-related by context or label
+    const allUnfilledSelects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const sel of allUnfilledSelects) {
+      const lbl = (getLabel(sel) || '').toLowerCase();
+      const ctx = getFullQuestionText(sel).toLowerCase();
+      const opts = $$('option', sel);
+      const hasPlaceholder = opts.length > 0 && /select|choose|pick|-- |please/i.test(opts[0]?.text || '');
+
+      // Education Level / Degree Level (catches "Education Level", "Highest Degree", etc.)
+      if (/education.?level|highest.?(degree|education|qualification)|level.?of.?education|degree.?type|degree.?level/i.test(lbl) ||
+          (/education|degree/i.test(ctx) && /level|type/i.test(lbl))) {
+        let match = opts.find(o => /master/i.test(o.text));
+        if (!match) match = opts.find(o => /bachelor|b\.?s\.?|b\.?a\.?/i.test(o.text));
+        if (!match) match = opts.find(o => /graduate|post.?graduate/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (level): ' + match.text); }
+        continue;
+      }
+
+      // Primary Major / Program / Area of Study
+      if (/major|program|area.?of.?study|field.?of.?study|specializ|concentrat|discipline|subject/i.test(lbl)) {
+        let match = opts.find(o => /artificial|intelligence|machine|learning|computer|science|information|technology/i.test(o.text));
+        if (!match) match = opts.find(o => /engineering|computing|stem|math|data|software/i.test(o.text));
+        if (!match) match = opts.find(o => /technology|business|management/i.test(o.text));
+        if (!match) {
+          match = opts.find(o => /^others?$/i.test(o.text.trim())) || opts.find(o => /\bother\b|not listed/i.test(o.text));
+          if (match) LOG('Major not found, selected "Other"');
+        }
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (major): ' + match.text); }
+        continue;
+      }
+
+      // CPA License / Professional License
+      if (/cpa|certified.?public|license|licensure|professional.?cert/i.test(lbl)) {
+        let match = opts.find(o => /^no$/i.test(o.text.trim()) || /not applicable|n\/a|none|do not/i.test(o.text));
+        if (!match) match = opts.find(o => /not required|prefer not/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (CPA/license): ' + match.text); }
+        continue;
+      }
+
+      // "Have you completed this degree?" / Degree completion
+      if (/complet|finish|graduate|awarded|confer|obtain|earn|receiv/i.test(lbl) && /degree|education|school|program/i.test(ctx)) {
+        let match = opts.find(o => /^yes$/i.test(o.text.trim()));
+        if (!match) match = opts.find(o => /completed|awarded|conferred|graduated/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (completed): ' + match.text); }
+        continue;
+      }
+
+      // Generic education-context select with "Select an option" placeholder
+      if (hasPlaceholder && /education|school|university|academic|degree/i.test(ctx)) {
+        // Try to match based on label keywords
+        if (/country/i.test(lbl)) {
+          const match = opts.find(o => /ireland|IE\b/i.test(o.text));
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        } else if (/year|grad/i.test(lbl)) {
+          const match = opts.find(o => o.text.trim() === '2021' || o.value === '2021');
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        } else if (/month/i.test(lbl)) {
+          const match = opts.find(o => /june|jun|6/i.test(o.text));
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        }
+      }
+      await sleep(200);
+    }
+
+    // ===== HANDLE MULTIPLE EDUCATION ENTRIES (Deloitte 2+ entries) =====
+    // If there are "Add Education" / "Add Another" buttons and we only filled one entry
+    const addEduBtns = $$('button, a, [role="button"]').filter(el =>
+      isVisible(el) && /add.*(education|school|degree|another|entry|more)/i.test(el.textContent || '')
+    );
+    // Don't auto-click add buttons — the user should control number of entries
+    // But DO fill any already-visible second/third education sections
+    const eduSections = $$('[class*="education"], [class*="Education"], [data-section*="education"], fieldset').filter(el => {
+      const t = el.textContent?.toLowerCase() || '';
+      return isVisible(el) && /education|school|university|degree/i.test(t) && el.querySelectorAll('select, input').length > 0;
+    });
+    if (eduSections.length > 1) {
+      LOG(`Found ${eduSections.length} education sections — filling all`);
+      for (let i = 1; i < eduSections.length; i++) {
+        const section = eduSections[i];
+        const sectionSelects = $$('select', section).filter(el => isVisible(el) && !hasFieldValue(el));
+        for (const sel of sectionSelects) {
+          const lbl = (getLabel(sel) || '').toLowerCase();
+          const opts = $$('option', sel);
+          // Fill with "N/A" or skip if it's a duplicate section
+          if (/school|university|institution/i.test(lbl)) {
+            const match = opts.find(o => /^others?$/i.test(o.text.trim())) || opts.find(o => /\bother\b|not listed/i.test(o.text));
+            if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+          }
+        }
+      }
+    }
+
+    LOG(`Education section: ${filled} fields filled`);
+    return filled;
+  }
+
+  // ===================== MULTI-CHOICE QUESTION ANSWERER =====================
+  function answerMultiChoiceQuestions() {
+    let answered = 0;
+    const radioGroups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => { (radioGroups[r.name || `_${r.id}`] ||= []).push(r); });
+
+    for (const [, radios] of Object.entries(radioGroups)) {
+      if (radios.some(r => r.checked)) continue;
+      const parent = radios[0].closest('fieldset, .question, [class*="question"], .form-group, [class*="field"]');
+      const questionText = (parent?.textContent || '').toLowerCase().replace(/\s+/g, ' ');
+
+      // Experience range questions
+      if (/how many years|years of experience|experience.*years/i.test(questionText)) {
+        const yearsExp = 9; // From profile
+        let bestMatch = null, bestScore = -1;
+        for (const radio of radios) {
+          const lbl = $(`label[for="${CSS.escape(radio.id)}"]`, parent);
+          const text = (lbl?.textContent || radio.value || '').trim();
+          // "7+" format
+          const plusM = text.match(/(\d+)\s*\+/);
+          if (plusM && yearsExp >= parseInt(plusM[1])) { if (100 > bestScore) { bestScore = 100; bestMatch = radio; } }
+          // "5-7 years" format
+          const rangeM = text.match(/(\d+)\s*[-–]\s*(\d+)/);
+          if (rangeM) {
+            const low = parseInt(rangeM[1]), high = parseInt(rangeM[2]);
+            const score = (yearsExp >= low && yearsExp <= high) ? 90 : (yearsExp > high ? 50 : 30);
+            if (score > bestScore) { bestScore = score; bestMatch = radio; }
+          }
+        }
+        if (bestMatch) { realClick(bestMatch); answered++; continue; }
+      }
+
+      // Yes/No questions — smart analysis
+      const labels = radios.map(r => {
+        const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+        return (lbl?.textContent || r.value || '').trim().toLowerCase();
+      });
+      const isYesNo = labels.some(l => /^yes$/i.test(l)) && labels.some(l => /^no$/i.test(l));
+
+      if (isYesNo) {
+        // Questions that should be "No"
+        const noPatterns = [/require.*sponsor/, /need.*visa/, /need.*permit/, /previously.*worked/,
+          /former.*employee/, /current.*employee/, /criminal|convicted/, /non.?compete|restrictive/,
+          /conflict.*interest/, /family.*member.*work/, /relative.*work/, /disability/, /veteran/,
+          /ever.*work.*for/, /referred/];
+        // Questions that should be "Yes"
+        const yesPatterns = [/authorized|eligible|right.*work|legally/, /proficien/, /experience.*have/,
+          /comfortable/, /familiar/, /willing/, /able/, /available/, /can.*start/, /can.*commute/,
+          /relocat/, /consent|agree|acknowledge|certify|confirm/, /background.*check/, /drug.*test/,
+          /over.*18|18.*years/, /driving|license|licence/, /speak.*english/, /reside/, /based.*in/,
+          /commit/, /passport|citizen/, /docker|terraform|kubernetes|python|java|react|node|aws|sql/,
+          /debugging|network|linux|backend|developer|devops|sre|programming|rust|code/,
+          /production.*environment/, /hands.?on.*experience/];
+
+        const shouldNo = noPatterns.some(r => r.test(questionText));
+        const shouldYes = yesPatterns.some(r => r.test(questionText));
+        const target = (shouldNo && !shouldYes) ? 'no' : 'yes';
+
+        const match = radios.find(r => {
+          const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+          return (lbl?.textContent || r.value || '').trim().toLowerCase() === target;
+        });
+        if (match) { realClick(match); answered++; continue; }
+      }
+
+      // Proficiency level questions
+      if (/proficien|skill.?level|expertise/i.test(questionText)) {
+        const levels = ['expert', 'advanced', 'proficient', 'experienced', 'strong'];
+        for (const level of levels) {
+          const match = radios.find(r => {
+            const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+            return (lbl?.textContent || r.value || '').toLowerCase().includes(level);
+          });
+          if (match) { realClick(match); answered++; break; }
+        }
+        continue;
+      }
+
+      // Default: try "Yes" for unknown questions
+      const yesRadio = radios.find(r => {
+        const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+        return /\byes\b/i.test(lbl?.textContent || r.value || '');
+      });
+      if (yesRadio) { realClick(yesRadio); answered++; }
+    }
+
+    // ===== BUTTON-STYLE Yes/No and Experience Range (Ashby, Kraken, etc.) =====
+    // These ATS render questions as clickable buttons/divs, not <input type="radio">
+    const buttonGroups = $$('fieldset, [class*="question"], [class*="Question"], [data-qa], [class*="field-group"], [class*="FieldGroup"], [class*="radio-group"], [class*="RadioGroup"], [class*="ButtonGroup"], [class*="button-group"], [role="radiogroup"], [role="group"]').filter(isVisible);
+
+    for (const group of buttonGroups) {
+      // Skip if any button/option already selected
+      const selectedBtn = group.querySelector('[aria-checked="true"], [data-selected="true"], [class*="selected"], [class*="active"]:not([class*="activeForm"]), [aria-pressed="true"], .bg-primary, .btn-primary, [class*="Checked"], [class*="checked"]');
+      if (selectedBtn) continue;
+
+      const groupText = group.textContent?.toLowerCase().replace(/\s+/g, ' ') || '';
+      // Find all clickable option buttons/divs within the group
+      const btns = $$('button, [role="button"], [role="option"], [role="radio"], label, div[tabindex], span[tabindex], div[class*="option"], div[class*="Option"], div[class*="choice"], div[class*="Choice"], div[class*="answer"], div[class*="Answer"]', group)
+        .filter(el => {
+          if (!isVisible(el)) return false;
+          const t = el.textContent?.trim() || '';
+          // Must have short text content (it's a button label, not a paragraph)
+          return t.length > 0 && t.length < 80;
+        });
+      if (btns.length < 2) continue;
+
+      const btnTexts = btns.map(b => (b.textContent?.trim() || '').toLowerCase());
+
+      // Check if this is a Yes/No button group
+      const hasYes = btnTexts.some(t => /^yes$/i.test(t.trim()));
+      const hasNo = btnTexts.some(t => /^no$/i.test(t.trim()));
+
+      if (hasYes && hasNo) {
+        // Smart Yes/No analysis
+        const noPatterns = [/require.*sponsor/, /need.*visa/, /need.*permit/, /previously.*worked/,
+          /former.*employee/, /current.*employee/, /criminal|convicted/, /non.?compete/,
+          /conflict.*interest/, /family.*member.*work/, /relative.*work/, /disability/, /veteran/];
+        const yesPatterns = [/authorized|eligible|right.*work|legally/, /proficien/, /experience/,
+          /comfortable/, /familiar/, /willing/, /able/, /available/, /can.*start/, /can.*commute/,
+          /relocat/, /consent|agree|acknowledge|certify|confirm/, /background.*check/, /drug.*test/,
+          /over.*18|18.*years/, /driving|license|licence/, /speak.*english/, /reside/, /based.*in/,
+          /commit/, /passport|citizen/, /docker|terraform|kubernetes|python|java|react|node|aws|sql/,
+          /debugging|network|linux|backend|developer|devops|sre|programming|rust|code/,
+          /production.*environment/, /hands.?on.*experience/, /do you have/, /have you/,
+          /are you.*proficient/, /are you.*experienced/, /are you.*comfortable/,
+          /can you/, /will you/, /would you/];
+
+        const shouldNo = noPatterns.some(r => r.test(groupText));
+        const shouldYes = yesPatterns.some(r => r.test(groupText));
+        const target = (shouldNo && !shouldYes) ? 'no' : 'yes';
+
+        const matchBtn = btns.find(b => b.textContent?.trim().toLowerCase() === target);
+        if (matchBtn) { realClick(matchBtn); answered++; LOG(`Button Yes/No: "${groupText.slice(0, 60)}..." → ${target}`); }
+        continue;
+      }
+
+      // Check if this is an experience range button group (0-3, 3-5, 5-7, 7+)
+      const hasRange = btnTexts.some(t => /\d+\s*[-–]\s*\d+|\d+\s*\+/i.test(t));
+      if (hasRange && /experience|years|how (many|long)/i.test(groupText)) {
+        const yearsExp = 9;
+        let bestMatch = null, bestScore = -1;
+        for (const btn of btns) {
+          const text = btn.textContent?.trim() || '';
+          const plusM = text.match(/(\d+)\s*\+/);
+          if (plusM && yearsExp >= parseInt(plusM[1])) { if (100 > bestScore) { bestScore = 100; bestMatch = btn; } }
+          const rangeM = text.match(/(\d+)\s*[-–]\s*(\d+)/);
+          if (rangeM) {
+            const low = parseInt(rangeM[1]), high = parseInt(rangeM[2]);
+            const score = (yearsExp >= low && yearsExp <= high) ? 90 : (yearsExp > high ? 50 : 30);
+            if (score > bestScore) { bestScore = score; bestMatch = btn; }
+          }
+        }
+        if (bestMatch) { realClick(bestMatch); answered++; LOG(`Button range: "${groupText.slice(0, 60)}..." → ${bestMatch.textContent?.trim()}`); }
+        continue;
+      }
+
+      // Generic button group — try first option if it seems like a skill/proficiency question
+      if (/proficien|skill|expertise|level|rating/i.test(groupText)) {
+        const levels = ['expert', 'advanced', 'proficient', 'experienced', 'strong', 'senior', 'high'];
+        for (const level of levels) {
+          const match = btns.find(b => b.textContent?.trim().toLowerCase().includes(level));
+          if (match) { realClick(match); answered++; break; }
+        }
+      }
+    }
+
+    LOG(`Multi-choice: ${answered} questions answered (incl. button-style)`);
+    return answered;
+  }
+
+  // ===================== SMART VALUE GUESSER (EXPANDED) =====================
   function guessValue(label, p) {
     const l = (label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
     if (/first.?name|given.?name/.test(l)) return p.first_name || p.firstName || '';
     if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
     if (/full.?name|your name|^name$/.test(l) && !/company|last|first/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/legal.?name/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/preferred.?name|nick/.test(l)) return p.first_name || p.firstName || '';
+    if (/middle/.test(l)) return 'N/A';
     if (/\bemail\b/.test(l)) return p.email || '';
     if (/phone|mobile|cell|telephone/.test(l)) return p.phone || '';
     if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
-    if (/state|province|region/.test(l)) return p.state || '';
+    if (/state|province|region|county/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
     if (/country/.test(l) && !/code|phone/.test(l)) return p.country || DEFAULTS.country;
-    if (/address|street/.test(l)) return p.address || '';
+    if (/address.*line.*1|street.*address|^address$/.test(l)) return p.address || p.address_line_1 || '';
+    if (/address.*line.*2/.test(l)) return p.address_line_2 || 'N/A';
     if (/location|where.*(you|do you).*live|where.*(located|based)/.test(l)) return p.city ? `${p.city}, ${p.state || p.country || ''}`.trim().replace(/,$/, '') : '';
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
     if (/github/.test(l)) return p.github_url || p.github || '';
-    if (/website|portfolio/.test(l)) return p.website_url || p.website || '';
-    if (/university|school|college/.test(l)) return p.school || p.university || '';
-    if (/\bdegree\b/.test(l)) return p.degree || "Bachelor's";
-    if (/major|field.?of.?study/.test(l)) return p.major || '';
-    if (/gpa/.test(l)) return p.gpa || '';
-    if (/graduation|grad.?year/.test(l)) return p.graduation_year || '';
+    if (/website|portfolio|blog/.test(l)) return p.website_url || p.website || '';
+    if (/university|school|college|institution/.test(l)) return p.school || p.university || '';
+    if (/\bdegree\b/.test(l) && !/field|major/.test(l)) return p.degree || "Master of Science";
+    if (/major|field.?of.?study|concentration|specialization/.test(l)) return p.major || '';
+    if (/\bgpa\b|grade.?point/.test(l)) return p.gpa || '';
+    if (/graduation|grad.?year|completed.?year/.test(l)) return p.graduation_year || '';
     if (/title|position|role|current.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
     if (/company|employer|current.?company/.test(l)) return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation|additional.?info/.test(l)) return p.cover_letter || DEFAULTS.cover;
-    if (/why.*(compan|role|want|interest)/.test(l)) return DEFAULTS.why;
+    if (/salary|compensation|pay|earning/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/notice.?period/.test(l)) return p.notice_period || '1 month';
+    if (/cover.?letter|motivation/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/why.*(compan|role|want|interest|position)/.test(l)) return p.why_interested || DEFAULTS.why;
+    if (/why.*(leaving|leave|left)/.test(l)) return 'Seeking new growth opportunities and challenges.';
+    if (/strength/.test(l)) return p.strengths || 'Translating complex technical problems into scalable solutions.';
+    if (/weakness/.test(l)) return p.weaknesses || 'I sometimes focus too deeply on optimization. I have learned to balance thoroughness with delivery.';
     if (/how.*hear|where.*(find|learn)|source|referred/.test(l)) return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
-    if (/availab|start.?date|notice|when.*start/.test(l)) return DEFAULTS.availability;
+    if (/years.*(exp|work)|exp.*years|how many years/.test(l)) return p.years_experience || DEFAULTS.years;
+    if (/availab|when.*start|can.*start/.test(l)) return p.start_date || DEFAULTS.availability;
     if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
     if (/sponsor|visa|immigration|h-1b/.test(l)) return DEFAULTS.sponsorship;
     if (/relocat|willing.*move/.test(l)) return DEFAULTS.relocation;
@@ -235,13 +736,39 @@
     if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
     if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
     if (/country.?code|phone.?code|dial.?code/.test(l)) return DEFAULTS.phoneCountryCode;
-    if (/nationality|citizenship/.test(l)) return p.nationality || DEFAULTS.country;
-    if (/language/.test(l)) return p.languages || 'English';
+    if (/nationality|citizenship/.test(l)) return p.nationality || 'Irish';
+    if (/language.*speak|speak.*language/.test(l)) return p.languages || 'English (Native), Spanish (Fluent), French (Fluent)';
+    if (/english/.test(l)) return 'Yes';
+    if (/french/.test(l)) return 'Yes';
+    if (/programming.*language|technical.*skill/.test(l)) return p.programming_languages || 'Python, JavaScript, TypeScript, SQL, Java';
+    if (/certification/.test(l)) return p.certifications || '';
     if (/convicted|criminal|felony/.test(l)) return 'No';
     if (/drug.?test/.test(l)) return 'Yes';
     if (/\bage\b|18.*years|over.*18/.test(l)) return 'Yes';
-    if (/agree|acknowledge|certif|consent/.test(l)) return 'Yes';
+    if (/agree|acknowledge|certif|consent|confirm/.test(l)) return 'Yes';
+    if (/sign|signature/.test(l) && !/design/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (/today.*date|date.*today|current.*date/.test(l)) return new Date().toLocaleDateString('en-US');
     if (/reason.*leav/.test(l)) return 'Seeking new growth opportunities and challenges.';
+    if (/additional|other.*info|anything.*else|comments/.test(l)) return 'I am excited about this opportunity and confident my experience aligns well with the role requirements.';
+    if (/referr|who.*refer/.test(l)) return 'N/A';
+    if (/call|what.*call|what.*should/.test(l)) return p.first_name || p.firstName || '';
+    if (/commun.*channel|preferred.*contact|contact.*method/.test(l)) return 'Email';
+    if (/available.*interview|interview.*avail/.test(l)) return 'Flexible - available for interviews anytime.';
+    if (/holiday|upcoming.*holiday/.test(l)) return 'No upcoming holidays.';
+    if (/relevant.*skills|skills/.test(l)) return p.programming_languages || p.skills || '';
+    // Specific tech experience years
+    if (/python.*years|years.*python/.test(l)) return '8';
+    if (/javascript.*years|years.*javascript/.test(l)) return '8';
+    if (/react.*years|years.*react/.test(l)) return '8';
+    if (/sql.*years|years.*sql/.test(l)) return '8';
+    if (/aws.*years|years.*aws/.test(l)) return '8';
+    if (/docker.*years|years.*docker/.test(l)) return '8';
+    if (/kubernetes.*years|years.*kubernetes/.test(l)) return '8';
+    if (/devops.*years|years.*devops/.test(l)) return '8';
+    if (/cloud.*years|years.*cloud/.test(l)) return '8';
+    if (/data.*years|years.*data/.test(l)) return '8';
+    if (/design.*years|engineering.*years|years.*engineer/.test(l)) return '8';
+    if (/experience.*years|years.*experience/.test(l)) return '8';
     return '';
   }
 
@@ -349,21 +876,39 @@
     }
   }
 
-  // ===================== HIDE UPGRADE/PREMIUM PROMPTS =====================
+  // ===================== HIDE UPGRADE/PREMIUM/PAYWALL PROMPTS =====================
   function hideUpgradePrompts() {
     const selectors = [
       '[class*="upgrade"]', '[class*="paywall"]', '[class*="premium-cta"]',
       '[class*="plus-cta"]', '[class*="token-cta"]', '[data-testid*="upgrade"]',
-      '[class*="subscription-banner"]'
+      '[class*="subscription-banner"]', '[class*="coin-"]', '[class*="credit-"]',
+      '[class*="limit-reached"]', '[class*="quota-"]', '[class*="locked"]',
+      '[class*="upsell"]', '[class*="pro-feature"]', '[class*="paygate"]'
     ];
     for (const sel of selectors) {
       $$(sel).forEach(el => {
-        if (isVisible(el) && /upgrade|get plus|subscribe|unlock|buy tokens/i.test(el.textContent || '')) {
+        if (isVisible(el) && /upgrade|get plus|subscribe|unlock|buy tokens|buy coins|purchase|out of|limit reached|upgrade to simplify|AI Generate/i.test(el.textContent || '')) {
           el.style.display = 'none';
-          LOG('Hidden upgrade prompt');
+          LOG('Hidden upgrade/paywall prompt');
         }
       });
     }
+    // Also hide modals about upgrading
+    $$('[class*="modal"], [class*="dialog"], [role="dialog"]').forEach(el => {
+      if (/upgrade.*simplify|simplify\+|premium|subscribe|tokens|coins|credits|limit|paywall|AI Generate/i.test(el.textContent || '')) {
+        el.style.display = 'none';
+        // Also remove overlay/backdrop
+        const backdrop = $('[class*="backdrop"], [class*="overlay"]');
+        if (backdrop) backdrop.style.display = 'none';
+        LOG('Hidden upgrade modal');
+      }
+    });
+    // Override any "Upgrade to Simplify+" buttons to do nothing
+    $$('button, a').forEach(el => {
+      if (/upgrade to simplify|get simplify\+|buy tokens|purchase/i.test(el.textContent || '')) {
+        el.style.display = 'none';
+      }
+    });
   }
 
   // ===================== PATCH normalizedProfile.isSubscribed IN MEMORY =====================
@@ -388,29 +933,85 @@
     };
   }
 
+  // ===================== CTRL+CLICK TO QUEUE =====================
+  function setupCtrlClickQueue() {
+    document.addEventListener('click', async (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+      const url = link.href;
+      if (!url || !url.startsWith('http')) return;
+      if (/job|career|position|apply|opening|vacanc|posting|opportunit/i.test(url) ||
+          /greenhouse|lever|workday|icims|taleo|smartrecruiters|bamboohr|indeed|linkedin.*jobs/i.test(url)) {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const queue = (await st.get('jw_queue')) || [];
+          if (!queue.find(q => q.url === url)) {
+            queue.push({ url, title: link.textContent?.trim() || url, status: 'pending', addedAt: Date.now() });
+            await st.set('jw_queue', queue);
+            showNotification(`Added to queue: ${link.textContent?.trim() || url}`);
+            LOG('CTRL+Click: Added to queue:', url);
+          } else {
+            showNotification('Already in queue!');
+          }
+        } catch (err) { LOG('CTRL+Click error:', err); }
+      }
+    }, true);
+  }
+
+  function showNotification(message) {
+    const existing = document.getElementById('simplify-enh-notification');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.id = 'simplify-enh-notification';
+    div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999999;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.3);color:#fff;background:linear-gradient(135deg,#7c3aed,#a855f7);transition:opacity 0.3s;';
+    div.textContent = message;
+    document.body.appendChild(div);
+    setTimeout(() => { div.style.opacity = '0'; setTimeout(() => div.remove(), 300); }, 3000);
+  }
+
   // ===================== AUTO-RUN: SIMPLIFY+ ENHANCEMENT =====================
   async function run() {
-    LOG('Simplify+ Enhancement active — all features unlocked');
+    LOG('Simplify+ Enhancement v2.0 active — all features unlocked, UNLIMITED');
     patchSubscriptionState();
+
+    // Setup CTRL+Click queue
+    setupCtrlClickQueue();
 
     // Wait for page to settle
     await sleep(2000);
 
-    // Hide upgrade prompts periodically
-    setInterval(hideUpgradePrompts, 5000);
+    // Hide upgrade prompts periodically (faster interval)
+    setInterval(hideUpgradePrompts, 3000);
+    hideUpgradePrompts(); // Immediate first run
 
     // Fix phone country code
     await fixPhoneCountryCode();
 
     // Run fallback fill after Simplify's own autofill completes
     await sleep(5000);
+    const p = await getProfile();
     const filled1 = await fallbackFill();
     if (filled1 > 0) LOG(`First pass: ${filled1} fields filled`);
 
-    // Second pass after a delay
+    // Education section — special handling
+    const eduFilled = await fillEducationFields(p);
+    if (eduFilled > 0) LOG(`Education: ${eduFilled} fields filled`);
+
+    // Multi-choice questions (Yes/No, experience ranges, proficiency)
+    const mcAnswered = answerMultiChoiceQuestions();
+    if (mcAnswered > 0) LOG(`Multi-choice: ${mcAnswered} questions answered`);
+
+    // Second pass after a delay (for dynamically loaded fields)
     await sleep(3000);
     const filled2 = await fallbackFill();
     if (filled2 > 0) LOG(`Second pass: ${filled2} fields filled`);
+
+    // Third pass for education fields revealed after selects
+    await sleep(2000);
+    await fillEducationFields(p);
+    answerMultiChoiceQuestions();
 
     // Learn from filled fields for future use
     $$('input:not([type=hidden]):not([type=file]),textarea,select')
@@ -439,5 +1040,26 @@
     }
   }, 2000);
 
-  LOG('Simplify+ Enhancement loaded successfully');
+  // MutationObserver for dynamically loaded forms
+  const formObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1 && (node.tagName === 'FORM' || node.querySelector?.('form, input, select, textarea'))) {
+          LOG('New form detected — running autofill');
+          setTimeout(async () => {
+            const p = await getProfile();
+            await fallbackFill();
+            await fillEducationFields(p);
+            answerMultiChoiceQuestions();
+          }, 1500);
+          return;
+        }
+      }
+    }
+  });
+  if (document.body) {
+    formObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  LOG('Simplify+ Enhancement v2.0 loaded — Education fix, Date formats, Multi-choice, CTRL+Click Queue, Unlimited AI');
 })();
