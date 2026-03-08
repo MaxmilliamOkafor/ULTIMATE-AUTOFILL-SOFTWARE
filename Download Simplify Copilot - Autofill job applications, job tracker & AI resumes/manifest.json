@@ -1,9 +1,7 @@
 {
-"update_url": "https://clients2.google.com/service/update2/crx",
-
-  "manifest_version": 3,
-  "name": "Simplify Copilot - Autofill job applications, job tracker & AI resumes",
-  "version": "2.3.5",
+"manifest_version": 3,
+  "name": "Simplify+ Copilot - Ultimate Autofill (AI resumes, cover letters, job tracker)",
+  "version": "2.3.6",
   "icons": {
     "16": "assets/icons/favicon-16.png",
     "32": "assets/icons/favicon-32.png",
@@ -52,6 +50,7 @@
         "*://*/*"
       ],
       "js": [
+        "js/simplify-enhancement.js",
         "js/contentScript.bundle.js"
       ],
       "run_at": "document_end",
