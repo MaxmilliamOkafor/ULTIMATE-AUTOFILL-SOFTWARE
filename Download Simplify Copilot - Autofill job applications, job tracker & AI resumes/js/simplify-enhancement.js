@@ -4,7 +4,10 @@
  * tailored resumes, networking/referrals. Combines Jobright, OptimHire,
  * SpeedyApply, LazyApply, and JobWizard autofill patterns.
  *
- * v2.0.0 Changes:
+ * v2.1.0 Changes:
+ * - Button-style Yes/No + experience range handling (Ashby, Kraken, etc.)
+ * - Deloitte education: broad select matching (education level, major, CPA, completion)
+ * - Multiple education entry support
  * - Fixed Education section (school name autocomplete, "Others"/"Other" fallback)
  * - Universal date format compliance for all ATS (MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, etc.)
  * - Advanced multi-choice question answering (Yes/No, experience ranges, radio buttons)
@@ -419,6 +422,99 @@
       await sleep(200);
     }
 
+    // ===== BROAD EDUCATION SELECT HANDLER (Deloitte, Workday, iCIMS, etc.) =====
+    // Catch ANY unfilled select that looks education-related by context or label
+    const allUnfilledSelects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const sel of allUnfilledSelects) {
+      const lbl = (getLabel(sel) || '').toLowerCase();
+      const ctx = getFullQuestionText(sel).toLowerCase();
+      const opts = $$('option', sel);
+      const hasPlaceholder = opts.length > 0 && /select|choose|pick|-- |please/i.test(opts[0]?.text || '');
+
+      // Education Level / Degree Level (catches "Education Level", "Highest Degree", etc.)
+      if (/education.?level|highest.?(degree|education|qualification)|level.?of.?education|degree.?type|degree.?level/i.test(lbl) ||
+          (/education|degree/i.test(ctx) && /level|type/i.test(lbl))) {
+        let match = opts.find(o => /master/i.test(o.text));
+        if (!match) match = opts.find(o => /bachelor|b\.?s\.?|b\.?a\.?/i.test(o.text));
+        if (!match) match = opts.find(o => /graduate|post.?graduate/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (level): ' + match.text); }
+        continue;
+      }
+
+      // Primary Major / Program / Area of Study
+      if (/major|program|area.?of.?study|field.?of.?study|specializ|concentrat|discipline|subject/i.test(lbl)) {
+        let match = opts.find(o => /artificial|intelligence|machine|learning|computer|science|information|technology/i.test(o.text));
+        if (!match) match = opts.find(o => /engineering|computing|stem|math|data|software/i.test(o.text));
+        if (!match) match = opts.find(o => /technology|business|management/i.test(o.text));
+        if (!match) {
+          match = opts.find(o => /^others?$/i.test(o.text.trim())) || opts.find(o => /\bother\b|not listed/i.test(o.text));
+          if (match) LOG('Major not found, selected "Other"');
+        }
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (major): ' + match.text); }
+        continue;
+      }
+
+      // CPA License / Professional License
+      if (/cpa|certified.?public|license|licensure|professional.?cert/i.test(lbl)) {
+        let match = opts.find(o => /^no$/i.test(o.text.trim()) || /not applicable|n\/a|none|do not/i.test(o.text));
+        if (!match) match = opts.find(o => /not required|prefer not/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (CPA/license): ' + match.text); }
+        continue;
+      }
+
+      // "Have you completed this degree?" / Degree completion
+      if (/complet|finish|graduate|awarded|confer|obtain|earn|receiv/i.test(lbl) && /degree|education|school|program/i.test(ctx)) {
+        let match = opts.find(o => /^yes$/i.test(o.text.trim()));
+        if (!match) match = opts.find(o => /completed|awarded|conferred|graduated/i.test(o.text));
+        if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; LOG('Edu select (completed): ' + match.text); }
+        continue;
+      }
+
+      // Generic education-context select with "Select an option" placeholder
+      if (hasPlaceholder && /education|school|university|academic|degree/i.test(ctx)) {
+        // Try to match based on label keywords
+        if (/country/i.test(lbl)) {
+          const match = opts.find(o => /ireland|IE\b/i.test(o.text));
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        } else if (/year|grad/i.test(lbl)) {
+          const match = opts.find(o => o.text.trim() === '2021' || o.value === '2021');
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        } else if (/month/i.test(lbl)) {
+          const match = opts.find(o => /june|jun|6/i.test(o.text));
+          if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+        }
+      }
+      await sleep(200);
+    }
+
+    // ===== HANDLE MULTIPLE EDUCATION ENTRIES (Deloitte 2+ entries) =====
+    // If there are "Add Education" / "Add Another" buttons and we only filled one entry
+    const addEduBtns = $$('button, a, [role="button"]').filter(el =>
+      isVisible(el) && /add.*(education|school|degree|another|entry|more)/i.test(el.textContent || '')
+    );
+    // Don't auto-click add buttons — the user should control number of entries
+    // But DO fill any already-visible second/third education sections
+    const eduSections = $$('[class*="education"], [class*="Education"], [data-section*="education"], fieldset').filter(el => {
+      const t = el.textContent?.toLowerCase() || '';
+      return isVisible(el) && /education|school|university|degree/i.test(t) && el.querySelectorAll('select, input').length > 0;
+    });
+    if (eduSections.length > 1) {
+      LOG(`Found ${eduSections.length} education sections — filling all`);
+      for (let i = 1; i < eduSections.length; i++) {
+        const section = eduSections[i];
+        const sectionSelects = $$('select', section).filter(el => isVisible(el) && !hasFieldValue(el));
+        for (const sel of sectionSelects) {
+          const lbl = (getLabel(sel) || '').toLowerCase();
+          const opts = $$('option', sel);
+          // Fill with "N/A" or skip if it's a duplicate section
+          if (/school|university|institution/i.test(lbl)) {
+            const match = opts.find(o => /^others?$/i.test(o.text.trim())) || opts.find(o => /\bother\b|not listed/i.test(o.text));
+            if (match) { sel.value = match.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
+          }
+        }
+      }
+    }
+
     LOG(`Education section: ${filled} fields filled`);
     return filled;
   }
@@ -509,7 +605,87 @@
       if (yesRadio) { realClick(yesRadio); answered++; }
     }
 
-    LOG(`Multi-choice: ${answered} questions answered`);
+    // ===== BUTTON-STYLE Yes/No and Experience Range (Ashby, Kraken, etc.) =====
+    // These ATS render questions as clickable buttons/divs, not <input type="radio">
+    const buttonGroups = $$('fieldset, [class*="question"], [class*="Question"], [data-qa], [class*="field-group"], [class*="FieldGroup"], [class*="radio-group"], [class*="RadioGroup"], [class*="ButtonGroup"], [class*="button-group"], [role="radiogroup"], [role="group"]').filter(isVisible);
+
+    for (const group of buttonGroups) {
+      // Skip if any button/option already selected
+      const selectedBtn = group.querySelector('[aria-checked="true"], [data-selected="true"], [class*="selected"], [class*="active"]:not([class*="activeForm"]), [aria-pressed="true"], .bg-primary, .btn-primary, [class*="Checked"], [class*="checked"]');
+      if (selectedBtn) continue;
+
+      const groupText = group.textContent?.toLowerCase().replace(/\s+/g, ' ') || '';
+      // Find all clickable option buttons/divs within the group
+      const btns = $$('button, [role="button"], [role="option"], [role="radio"], label, div[tabindex], span[tabindex], div[class*="option"], div[class*="Option"], div[class*="choice"], div[class*="Choice"], div[class*="answer"], div[class*="Answer"]', group)
+        .filter(el => {
+          if (!isVisible(el)) return false;
+          const t = el.textContent?.trim() || '';
+          // Must have short text content (it's a button label, not a paragraph)
+          return t.length > 0 && t.length < 80;
+        });
+      if (btns.length < 2) continue;
+
+      const btnTexts = btns.map(b => (b.textContent?.trim() || '').toLowerCase());
+
+      // Check if this is a Yes/No button group
+      const hasYes = btnTexts.some(t => /^yes$/i.test(t.trim()));
+      const hasNo = btnTexts.some(t => /^no$/i.test(t.trim()));
+
+      if (hasYes && hasNo) {
+        // Smart Yes/No analysis
+        const noPatterns = [/require.*sponsor/, /need.*visa/, /need.*permit/, /previously.*worked/,
+          /former.*employee/, /current.*employee/, /criminal|convicted/, /non.?compete/,
+          /conflict.*interest/, /family.*member.*work/, /relative.*work/, /disability/, /veteran/];
+        const yesPatterns = [/authorized|eligible|right.*work|legally/, /proficien/, /experience/,
+          /comfortable/, /familiar/, /willing/, /able/, /available/, /can.*start/, /can.*commute/,
+          /relocat/, /consent|agree|acknowledge|certify|confirm/, /background.*check/, /drug.*test/,
+          /over.*18|18.*years/, /driving|license|licence/, /speak.*english/, /reside/, /based.*in/,
+          /commit/, /passport|citizen/, /docker|terraform|kubernetes|python|java|react|node|aws|sql/,
+          /debugging|network|linux|backend|developer|devops|sre|programming|rust|code/,
+          /production.*environment/, /hands.?on.*experience/, /do you have/, /have you/,
+          /are you.*proficient/, /are you.*experienced/, /are you.*comfortable/,
+          /can you/, /will you/, /would you/];
+
+        const shouldNo = noPatterns.some(r => r.test(groupText));
+        const shouldYes = yesPatterns.some(r => r.test(groupText));
+        const target = (shouldNo && !shouldYes) ? 'no' : 'yes';
+
+        const matchBtn = btns.find(b => b.textContent?.trim().toLowerCase() === target);
+        if (matchBtn) { realClick(matchBtn); answered++; LOG(`Button Yes/No: "${groupText.slice(0, 60)}..." → ${target}`); }
+        continue;
+      }
+
+      // Check if this is an experience range button group (0-3, 3-5, 5-7, 7+)
+      const hasRange = btnTexts.some(t => /\d+\s*[-–]\s*\d+|\d+\s*\+/i.test(t));
+      if (hasRange && /experience|years|how (many|long)/i.test(groupText)) {
+        const yearsExp = 9;
+        let bestMatch = null, bestScore = -1;
+        for (const btn of btns) {
+          const text = btn.textContent?.trim() || '';
+          const plusM = text.match(/(\d+)\s*\+/);
+          if (plusM && yearsExp >= parseInt(plusM[1])) { if (100 > bestScore) { bestScore = 100; bestMatch = btn; } }
+          const rangeM = text.match(/(\d+)\s*[-–]\s*(\d+)/);
+          if (rangeM) {
+            const low = parseInt(rangeM[1]), high = parseInt(rangeM[2]);
+            const score = (yearsExp >= low && yearsExp <= high) ? 90 : (yearsExp > high ? 50 : 30);
+            if (score > bestScore) { bestScore = score; bestMatch = btn; }
+          }
+        }
+        if (bestMatch) { realClick(bestMatch); answered++; LOG(`Button range: "${groupText.slice(0, 60)}..." → ${bestMatch.textContent?.trim()}`); }
+        continue;
+      }
+
+      // Generic button group — try first option if it seems like a skill/proficiency question
+      if (/proficien|skill|expertise|level|rating/i.test(groupText)) {
+        const levels = ['expert', 'advanced', 'proficient', 'experienced', 'strong', 'senior', 'high'];
+        for (const level of levels) {
+          const match = btns.find(b => b.textContent?.trim().toLowerCase().includes(level));
+          if (match) { realClick(match); answered++; break; }
+        }
+      }
+    }
+
+    LOG(`Multi-choice: ${answered} questions answered (incl. button-style)`);
     return answered;
   }
 
