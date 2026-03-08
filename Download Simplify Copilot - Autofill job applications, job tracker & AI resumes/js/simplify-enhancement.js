@@ -4,6 +4,12 @@
  * tailored resumes, networking/referrals. Combines Jobright, OptimHire,
  * SpeedyApply, LazyApply, and JobWizard autofill patterns.
  *
+ * v2.2.0 Changes (JobWizard integration):
+ * - Responses.json keyword-based Q&A matching for perfect answers
+ * - React synthetic event support for React-based ATS (Greenhouse, Ashby)
+ * - Enhanced autocomplete dropdown detection (Material-UI, React-Select, etc.)
+ * - Better getLabel() with 10+ container selectors for broader ATS coverage
+ * - realClick() now fires change event for custom UI components
  * v2.1.0 Changes:
  * - Button-style Yes/No + experience range handling (Ashby, Kraken, etc.)
  * - Deloitte education: broad select matching (education level, major, CPA, completion)
@@ -147,13 +153,91 @@
 
   async function getProfile() {
     let p = (await st.get('ua_profile')) || {};
-    const ohData = await st.getMulti(['candidateDetails', 'userDetails']);
+    const ohData = await st.getMulti(['candidateDetails', 'userDetails', 'jw_responses', 'jw_responses_lookup']);
     try {
       const cd = typeof ohData.candidateDetails === 'string' ? JSON.parse(ohData.candidateDetails) : (ohData.candidateDetails || {});
       const ud = typeof ohData.userDetails === 'string' ? JSON.parse(ohData.userDetails) : (ohData.userDetails || {});
       p = { ...ud, ...cd, ...p };
     } catch (_) {}
+    // Attach responses.json data for keyword-based Q&A matching (from JobWizard)
+    p._responses = ohData.jw_responses || [];
+    p._responsesLookup = ohData.jw_responses_lookup || {};
+    // Build keyword lookup from responses array
+    if (Array.isArray(p._responses) && !Object.keys(p._responsesLookup).length) {
+      p._responsesLookup = {};
+      p._responses.forEach(e => {
+        if (e.key) p._responsesLookup[e.key] = e.response;
+        if (e.keywords) {
+          const sorted = [...e.keywords].sort().join('|');
+          p._responsesLookup[sorted] = e.response;
+        }
+      });
+    }
     return p;
+  }
+
+  // ===================== RESPONSES.JSON KEYWORD MATCHER (from JobWizard) =====================
+  function findResponseMatch(questionText, profile) {
+    if (!profile._responses || !Array.isArray(profile._responses) || !profile._responses.length) return null;
+    const qNorm = questionText.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const qWords = qNorm.split(' ').filter(w => w.length > 2);
+    let bestMatch = null, bestScore = 0;
+    for (const entry of profile._responses) {
+      if (!entry.keywords || !entry.response) continue;
+      const matchingKeywords = entry.keywords.filter(kw => qWords.includes(kw.toLowerCase()));
+      const score = matchingKeywords.length / entry.keywords.length;
+      if (score > bestScore && score >= 0.5) { bestScore = score; bestMatch = entry.response; }
+    }
+    if (!bestMatch && profile._responsesLookup) {
+      const sortedKey = qWords.sort().join('|');
+      if (profile._responsesLookup[sortedKey]) bestMatch = profile._responsesLookup[sortedKey];
+    }
+    return bestMatch;
+  }
+
+  // ===================== ENHANCED AUTOCOMPLETE DROPDOWN FINDER (from JobWizard) =====================
+  function findAutocompleteDropdown(input) {
+    const selectors = [
+      '[class*="autocomplete"]', '[class*="typeahead"]', '[class*="suggestion"]',
+      '[class*="dropdown"]', '[class*="listbox"]', '[role="listbox"]',
+      '[class*="menu"]', 'ul[class*="option"]', '[data-automation-id*="dropdown"]',
+      '.css-26l3qy-menu', '.Select-menu', '.react-select__menu',
+      '[class*="dropdown-menu"]:not([style*="display: none"])'
+    ];
+    for (const sel of selectors) {
+      const dd = $(sel);
+      if (dd && isVisible(dd)) return dd;
+    }
+    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"]');
+    if (parent) {
+      for (const sel of selectors) {
+        const dd = parent.querySelector(sel);
+        if (dd && isVisible(dd)) return dd;
+      }
+    }
+    return null;
+  }
+
+  function findBestDropdownMatch(dropdown, searchText) {
+    const items = $$('li, [role="option"], [class*="option"], div[class*="item"]', dropdown);
+    const search = searchText.toLowerCase();
+    let match = items.find(i => i.textContent?.trim().toLowerCase() === search);
+    if (match) return match;
+    match = items.find(i => i.textContent?.trim().toLowerCase().includes(search));
+    if (match) return match;
+    const words = search.split(/\s+/);
+    match = items.find(i => {
+      const t = i.textContent?.trim().toLowerCase() || '';
+      return words.some(w => w.length > 3 && t.includes(w));
+    });
+    return match || null;
+  }
+
+  function findOtherOption(dropdown) {
+    const items = $$('li, [role="option"], [class*="option"], option, div[class*="item"]', dropdown);
+    return items.find(i => /^others?$/i.test(i.textContent?.trim() || '')) ||
+      items.find(i => /\bother\b/i.test(i.textContent?.trim() || '')) ||
+      items.find(i => /not listed|not found|different|unlisted|none of/i.test(i.textContent?.trim() || ''));
   }
 
   // ===================== DOM HELPERS =====================
@@ -180,6 +264,10 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // React synthetic event support (needed for Greenhouse, Ashby, etc.)
+    const reactEvent = new Event('input', { bubbles: true });
+    Object.defineProperty(reactEvent, 'simulated', { value: true });
+    el.dispatchEvent(reactEvent);
   }
 
   function realClick(el) {
@@ -188,15 +276,27 @@
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     el.click();
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function getLabel(el) {
     if (!el) return '';
     const id = el.id;
     if (id) { const lbl = $(`label[for="${CSS.escape(id)}"]`); if (lbl) return lbl.textContent?.trim(); }
-    const p = el.closest('label, .form-group, .field, [class*="field"], [class*="form-row"]');
-    if (p) { const lbl = p.querySelector('label, .label, [class*="label"]'); if (lbl) return lbl.textContent?.trim(); }
-    return el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('data-label') || el.name || '';
+    // Expanded container selectors from JobWizard for broader ATS coverage
+    const containers = ['label', '.form-group', '.field', '[class*="field"]', '[class*="form-row"]',
+      '[class*="question"]', '[data-automation-id]', '[class*="FormField"]',
+      '[class*="form-field"]', '[class*="input-group"]', '[class*="formElement"]'];
+    for (const sel of containers) {
+      const p = el.closest(sel);
+      if (p) {
+        const lbl = p.querySelector('label, .label, [class*="label"], legend, [class*="question-text"], [class*="QuestionText"]');
+        if (lbl && lbl !== el) return lbl.textContent?.trim() || '';
+      }
+    }
+    return el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
+      el.getAttribute('data-label') || el.getAttribute('data-automation-id') ||
+      el.name || el.id || '';
   }
 
   function hasFieldValue(el) {
@@ -323,20 +423,13 @@
       nativeSet(inp, school);
       filled++;
       await sleep(600);
-      // Check for autocomplete dropdown
-      const dropdown = $('[class*="autocomplete"], [class*="typeahead"], [class*="suggestion"], [role="listbox"], [class*="dropdown-menu"]:not([style*="display: none"])');
-      if (dropdown && isVisible(dropdown)) {
-        const items = $$('li, [role="option"], [class*="option"]', dropdown);
-        let match = items.find(i => i.textContent?.toLowerCase().includes(school.toLowerCase()));
-        if (!match) {
-          const words = school.toLowerCase().split(/\s+/);
-          match = items.find(i => words.some(w => w.length > 3 && i.textContent?.toLowerCase().includes(w)));
-        }
+      // Check for autocomplete dropdown (enhanced: Material-UI, React-Select, etc.)
+      const dropdown = findAutocompleteDropdown(inp);
+      if (dropdown) {
+        const match = findBestDropdownMatch(dropdown, school);
         if (match) { realClick(match); await sleep(300); }
         else {
-          // Click "Other" if available
-          const other = items.find(i => /^others?$/i.test(i.textContent?.trim())) ||
-            items.find(i => /\bother\b|not listed/i.test(i.textContent));
+          const other = findOtherOption(dropdown);
           if (other) { realClick(other); LOG('School autocomplete: selected "Other"'); await sleep(300); }
         }
       }
@@ -797,7 +890,10 @@
     for (const inp of inputs) {
       const lbl = getLabel(inp);
       if (!lbl) continue;
-      const val = guessValue(lbl, p) || _answerBank[lbl.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60)] || '';
+      // Try responses.json match first (from JobWizard), then guessValue, then answer bank
+      const questionText = getFullQuestionText(inp);
+      const fromResponses = findResponseMatch(questionText, p);
+      const val = fromResponses || guessValue(lbl, p) || _answerBank[lbl.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60)] || '';
       if (!val) continue;
       inp.focus(); nativeSet(inp, val); filled++;
       await sleep(50);
@@ -807,7 +903,8 @@
     const selects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
     for (const sel of selects) {
       const lbl = getLabel(sel);
-      const val = guessValue(lbl, p);
+      const fromResp = findResponseMatch(getFullQuestionText(sel), p);
+      const val = fromResp || guessValue(lbl, p);
       if (val) {
         const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
         if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); filled++; }
@@ -1061,5 +1158,5 @@
     formObserver.observe(document.body, { childList: true, subtree: true });
   }
 
-  LOG('Simplify+ Enhancement v2.0 loaded — Education fix, Date formats, Multi-choice, CTRL+Click Queue, Unlimited AI');
+  LOG('Simplify+ Enhancement v2.2 loaded — JobWizard integration, responses.json, React support, Education fix, Multi-choice, Unlimited AI');
 })();
