@@ -1,5 +1,5 @@
 /**
- * Simplify+ Enhancement — Ultimate Autofill Integration v2.0.0
+ * Simplify+ Enhancement — Ultimate Autofill Integration
  * Unlocks Simplify+ features: unlimited tokens, AI autofill, cover letters,
  * tailored resumes, networking/referrals. Combines Jobright, OptimHire,
  * SpeedyApply, LazyApply, and JobWizard autofill patterns.
@@ -20,6 +20,8 @@
  * - Removed all "Upgrade to Simplify+" prompts and modals
  * - CSV import support and CTRL+Click to queue
  * - Quick Answer engine with unlimited use
+ * SpeedyApply, and LazyApply autofill patterns.
+ * Version: 1.0.0
  */
 (function () {
   'use strict';
@@ -783,43 +785,36 @@
   }
 
   // ===================== SMART VALUE GUESSER (EXPANDED) =====================
+  // ===================== SMART VALUE GUESSER =====================
   function guessValue(label, p) {
     const l = (label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
     if (/first.?name|given.?name/.test(l)) return p.first_name || p.firstName || '';
     if (/last.?name|family.?name|surname/.test(l)) return p.last_name || p.lastName || '';
     if (/full.?name|your name|^name$/.test(l) && !/company|last|first/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
-    if (/legal.?name/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
-    if (/preferred.?name|nick/.test(l)) return p.first_name || p.firstName || '';
-    if (/middle/.test(l)) return 'N/A';
     if (/\bemail\b/.test(l)) return p.email || '';
     if (/phone|mobile|cell|telephone/.test(l)) return p.phone || '';
     if (/^city$|\bcity\b|current.?city/.test(l)) return p.city || '';
-    if (/state|province|region|county/.test(l)) return p.state || '';
+    if (/state|province|region/.test(l)) return p.state || '';
     if (/zip|postal/.test(l)) return p.postal_code || p.zip || '';
     if (/country/.test(l) && !/code|phone/.test(l)) return p.country || DEFAULTS.country;
-    if (/address.*line.*1|street.*address|^address$/.test(l)) return p.address || p.address_line_1 || '';
-    if (/address.*line.*2/.test(l)) return p.address_line_2 || 'N/A';
+    if (/address|street/.test(l)) return p.address || '';
     if (/location|where.*(you|do you).*live|where.*(located|based)/.test(l)) return p.city ? `${p.city}, ${p.state || p.country || ''}`.trim().replace(/,$/, '') : '';
     if (/linkedin/.test(l)) return p.linkedin_profile_url || p.linkedin || '';
     if (/github/.test(l)) return p.github_url || p.github || '';
-    if (/website|portfolio|blog/.test(l)) return p.website_url || p.website || '';
-    if (/university|school|college|institution/.test(l)) return p.school || p.university || '';
-    if (/\bdegree\b/.test(l) && !/field|major/.test(l)) return p.degree || "Master of Science";
-    if (/major|field.?of.?study|concentration|specialization/.test(l)) return p.major || '';
-    if (/\bgpa\b|grade.?point/.test(l)) return p.gpa || '';
-    if (/graduation|grad.?year|completed.?year/.test(l)) return p.graduation_year || '';
+    if (/website|portfolio/.test(l)) return p.website_url || p.website || '';
+    if (/university|school|college/.test(l)) return p.school || p.university || '';
+    if (/\bdegree\b/.test(l)) return p.degree || "Bachelor's";
+    if (/major|field.?of.?study/.test(l)) return p.major || '';
+    if (/gpa/.test(l)) return p.gpa || '';
+    if (/graduation|grad.?year/.test(l)) return p.graduation_year || '';
     if (/title|position|role|current.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
     if (/company|employer|current.?company/.test(l)) return p.current_company || p.company || '';
-    if (/salary|compensation|pay|earning/.test(l)) return p.expected_salary || DEFAULTS.salary;
-    if (/notice.?period/.test(l)) return p.notice_period || '1 month';
-    if (/cover.?letter|motivation/.test(l)) return p.cover_letter || DEFAULTS.cover;
-    if (/why.*(compan|role|want|interest|position)/.test(l)) return p.why_interested || DEFAULTS.why;
-    if (/why.*(leaving|leave|left)/.test(l)) return 'Seeking new growth opportunities and challenges.';
-    if (/strength/.test(l)) return p.strengths || 'Translating complex technical problems into scalable solutions.';
-    if (/weakness/.test(l)) return p.weaknesses || 'I sometimes focus too deeply on optimization. I have learned to balance thoroughness with delivery.';
+    if (/salary|compensation|pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.?info/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/why.*(compan|role|want|interest)/.test(l)) return DEFAULTS.why;
     if (/how.*hear|where.*(find|learn)|source|referred/.test(l)) return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years|how many years/.test(l)) return p.years_experience || DEFAULTS.years;
-    if (/availab|when.*start|can.*start/.test(l)) return p.start_date || DEFAULTS.availability;
+    if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
+    if (/availab|start.?date|notice|when.*start/.test(l)) return DEFAULTS.availability;
     if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
     if (/sponsor|visa|immigration|h-1b/.test(l)) return DEFAULTS.sponsorship;
     if (/relocat|willing.*move/.test(l)) return DEFAULTS.relocation;
@@ -829,39 +824,13 @@
     if (/gender|sex\b|pronouns/.test(l)) return DEFAULTS.gender;
     if (/ethnic|race|racial|heritage/.test(l)) return DEFAULTS.ethnicity;
     if (/country.?code|phone.?code|dial.?code/.test(l)) return DEFAULTS.phoneCountryCode;
-    if (/nationality|citizenship/.test(l)) return p.nationality || 'Irish';
-    if (/language.*speak|speak.*language/.test(l)) return p.languages || 'English (Native), Spanish (Fluent), French (Fluent)';
-    if (/english/.test(l)) return 'Yes';
-    if (/french/.test(l)) return 'Yes';
-    if (/programming.*language|technical.*skill/.test(l)) return p.programming_languages || 'Python, JavaScript, TypeScript, SQL, Java';
-    if (/certification/.test(l)) return p.certifications || '';
+    if (/nationality|citizenship/.test(l)) return p.nationality || DEFAULTS.country;
+    if (/language/.test(l)) return p.languages || 'English';
     if (/convicted|criminal|felony/.test(l)) return 'No';
     if (/drug.?test/.test(l)) return 'Yes';
     if (/\bage\b|18.*years|over.*18/.test(l)) return 'Yes';
-    if (/agree|acknowledge|certif|consent|confirm/.test(l)) return 'Yes';
-    if (/sign|signature/.test(l) && !/design/.test(l)) return `${p.first_name || ''} ${p.last_name || ''}`.trim();
-    if (/today.*date|date.*today|current.*date/.test(l)) return new Date().toLocaleDateString('en-US');
+    if (/agree|acknowledge|certif|consent/.test(l)) return 'Yes';
     if (/reason.*leav/.test(l)) return 'Seeking new growth opportunities and challenges.';
-    if (/additional|other.*info|anything.*else|comments/.test(l)) return 'I am excited about this opportunity and confident my experience aligns well with the role requirements.';
-    if (/referr|who.*refer/.test(l)) return 'N/A';
-    if (/call|what.*call|what.*should/.test(l)) return p.first_name || p.firstName || '';
-    if (/commun.*channel|preferred.*contact|contact.*method/.test(l)) return 'Email';
-    if (/available.*interview|interview.*avail/.test(l)) return 'Flexible - available for interviews anytime.';
-    if (/holiday|upcoming.*holiday/.test(l)) return 'No upcoming holidays.';
-    if (/relevant.*skills|skills/.test(l)) return p.programming_languages || p.skills || '';
-    // Specific tech experience years
-    if (/python.*years|years.*python/.test(l)) return '8';
-    if (/javascript.*years|years.*javascript/.test(l)) return '8';
-    if (/react.*years|years.*react/.test(l)) return '8';
-    if (/sql.*years|years.*sql/.test(l)) return '8';
-    if (/aws.*years|years.*aws/.test(l)) return '8';
-    if (/docker.*years|years.*docker/.test(l)) return '8';
-    if (/kubernetes.*years|years.*kubernetes/.test(l)) return '8';
-    if (/devops.*years|years.*devops/.test(l)) return '8';
-    if (/cloud.*years|years.*cloud/.test(l)) return '8';
-    if (/data.*years|years.*data/.test(l)) return '8';
-    if (/design.*years|engineering.*years|years.*engineer/.test(l)) return '8';
-    if (/experience.*years|years.*experience/.test(l)) return '8';
     return '';
   }
 
@@ -973,39 +942,21 @@
     }
   }
 
-  // ===================== HIDE UPGRADE/PREMIUM/PAYWALL PROMPTS =====================
+  // ===================== HIDE UPGRADE/PREMIUM PROMPTS =====================
   function hideUpgradePrompts() {
     const selectors = [
       '[class*="upgrade"]', '[class*="paywall"]', '[class*="premium-cta"]',
       '[class*="plus-cta"]', '[class*="token-cta"]', '[data-testid*="upgrade"]',
-      '[class*="subscription-banner"]', '[class*="coin-"]', '[class*="credit-"]',
-      '[class*="limit-reached"]', '[class*="quota-"]', '[class*="locked"]',
-      '[class*="upsell"]', '[class*="pro-feature"]', '[class*="paygate"]'
+      '[class*="subscription-banner"]'
     ];
     for (const sel of selectors) {
       $$(sel).forEach(el => {
-        if (isVisible(el) && /upgrade|get plus|subscribe|unlock|buy tokens|buy coins|purchase|out of|limit reached|upgrade to simplify|AI Generate/i.test(el.textContent || '')) {
+        if (isVisible(el) && /upgrade|get plus|subscribe|unlock|buy tokens/i.test(el.textContent || '')) {
           el.style.display = 'none';
-          LOG('Hidden upgrade/paywall prompt');
+          LOG('Hidden upgrade prompt');
         }
       });
     }
-    // Also hide modals about upgrading
-    $$('[class*="modal"], [class*="dialog"], [role="dialog"]').forEach(el => {
-      if (/upgrade.*simplify|simplify\+|premium|subscribe|tokens|coins|credits|limit|paywall|AI Generate/i.test(el.textContent || '')) {
-        el.style.display = 'none';
-        // Also remove overlay/backdrop
-        const backdrop = $('[class*="backdrop"], [class*="overlay"]');
-        if (backdrop) backdrop.style.display = 'none';
-        LOG('Hidden upgrade modal');
-      }
-    });
-    // Override any "Upgrade to Simplify+" buttons to do nothing
-    $$('button, a').forEach(el => {
-      if (/upgrade to simplify|get simplify\+|buy tokens|purchase/i.test(el.textContent || '')) {
-        el.style.display = 'none';
-      }
-    });
   }
 
   // ===================== PATCH normalizedProfile.isSubscribed IN MEMORY =====================
@@ -1030,85 +981,29 @@
     };
   }
 
-  // ===================== CTRL+CLICK TO QUEUE =====================
-  function setupCtrlClickQueue() {
-    document.addEventListener('click', async (e) => {
-      if (!e.ctrlKey && !e.metaKey) return;
-      const link = e.target.closest('a[href]');
-      if (!link) return;
-      const url = link.href;
-      if (!url || !url.startsWith('http')) return;
-      if (/job|career|position|apply|opening|vacanc|posting|opportunit/i.test(url) ||
-          /greenhouse|lever|workday|icims|taleo|smartrecruiters|bamboohr|indeed|linkedin.*jobs/i.test(url)) {
-        e.preventDefault();
-        e.stopPropagation();
-        try {
-          const queue = (await st.get('jw_queue')) || [];
-          if (!queue.find(q => q.url === url)) {
-            queue.push({ url, title: link.textContent?.trim() || url, status: 'pending', addedAt: Date.now() });
-            await st.set('jw_queue', queue);
-            showNotification(`Added to queue: ${link.textContent?.trim() || url}`);
-            LOG('CTRL+Click: Added to queue:', url);
-          } else {
-            showNotification('Already in queue!');
-          }
-        } catch (err) { LOG('CTRL+Click error:', err); }
-      }
-    }, true);
-  }
-
-  function showNotification(message) {
-    const existing = document.getElementById('simplify-enh-notification');
-    if (existing) existing.remove();
-    const div = document.createElement('div');
-    div.id = 'simplify-enh-notification';
-    div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999999;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.3);color:#fff;background:linear-gradient(135deg,#7c3aed,#a855f7);transition:opacity 0.3s;';
-    div.textContent = message;
-    document.body.appendChild(div);
-    setTimeout(() => { div.style.opacity = '0'; setTimeout(() => div.remove(), 300); }, 3000);
-  }
-
   // ===================== AUTO-RUN: SIMPLIFY+ ENHANCEMENT =====================
   async function run() {
-    LOG('Simplify+ Enhancement v2.0 active — all features unlocked, UNLIMITED');
+    LOG('Simplify+ Enhancement active — all features unlocked');
     patchSubscriptionState();
-
-    // Setup CTRL+Click queue
-    setupCtrlClickQueue();
 
     // Wait for page to settle
     await sleep(2000);
 
-    // Hide upgrade prompts periodically (faster interval)
-    setInterval(hideUpgradePrompts, 3000);
-    hideUpgradePrompts(); // Immediate first run
+    // Hide upgrade prompts periodically
+    setInterval(hideUpgradePrompts, 5000);
 
     // Fix phone country code
     await fixPhoneCountryCode();
 
     // Run fallback fill after Simplify's own autofill completes
     await sleep(5000);
-    const p = await getProfile();
     const filled1 = await fallbackFill();
     if (filled1 > 0) LOG(`First pass: ${filled1} fields filled`);
 
-    // Education section — special handling
-    const eduFilled = await fillEducationFields(p);
-    if (eduFilled > 0) LOG(`Education: ${eduFilled} fields filled`);
-
-    // Multi-choice questions (Yes/No, experience ranges, proficiency)
-    const mcAnswered = answerMultiChoiceQuestions();
-    if (mcAnswered > 0) LOG(`Multi-choice: ${mcAnswered} questions answered`);
-
-    // Second pass after a delay (for dynamically loaded fields)
+    // Second pass after a delay
     await sleep(3000);
     const filled2 = await fallbackFill();
     if (filled2 > 0) LOG(`Second pass: ${filled2} fields filled`);
-
-    // Third pass for education fields revealed after selects
-    await sleep(2000);
-    await fillEducationFields(p);
-    answerMultiChoiceQuestions();
 
     // Learn from filled fields for future use
     $$('input:not([type=hidden]):not([type=file]),textarea,select')
@@ -1159,4 +1054,5 @@
   }
 
   LOG('Simplify+ Enhancement v2.2 loaded — JobWizard integration, responses.json, React support, Education fix, Multi-choice, Unlimited AI');
+  LOG('Simplify+ Enhancement loaded successfully');
 })();

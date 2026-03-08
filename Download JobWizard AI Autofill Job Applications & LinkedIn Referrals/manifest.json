@@ -37,6 +37,44 @@
   ],
   "background": {
     "service_worker": "js/background.js"
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "name": "JobWizard: AI Autofill Job Applications & LinkedIn Referrals",
+  "version": "1.0.81",
+  "description": "Autofill job applications, find referrals, track applications, and generate ATS-optimized resumes with AI — apply 10x faster.",
+  "minimum_chrome_version": "108",
+  "host_permissions": [
+    "https://*.jobwizard.ai/*",
+    "https://*/*",
+    "https://api.jobwizard.ai/*"
+  ],
+  "permissions": [
+    "background",
+    "storage",
+    "cookies",
+    "scripting",
+    "activeTab",
+    "tabs"
+  ],
+  "manifest_version": 3,
+  "action": {
+    "default_icon": {
+      "16": "icons/thumbnails_16.png",
+      "32": "icons/thumbnails_32.png",
+      "48": "icons/thumbnails_48.png",
+      "128": "icons/thumbnails_128.png"
+    },
+    "default_title": "Auto Form Filler"
+  },
+  "icons": {
+    "16": "icons/thumbnails_16.png",
+    "32": "icons/thumbnails_32.png",
+    "48": "icons/thumbnails_48.png",
+    "128": "icons/thumbnails_128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
   },
   "commands": {
     "shortcut_autofill": {
