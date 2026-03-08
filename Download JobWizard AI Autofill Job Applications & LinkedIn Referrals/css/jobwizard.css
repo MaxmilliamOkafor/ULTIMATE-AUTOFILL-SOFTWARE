@@ -1,0 +1,16 @@
+/* JobWizard AI — Content Script Styles */
+#jw-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 999999;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: system-ui, -apple-system, sans-serif;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.3s ease;
+  color: #fff;
+  pointer-events: none;
+}

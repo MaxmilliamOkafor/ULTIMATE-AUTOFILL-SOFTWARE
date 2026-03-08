@@ -1,0 +1,53 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 380px; min-height: 480px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; }
+.jw-popup { padding: 16px; }
+.jw-header { text-align: center; margin-bottom: 12px; }
+.jw-logo { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.jw-logo-icon { font-size: 24px; }
+.jw-logo h1 { font-size: 18px; font-weight: 700; color: #38bdf8; }
+.jw-badge { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-size: 9px; padding: 2px 8px; border-radius: 10px; font-weight: 700; letter-spacing: 1px; }
+.jw-subtitle { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+.jw-tabs { display: flex; gap: 2px; margin-bottom: 12px; background: #1e293b; border-radius: 8px; padding: 3px; }
+.jw-tab { flex: 1; padding: 6px 4px; border: none; background: transparent; color: #94a3b8; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+.jw-tab.active { background: #334155; color: #38bdf8; }
+.jw-tab:hover { color: #e2e8f0; }
+.jw-panel { display: none; }
+.jw-panel.active { display: block; }
+.jw-btn { width: 100%; padding: 10px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; }
+.jw-btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; }
+.jw-btn-primary:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); transform: translateY(-1px); }
+.jw-btn-secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+.jw-btn-secondary:hover { background: #334155; }
+.jw-btn-danger { background: #dc2626; color: #fff; }
+.jw-btn-danger:hover { background: #b91c1c; }
+.jw-info { background: #1e293b; border-radius: 8px; padding: 10px; margin: 8px 0; font-size: 11px; line-height: 1.8; }
+.jw-info p { color: #94a3b8; }
+.jw-info strong { color: #38bdf8; }
+.jw-unlimited { color: #22c55e; font-weight: 700; }
+.jw-stats { display: flex; gap: 8px; margin-top: 8px; }
+.jw-stat { flex: 1; background: #1e293b; border-radius: 8px; padding: 10px 8px; text-align: center; }
+.jw-stat span { display: block; font-size: 20px; font-weight: 700; color: #38bdf8; }
+.jw-stat label { font-size: 10px; color: #94a3b8; }
+.jw-queue-list { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+.jw-empty { text-align: center; color: #64748b; font-size: 12px; padding: 20px; }
+.jw-queue-item { display: flex; align-items: center; gap: 8px; padding: 8px; background: #1e293b; border-radius: 6px; margin-bottom: 4px; font-size: 11px; }
+.jw-queue-item .jw-qi-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
+.jw-queue-item .jw-qi-status { font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+.jw-qi-pending { background: #334155; color: #94a3b8; }
+.jw-qi-done { background: #166534; color: #22c55e; }
+.jw-qi-active { background: #1e40af; color: #60a5fa; }
+.jw-queue-item .jw-qi-remove { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 14px; }
+.jw-csv-area { padding: 8px 0; }
+.jw-csv-area h3 { font-size: 13px; margin-bottom: 8px; color: #38bdf8; }
+.jw-csv-area p { font-size: 11px; color: #94a3b8; margin-bottom: 8px; }
+.jw-csv-area input[type=file] { width: 100%; margin-bottom: 8px; font-size: 11px; }
+.jw-csv-preview { max-height: 120px; overflow-y: auto; font-size: 10px; color: #64748b; margin-top: 4px; background: #1e293b; border-radius: 6px; padding: 8px; }
+.jw-checkbox { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; margin-top: 8px; cursor: pointer; }
+.jw-form-group { margin-bottom: 8px; }
+.jw-form-group label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+.jw-form-group input, .jw-form-group select { width: 100%; padding: 6px 10px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 12px; }
+.jw-form-group input:focus, .jw-form-group select:focus { border-color: #6366f1; outline: none; }
+.jw-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid #1e293b; font-size: 10px; color: #64748b; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
