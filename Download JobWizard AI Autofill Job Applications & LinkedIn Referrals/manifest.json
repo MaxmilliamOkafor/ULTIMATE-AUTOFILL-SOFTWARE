@@ -1,4 +1,42 @@
 {
+  "manifest_version": 3,
+  "name": "JobWizard AI - Ultimate Autofill Job Applications & LinkedIn Referrals",
+  "version": "3.0.0",
+  "description": "AI-powered job application autofill with unlimited Quick Answer, CSV import, job queue automation, CTRL+Click queue, and advanced form filling for all ATS platforms.",
+  "minimum_chrome_version": "108",
+  "icons": {
+    "16": "images/16x.png",
+    "32": "images/32x.png",
+    "48": "images/48x.png",
+    "128": "images/128x.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "images/16x.png",
+      "32": "images/32x.png",
+      "48": "images/48x.png",
+      "128": "images/128x.png"
+    },
+    "default_title": "JobWizard AI Autofill"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "cookies",
+    "contextMenus",
+    "scripting",
+    "webNavigation",
+    "webRequest",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js"
 "update_url": "https://clients2.google.com/service/update2/crx",
 
   "name": "JobWizard: AI Autofill Job Applications & LinkedIn Referrals",
@@ -54,66 +92,23 @@
       "description": "Popup/Minimize"
     }
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "js/*",
-        "css/*",
-        "fonts/*",
-        "icons/*",
-        "js/marked.min.js",
-        "images/*.png",
-        "demo-job.html",
-        "js/demo-job-loader.js",
-        "js/demo-utils.js",
-        "js/demo-highlight-config.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ],
-      "extension_ids": [
-        "*"
-      ]
-    }
-  ],
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "css": [
-        "/css/content_generate.css",
-        "/css/common.css"
-      ],
-      "js": [
-        "js/jquery-3.7.1.min.js",
-        "js/html2canvas.js",
-        "js/marked.min.js",
-        "js/fuse.min.js",
-        "js/custom-elements.min.js",
-        "js/patternCacheManager.js",
-        "js/chatState.js",
-        "js/bundle.js"
-      ],
+      "matches": ["*://*/*"],
+      "js": ["js/jobwizard-autofill.js"],
+      "css": ["css/jobwizard.css"],
       "run_at": "document_end",
-      "type": "module",
       "all_frames": true
-    },
-    {
-      "matches": [
-        "https://www.jobwizard.ai/demo-job*"
-      ],
-      "css": [
-        "/css/demo-highlight.css"
-      ],
-      "js": [
-        "js/demo-utils.js",
-        "js/demo-highlight-config.js",
-        "js/demoHighlight.js"
-      ],
-      "run_at": "document_end",
-      "all_frames": false
     }
   ],
-  "author": "team@jobwizard.ai"
+  "web_accessible_resources": [
+    {
+      "resources": ["icon/*", "images/*", "css/*", "js/*", "popup/*", "fonts/*"],
+      "matches": ["*://*/*"],
+      "use_dynamic_url": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src * data:; img-src 'self' data: https:"
+  }
 }
