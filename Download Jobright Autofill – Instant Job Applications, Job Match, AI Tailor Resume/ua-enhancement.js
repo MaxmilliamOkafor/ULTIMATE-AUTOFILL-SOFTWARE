@@ -1,5 +1,5 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v9.0 ===
-// Simplify+ integration, SpeedyApply Workday, LazyApply automation, review bypass, Ireland locale
+// === ULTIMATE AUTOFILL ENHANCEMENT v10.0 ===
+// Accuracy-first: deliberate pacing, verification passes, robust matching
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
@@ -809,9 +809,12 @@
       const val = guessFieldValue(lbl, p, inp);
       if (!val) continue;
       inp.focus();
+      await sleep(100); // Stabilize focus before setting value
       nativeSet(inp, val);
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+      inp.dispatchEvent(new Event('change', {bubbles:true}));
       filled++;
-      await sleep(60);
+      await sleep(200); // Accuracy-first: deliberate pacing between fields
     }
 
     // Select dropdowns — only unselected ones
@@ -877,7 +880,7 @@
     for (const n of numInputs) {
       const lbl = getLabel(n);
       const val = guessFieldValue(lbl, p, n);
-      if (val && !isNaN(Number(val))) { nativeSet(n, val); filled++; }
+      if (val && !isNaN(Number(val))) { nativeSet(n, val); n.dispatchEvent(new Event('change', {bubbles:true})); filled++; await sleep(150); }
     }
 
     // Contenteditable divs (rich text editors)
@@ -885,17 +888,47 @@
     for (const ed of editables) {
       const lbl = getLabel(ed) || ed.getAttribute('data-placeholder') || '';
       const val = guessFieldValue(lbl, p, ed);
-      if (val) { ed.textContent = val; ed.dispatchEvent(new Event('input', {bubbles:true})); filled++; }
+      if (val) { ed.textContent = val; ed.dispatchEvent(new Event('input', {bubbles:true})); filled++; await sleep(150); }
     }
 
     // Fix phone country code on every fallback fill pass
     await fixPhoneCountryCode();
 
+    // ===== ACCURACY VERIFICATION PASS =====
+    // Re-scan all visible fields and verify values stuck; re-apply if cleared by JS frameworks
+    await sleep(500); // Let frameworks settle after initial fill
+    let verified = 0, refilled = 0;
+    const verifyInputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea')
+      .filter(el => isVisible(el) && !el.value?.trim());
+    for (const inp of verifyInputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      // Field was supposed to be filled but is empty — framework may have cleared it
+      inp.focus(); await sleep(100);
+      nativeSet(inp, val);
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+      inp.dispatchEvent(new Event('change', {bubbles:true}));
+      inp.dispatchEvent(new Event('blur', {bubbles:true}));
+      refilled++;
+      await sleep(200);
+    }
+    const verifySelects = $$('select').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const sel of verifySelects) {
+      const lbl = getLabel(sel);
+      const val = guessFieldValue(lbl, p, sel);
+      if (!val) continue;
+      const opt = $$('option', sel).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', {bubbles:true})); refilled++; }
+    }
+    if (refilled > 0) LOG(`Verification pass: re-filled ${refilled} fields that were cleared`);
+
     // Learn from all filled fields for future use
     learnFromFilledFields();
 
-    LOG(`Fallback fill done: ${filled} fields filled`);
-    return filled;
+    LOG(`Fallback fill done: ${filled} fields filled, ${refilled} re-verified`);
+    return filled + refilled;
   }
 
   // ===================== LEARN FROM PAGE (capture filled answers) =====================
