@@ -1,8 +1,17 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v6.0 ===
-// Tailor-first flow, answer-learning, fallback form-fill, auto-submit
+// === ULTIMATE AUTOFILL ENHANCEMENT v6.1 ===
+// Tailor-first flow, answer-learning, fallback form-fill, auto-submit, freeze-proof error handling
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
+
+  // ===================== GLOBAL ERROR HANDLER (prevent extension freeze on unhandled rejections) =====================
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = event.reason?.message || String(event.reason || '');
+    if (/Could not establish connection|Receiving end does not exist|Extension context invalidated|useOriginalResume|No form fields found/i.test(msg)) {
+      event.preventDefault();
+      console.warn('[UA] Suppressed unhandled rejection:', msg);
+    }
+  });
 
   // ===================== CREDIT BYPASS =====================
   const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999 };

@@ -1,8 +1,18 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v10.0 ===
-// Accuracy-first: deliberate pacing, verification passes, robust matching
+// === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
+// Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
+
+  // ===================== GLOBAL ERROR HANDLER (prevent extension freeze on unhandled rejections) =====================
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = event.reason?.message || String(event.reason || '');
+    // Suppress known non-critical extension errors that cause freeze loops
+    if (/Could not establish connection|Receiving end does not exist|Extension context invalidated|useOriginalResume|No form fields found/i.test(msg)) {
+      event.preventDefault();
+      console.warn('[UA] Suppressed unhandled rejection:', msg);
+    }
+  });
 
   // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
   const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999,aiApply:99999,smartApply:99999,quickApply:99999,bulkApply:99999,networkScan:99999,referralRequest:99999,aiResponse:99999,essayAnswer:99999,coins:99999,tokens:99999};
