@@ -105,6 +105,35 @@
     {n:'Naukri',p:/naukri\.com/i},{n:'Reed',p:/reed\.co\.uk/i},
     {n:'TotalJobs',p:/totaljobs\.com/i},{n:'Adzuna',p:/adzuna\.com/i},
     {n:'Jobsite',p:/jobsite\.co\.uk/i},{n:'CVLibrary',p:/cv-library\.co\.uk/i},
+    // OptimHire / SpeedyApply supported ATS platforms
+    {n:'Zoho',p:/zohorecruit\.com|recruit\.zoho/i},{n:'Freshteam',p:/freshteam\.com/i},
+    {n:'Recruiterbox',p:/recruiterbox\.com/i},{n:'Jobadder',p:/jobadder\.com/i},
+    {n:'Recruitee',p:/hire\.trakstar\.com/i},{n:'CATSone',p:/catsone\.com/i},
+    {n:'PCRecruiter',p:/pcrecruiter\.net/i},{n:'ApplicantStack',p:/applicantstack\.com/i},
+    {n:'Hirebridge',p:/hirebridge\.com/i},{n:'Newton',p:/newtonsoftware\.com/i},
+    {n:'CEIPAL',p:/ceipal\.com/i},{n:'Oorwin',p:/oorwin\.com/i},
+    {n:'Vincere',p:/vincere\.io/i},{n:'Crelate',p:/crelate\.com/i},
+    {n:'Tracker',p:/tracker-rms\.com/i},{n:'Recooty',p:/recooty\.com/i},
+    {n:'TalentAdore',p:/talentadore\.com/i},{n:'Betterteam',p:/betterteam\.com/i},
+    {n:'Hire',p:/hire\.com/i},{n:'SmashFly',p:/smashfly\.com/i},
+    {n:'HRCloud',p:/hrcloud\.com/i},{n:'Eddy',p:/eddy\.com.*careers/i},
+    {n:'Paycor',p:/paycor\.com.*recruiting/i},{n:'PeopleFluent',p:/peoplefluent\.com/i},
+    {n:'SilkRoad',p:/silkroad\.com/i},{n:'Kenexa',p:/kenexa\.com/i},
+    {n:'Lumesse',p:/lumesse\.com|talentlink\.com/i},{n:'PageUp',p:/pageuppeople\.com/i},
+    {n:'Jobdiva',p:/jobdiva\.com/i},{n:'TempWorks',p:/tempworks\.com/i},
+    {n:'Avionte',p:/avionte\.com/i},{n:'TargetRecruit',p:/targetrecruit\.com/i},
+    {n:'Sage',p:/sage\.hr|sagehr\.com/i},{n:'HiBob',p:/hibob\.com.*careers/i},
+    {n:'BreezyHR',p:/app\.breezy\.hr/i},{n:'Recruitee2',p:/recruitee\.com/i},
+    {n:'SmartRecruiter',p:/smartrecruiters\.com.*jobs/i},{n:'GRNConnect',p:/grnconnect\.com/i},
+    {n:'ApplyOnline',p:/applyonline\.com\.au/i},{n:'ELMO',p:/elmosoftware\.com/i},
+    {n:'Tribepad',p:/tribepad\.com/i},{n:'Oleeo',p:/oleeo\.com/i},
+    {n:'Eploy',p:/eploy\.co\.uk/i},{n:'Peoplehr',p:/peoplehr\.com/i},
+    {n:'HRPartner',p:/hrpartner\.io/i},{n:'Kenjo',p:/kenjo\.io.*careers/i},
+    {n:'Occupop',p:/occupop\.com/i},{n:'GoHire',p:/gohire\.io/i},
+    {n:'100Hires',p:/100hires\.com/i},{n:'Hireflix',p:/hireflix\.com/i},
+    {n:'TestGorilla',p:/testgorilla\.com/i},{n:'Codility',p:/codility\.com/i},
+    {n:'HackerRank',p:/hackerrank\.com/i},{n:'Dover2',p:/dover\.io/i},
+    {n:'Ashby2',p:/ashbyhq\.com.*application/i},{n:'Lever2',p:/lever\.co.*apply/i},
     // Generic career page patterns
     {n:'Career',p:/\/careers?\/?$|\/jobs?\/?$|\/apply\b|\/positions?\/?$|\/openings?\/?$/i}
   ];
@@ -287,7 +316,363 @@
   }
 
   function guessFieldValue(label, p, el) {
-    return guessValue(label, p) || getLearnedAnswer(label, el) || '';
+    // Try saved responses keyword match first, then guessValue, then learned answers
+    const questionText = el ? getFullQuestionText(el) : label;
+    const fromSaved = findSavedResponseMatch(questionText);
+    return fromSaved || guessValue(label, p) || getLearnedAnswer(label, el) || '';
+  }
+
+  // ===================== SAVED RESPONSES SYSTEM (SpeedyApply-style) =====================
+  // Keyword-based Q&A database with import/export/search/autofill
+  let _savedResponses = [];
+  let _savedResponsesLoaded = false;
+
+  async function loadSavedResponses() {
+    if (_savedResponsesLoaded) return _savedResponses;
+    _savedResponses = (await st.get('ua_saved_responses')) || [];
+    _savedResponsesLoaded = true;
+    return _savedResponses;
+  }
+
+  async function saveSavedResponses() {
+    await st.set('ua_saved_responses', _savedResponses);
+  }
+
+  function findSavedResponseMatch(questionText) {
+    if (!_savedResponses.length || !questionText) return '';
+    const qNorm = questionText.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const qWords = qNorm.split(' ').filter(w => w.length > 2);
+    if (!qWords.length) return '';
+    let bestMatch = null, bestScore = 0;
+    for (const entry of _savedResponses) {
+      if (!entry.keywords || !entry.keywords.length || !entry.response) continue;
+      const matchCount = entry.keywords.filter(kw => qWords.includes(kw.toLowerCase())).length;
+      const score = matchCount / entry.keywords.length;
+      if (score > bestScore && score >= 0.4) { bestScore = score; bestMatch = entry.response; }
+    }
+    return bestMatch || '';
+  }
+
+  function addSavedResponse(keywords, response) {
+    if (!keywords || !keywords.length || !response) return;
+    // Check for duplicate
+    const existing = _savedResponses.findIndex(r =>
+      r.keywords.sort().join('|') === [...keywords].sort().join('|')
+    );
+    if (existing >= 0) {
+      _savedResponses[existing].response = response;
+      _savedResponses[existing].appearances = (_savedResponses[existing].appearances || 0) + 1;
+      _savedResponses[existing].updatedAt = Date.now();
+    } else {
+      _savedResponses.push({ keywords, response, appearances: 1, createdAt: Date.now(), updatedAt: Date.now() });
+    }
+    saveSavedResponses();
+  }
+
+  function learnFromFilledFields() {
+    $$('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea,select')
+      .filter(el => isVisible(el) && hasFieldValue(el))
+      .forEach(el => {
+        const lbl = getLabel(el);
+        const val = el.tagName === 'SELECT' ? (el.options[el.selectedIndex]?.text || el.value) : el.value;
+        if (lbl && val && val.trim()) {
+          learnAnswer(lbl, val.trim());
+          // Also learn as saved response with keywords
+          const keywords = lbl.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+          if (keywords.length >= 2) addSavedResponse(keywords, val.trim());
+        }
+      });
+  }
+
+  function exportSavedResponses() {
+    const data = JSON.stringify(_savedResponses, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `saved-responses-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    LOG(`Exported ${_savedResponses.length} saved responses`);
+  }
+
+  function importSavedResponses(jsonStr) {
+    try {
+      const data = JSON.parse(jsonStr);
+      if (!Array.isArray(data)) throw new Error('Expected array');
+      let imported = 0;
+      for (const entry of data) {
+        if (entry.keywords && entry.response) {
+          const kws = Array.isArray(entry.keywords) ? entry.keywords : entry.keywords.split(',').map(s => s.trim());
+          addSavedResponse(kws, entry.response);
+          imported++;
+        }
+      }
+      saveSavedResponses();
+      LOG(`Imported ${imported} saved responses`);
+      return imported;
+    } catch (e) {
+      LOG('Import error:', e.message);
+      return 0;
+    }
+  }
+
+  // ===================== MASTER KNOCKOUT QUESTION ANSWERING SYSTEM =====================
+  // Comprehensive handling for radio, button-style, select, and text knockout questions
+  function getFullQuestionText(el) {
+    if (!el) return '';
+    const containers = ['.question', '[class*="question"]', '[class*="Question"]', '.field',
+      '.form-group', '[class*="FormField"]', '[data-automation-id]', 'fieldset',
+      '[class*="form-field"]', '[class*="formElement"]', '[class*="input-group"]'];
+    for (const sel of containers) {
+      const p = el.closest(sel);
+      if (p) return p.textContent?.trim().replace(/\s+/g, ' ') || '';
+    }
+    return getLabel(el);
+  }
+
+  // Smart Yes/No determination based on question context
+  function determineYesNo(questionText) {
+    const q = questionText.toLowerCase();
+    // Questions that should be "No"
+    const noPatterns = [
+      /require.*sponsor/, /need.*visa/, /need.*permit/, /need.*sponsorship/,
+      /previously.*worked.*for/, /former.*employee/, /current.*employee/, /worked.*before/,
+      /applied.*before/, /criminal|convicted|felony/, /non.?compete|restrictive/,
+      /conflict.*interest/, /family.*member.*work/, /relative.*work/,
+      /ever.*work.*for/, /ever.*employ/, /accommodation.*require/,
+      /restriction/, /pending.*charges/, /terminated|fired|dismissed/
+    ];
+    // Questions that should be "Yes"
+    const yesPatterns = [
+      /authorized|eligible|right.*work|legally|lawfully/, /proficien/, /experience.*have/,
+      /comfortable/, /familiar/, /willing/, /\bable\b/, /available/, /can.*start/,
+      /can.*commute/, /relocat/, /consent|agree|acknowledge|certify|confirm|attest/,
+      /background.*check/, /drug.*test|screening/, /over.*18|18.*years|at.*least.*18/,
+      /driving|license|licence/, /speak.*english|english.*proficien/, /reside/, /based.*in/,
+      /commit/, /right.*work/, /work.*right/, /passport|citizen/,
+      /docker|terraform|kubernetes|python|java|react|node|aws|azure|gcp|sql|typescript/,
+      /debugging|network|linux|backend|developer|devops|sre|programming|rust|code|golang/,
+      /production.*environment/, /hands.?on.*experience/, /do you have experience/,
+      /have you.*experience/, /are you.*proficient/, /are you.*experienced/,
+      /are you.*comfortable/, /can you/, /will you/, /would you be willing/,
+      /reliable.*transport/, /work.*(night|weekend|holiday|overtime|shift|flexible)/,
+      /travel.*up.*to/, /submit.*to/, /complete.*assessment/
+    ];
+    // EEO/Diversity — prefer "Prefer not to say/answer"
+    const eeoPatterns = [/gender|sex\b|disability|veteran|military|ethnic|race|racial|heritage|hispanic|latino/];
+    const isEEO = eeoPatterns.some(r => r.test(q));
+    if (isEEO) return 'eeo';
+    const shouldNo = noPatterns.some(r => r.test(q));
+    const shouldYes = yesPatterns.some(r => r.test(q));
+    if (shouldNo && !shouldYes) return 'no';
+    if (shouldYes) return 'yes';
+    return 'yes'; // Default to yes for unknown
+  }
+
+  // Experience range scoring (7+, 5-7, 3-5, 0-3)
+  function scoreExperienceRange(text, yearsExp) {
+    const t = text.toLowerCase().trim();
+    const plusM = t.match(/(\d+)\s*\+/);
+    if (plusM && yearsExp >= parseInt(plusM[1])) return 100;
+    const moreM = t.match(/more\s+than\s+(\d+)/i);
+    if (moreM && yearsExp > parseInt(moreM[1])) return 95;
+    const rangeM = t.match(/(\d+)\s*[-–]\s*(\d+)/);
+    if (rangeM) {
+      const low = parseInt(rangeM[1]), high = parseInt(rangeM[2]);
+      if (yearsExp >= low && yearsExp <= high) return 90;
+      if (yearsExp > high) return 50 - (yearsExp - high);
+      if (yearsExp < low) return 30 - (low - yearsExp);
+    }
+    const numM = t.match(/^(\d+)\s*years?/);
+    if (numM && parseInt(numM[1]) <= yearsExp) return 80;
+    return 0;
+  }
+
+  // Comprehensive knockout question handler for radio button groups
+  function answerKnockoutRadioGroup(radios, parent, p) {
+    const questionText = (parent?.textContent || '').toLowerCase().replace(/\s+/g, ' ');
+
+    // 1. Check saved responses first
+    const savedAnswer = findSavedResponseMatch(questionText);
+    if (savedAnswer) {
+      const match = radios.find(r => {
+        const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+        return (lbl?.textContent || r.value || '').toLowerCase().trim().includes(savedAnswer.toLowerCase());
+      });
+      if (match) { realClick(match); return true; }
+    }
+
+    // 2. Experience range questions (0-3, 3-5, 5-7, 7+)
+    if (/how many years|years of experience|experience.*years|how long.*work/i.test(questionText)) {
+      const yearsExp = parseInt(p.years_experience || p.yearsExperience || DEFAULTS.years) || 9;
+      let bestMatch = null, bestScore = -1;
+      for (const radio of radios) {
+        const lbl = $(`label[for="${CSS.escape(radio.id)}"]`, parent);
+        const text = (lbl?.textContent || radio.value || '').trim();
+        const score = scoreExperienceRange(text, yearsExp);
+        if (score > bestScore) { bestScore = score; bestMatch = radio; }
+      }
+      if (bestMatch && bestScore > 0) { realClick(bestMatch); return true; }
+    }
+
+    // 3. Yes/No questions with smart analysis
+    const labels = radios.map(r => {
+      const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+      return (lbl?.textContent || r.value || '').trim().toLowerCase();
+    });
+    const hasYes = labels.some(l => /^yes$/i.test(l));
+    const hasNo = labels.some(l => /^no$/i.test(l));
+
+    if (hasYes && hasNo) {
+      const decision = determineYesNo(questionText);
+      if (decision === 'eeo') {
+        // Try "Prefer not to say/answer"
+        const pref = radios.find(r => {
+          const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+          return /prefer not|decline|do not|don.t wish/i.test(lbl?.textContent || r.value || '');
+        });
+        if (pref) { realClick(pref); return true; }
+      }
+      const target = decision === 'no' ? 'no' : 'yes';
+      const match = radios.find(r => {
+        const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+        return (lbl?.textContent || r.value || '').trim().toLowerCase() === target;
+      });
+      if (match) { realClick(match); return true; }
+    }
+
+    // 4. Proficiency level questions
+    if (/proficien|skill.?level|expertise|competenc|rating|how.*(rate|would you rate)/i.test(questionText)) {
+      const levels = ['expert', 'advanced', 'proficient', 'experienced', 'senior', 'strong', 'high', 'fluent', '5', '4'];
+      for (const level of levels) {
+        const match = radios.find(r => {
+          const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+          return (lbl?.textContent || r.value || '').toLowerCase().includes(level);
+        });
+        if (match) { realClick(match); return true; }
+      }
+    }
+
+    // 5. Education level questions
+    if (/education.*level|highest.*degree|completed.*degree|level.*education/i.test(questionText)) {
+      const levels = ["master", "master's", "graduate", "postgraduate", "bachelor", "undergraduate"];
+      for (const level of levels) {
+        const match = radios.find(r => {
+          const lbl = $(`label[for="${CSS.escape(r.id)}"]`, parent);
+          return (lbl?.textContent || r.value || '').toLowerCase().includes(level);
+        });
+        if (match) { realClick(match); return true; }
+      }
+    }
+
+    // 6. Salary range / compensation band questions
+    if (/salary|compensation|pay.*range|pay.*band/i.test(questionText)) {
+      const targetSalary = parseInt(p.expected_salary || DEFAULTS.salary) || 80000;
+      let bestMatch = null, bestDiff = Infinity;
+      for (const radio of radios) {
+        const lbl = $(`label[for="${CSS.escape(radio.id)}"]`, parent);
+        const text = (lbl?.textContent || radio.value || '');
+        const nums = text.match(/[\d,]+/g);
+        if (nums) {
+          const avg = nums.reduce((s, n) => s + parseInt(n.replace(/,/g, '')), 0) / nums.length;
+          const diff = Math.abs(avg - targetSalary);
+          if (diff < bestDiff) { bestDiff = diff; bestMatch = radio; }
+        }
+      }
+      if (bestMatch) { realClick(bestMatch); return true; }
+    }
+
+    // 7. Default: try guessValue match, then "Yes"
+    const lbl = getLabel(radios[0]);
+    const guess = guessFieldValue(lbl, p, radios[0]);
+    if (guess) {
+      const match = radios.find(r => {
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+        return t.includes(guess.toLowerCase());
+      });
+      if (match) { realClick(match); return true; }
+    }
+    const yes = radios.find(r => /\byes\b/i.test($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || ''));
+    if (yes) { realClick(yes); return true; }
+    return false;
+  }
+
+  // Button-style knockout questions (Ashby, Kraken, etc.) — non-radio UI
+  function answerButtonStyleQuestions(p) {
+    let answered = 0;
+    const buttonGroups = $$('fieldset, [class*="question"], [class*="Question"], [data-qa], [class*="field-group"], [class*="FieldGroup"], [class*="radio-group"], [class*="RadioGroup"], [class*="ButtonGroup"], [class*="button-group"], [role="radiogroup"], [role="group"]').filter(isVisible);
+    for (const group of buttonGroups) {
+      const selectedBtn = group.querySelector('[aria-checked="true"], [data-selected="true"], [class*="selected"], [aria-pressed="true"], .bg-primary, .btn-primary, [class*="Checked"], [class*="checked"]');
+      if (selectedBtn) continue;
+      const groupText = group.textContent?.toLowerCase().replace(/\s+/g, ' ') || '';
+      const btns = $$('button, [role="button"], [role="option"], [role="radio"], div[tabindex], span[tabindex], div[class*="option"], div[class*="Option"], div[class*="choice"], div[class*="Choice"], div[class*="answer"], div[class*="Answer"]', group)
+        .filter(el => isVisible(el) && (el.textContent?.trim() || '').length > 0 && (el.textContent?.trim() || '').length < 80);
+      if (btns.length < 2) continue;
+      const btnTexts = btns.map(b => (b.textContent?.trim() || '').toLowerCase());
+      const hasYes = btnTexts.some(t => /^yes$/i.test(t));
+      const hasNo = btnTexts.some(t => /^no$/i.test(t));
+      if (hasYes && hasNo) {
+        const decision = determineYesNo(groupText);
+        const target = decision === 'no' ? 'no' : 'yes';
+        const matchBtn = btns.find(b => b.textContent?.trim().toLowerCase() === target);
+        if (matchBtn) { realClick(matchBtn); answered++; continue; }
+      }
+      const hasRange = btnTexts.some(t => /\d+\s*[-–]\s*\d+|\d+\s*\+/i.test(t));
+      if (hasRange && /experience|years|how (many|long)/i.test(groupText)) {
+        const yearsExp = parseInt(p.years_experience || p.yearsExperience || DEFAULTS.years) || 9;
+        let bestMatch = null, bestScore = -1;
+        for (const btn of btns) {
+          const score = scoreExperienceRange(btn.textContent?.trim() || '', yearsExp);
+          if (score > bestScore) { bestScore = score; bestMatch = btn; }
+        }
+        if (bestMatch && bestScore > 0) { realClick(bestMatch); answered++; continue; }
+      }
+      if (/proficien|skill|expertise|level|rating/i.test(groupText)) {
+        const levels = ['expert', 'advanced', 'proficient', 'experienced', 'strong', 'senior', 'high'];
+        for (const level of levels) {
+          const match = btns.find(b => b.textContent?.trim().toLowerCase().includes(level));
+          if (match) { realClick(match); answered++; break; }
+        }
+      }
+    }
+    return answered;
+  }
+
+  // ===================== ENHANCED AUTOCOMPLETE DROPDOWN FINDER =====================
+  function findAutocompleteDropdown(input) {
+    const selectors = [
+      '[class*="autocomplete"]', '[class*="typeahead"]', '[class*="suggestion"]',
+      '[class*="dropdown"]', '[class*="listbox"]', '[role="listbox"]',
+      '[class*="menu"]', 'ul[class*="option"]', '[data-automation-id*="dropdown"]',
+      '.css-26l3qy-menu', '.Select-menu', '.react-select__menu',
+      '[class*="dropdown-menu"]:not([style*="display: none"])'
+    ];
+    for (const sel of selectors) {
+      const dd = $(sel);
+      if (dd && isVisible(dd)) return dd;
+    }
+    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"]');
+    if (parent) {
+      for (const sel of selectors) { const dd = parent.querySelector(sel); if (dd && isVisible(dd)) return dd; }
+    }
+    return null;
+  }
+
+  function findBestDropdownMatch(dropdown, searchText) {
+    const items = $$('li, [role="option"], [class*="option"], div[class*="item"]', dropdown);
+    const search = searchText.toLowerCase();
+    let match = items.find(i => i.textContent?.trim().toLowerCase() === search);
+    if (match) return match;
+    match = items.find(i => i.textContent?.trim().toLowerCase().includes(search));
+    if (match) return match;
+    const words = search.split(/\s+/);
+    return items.find(i => words.some(w => w.length > 3 && i.textContent?.trim().toLowerCase().includes(w))) || null;
+  }
+
+  function findOtherOption(dropdown) {
+    const items = $$('li, [role="option"], [class*="option"], option, div[class*="item"]', dropdown);
+    return items.find(i => /^others?$/i.test(i.textContent?.trim() || '')) ||
+      items.find(i => /\bother\b/i.test(i.textContent?.trim() || '')) ||
+      items.find(i => /not listed|not found|unlisted|none of/i.test(i.textContent?.trim() || ''));
   }
 
   // ===================== DOM HELPERS =====================
@@ -310,6 +695,10 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // React synthetic event support (Greenhouse, Ashby, etc.)
+    const reactEvt = new Event('input', { bubbles: true });
+    Object.defineProperty(reactEvt, 'simulated', { value: true });
+    el.dispatchEvent(reactEvt);
   }
 
   function realClick(el) {
@@ -318,6 +707,7 @@
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     el.click();
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function clickEl(el) { if (!el) return false; el.scrollIntoView?.({behavior:'smooth',block:'center'}); realClick(el); return true; }
@@ -448,25 +838,17 @@
       }
     }
 
-    // Radio buttons — only unselected groups
+    // Radio buttons — Master Knockout Question System
     const groups = {};
     $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
     for (const [, radios] of Object.entries(groups)) {
       if (radios.some(r => r.checked)) continue;
-      const lbl = getLabel(radios[0]);
-      const guess = guessFieldValue(lbl, {}, radios[0]);
-      const match = radios.find(r => {
-        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
-        return guess && t.includes(guess.toLowerCase());
-      });
-      if (match) { realClick(match); filled++; continue; }
-      // Default: Yes for yes/no
-      const yes = radios.find(r => {
-        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase().trim();
-        return ['yes','true','1'].includes(t);
-      });
-      if (yes) { realClick(yes); filled++; }
+      const parent = radios[0].closest('fieldset, .question, [class*="question"], .form-group, [class*="field"]');
+      if (answerKnockoutRadioGroup(radios, parent, p)) filled++;
     }
+
+    // Button-style questions (Ashby, Kraken, etc.)
+    filled += answerButtonStyleQuestions(p);
 
     // Required checkboxes
     $$('input[type=checkbox][required],input[type=checkbox][aria-required="true"]')
@@ -508,6 +890,9 @@
 
     // Fix phone country code on every fallback fill pass
     await fixPhoneCountryCode();
+
+    // Learn from all filled fields for future use
+    learnFromFilledFields();
 
     LOG(`Fallback fill done: ${filled} fields filled`);
     return filled;
@@ -1380,21 +1765,17 @@
       } else { inp.focus(); nativeSet(inp, val); }
       await sleep(80);
     }
-    // Workday radio/checkbox groups in question pages
+    // Workday radio/checkbox groups — Master Knockout Question System
     const radioGroups = {};
     $$('[data-automation-id^="formField-"] input[type=radio]').filter(isVisible).forEach(r => { (radioGroups[r.name||r.id]||=[]).push(r); });
     for (const [, radios] of Object.entries(radioGroups)) {
       if (radios.some(r => r.checked)) continue;
-      const lbl = getLabel(radios[0]);
-      const guess = guessFieldValue(lbl, p, radios[0]);
-      const match = radios.find(r => {
-        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
-        return guess && t.includes(guess.toLowerCase());
-      });
-      if (match) { realClick(match); await sleep(80); continue; }
-      const yes = radios.find(r => /\byes\b/i.test($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || ''));
-      if (yes) realClick(yes);
+      const parent = radios[0].closest('[data-automation-id^="formField-"], fieldset, .question, [class*="question"], .form-group');
+      answerKnockoutRadioGroup(radios, parent, p);
+      await sleep(80);
     }
+    // Button-style knockout questions in Workday
+    answerButtonStyleQuestions(p);
     // Workday dropdowns (button-based) in question areas
     const qDropdowns = $$('[data-automation-id^="formField-"] button:not([disabled])').filter(btn => {
       const txt = (btn.textContent || '').toLowerCase();
@@ -1412,6 +1793,7 @@
       const val = guessFieldValue(lbl, p, rt);
       if (val) { rt.textContent = val; rt.dispatchEvent(new Event('input',{bubbles:true})); }
     }
+    learnFromFilledFields();
     LOG('Workday: question page filled');
   }
 
@@ -1619,22 +2001,17 @@
       }
     }
 
-    // Phase 5: Radio buttons and checkboxes (pronouns, eligibility, etc.)
+    // Phase 5: Radio buttons and checkboxes — Master Knockout System
     const groups = {};
     $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
     for (const [, radios] of Object.entries(groups)) {
       if (radios.some(r => r.checked)) continue;
-      const lbl = getLabel(radios[0]);
-      const guess = guessFieldValue(lbl, p, radios[0]);
-      const match = radios.find(r => {
-        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
-        return guess && t.includes(guess.toLowerCase());
-      });
-      if (match) { realClick(match); await sleep(50); continue; }
-      // Default yes for yes/no questions
-      const yes = radios.find(r => /\byes\b/i.test($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || ''));
-      if (yes) { realClick(yes); await sleep(50); }
+      const parent = radios[0].closest('fieldset, .question, [class*="question"], .form-group, [class*="field"]');
+      answerKnockoutRadioGroup(radios, parent, p);
+      await sleep(50);
     }
+    // Button-style questions (Ashby, Kraken, etc.)
+    answerButtonStyleQuestions(p);
 
     // Phase 6: Required checkboxes (acknowledgments, consents)
     $$('input[type=checkbox][required],input[type=checkbox][aria-required="true"]')
@@ -1659,6 +2036,7 @@
       // Don't auto-submit — let user review
     }
 
+    learnFromFilledFields();
     LOG('Lever automation complete');
   }
 
@@ -2413,6 +2791,18 @@
           <div class="ua-url-row"><input type="text" id="ua-url" class="ua-url-inp" placeholder="Paste job URL..."><button id="ua-add" class="ua-url-btn">Add</button></div>
         </div>
         <div class="ua-sec">
+          <div class="ua-sec-t">Saved Responses <span id="ua-resp-cnt" style="color:#00c985"></span></div>
+          <input type="text" id="ua-resp-search" placeholder="Search by Keyword or Response" style="width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;margin-bottom:6px;box-sizing:border-box">
+          <div id="ua-resp-list" style="max-height:180px;overflow-y:auto;font-size:10px;color:#9ca3af;margin-bottom:6px"></div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button id="ua-resp-new" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #a78bfa;border-radius:6px;background:none;color:#7c3aed;cursor:pointer">+ New</button>
+            <button id="ua-resp-import" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Import</button>
+            <button id="ua-resp-export" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export</button>
+            <button id="ua-resp-delete" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer">Delete All</button>
+          </div>
+          <input type="file" id="ua-resp-file" accept=".json" style="display:none">
+        </div>
+        <div class="ua-sec">
           <div class="ua-sec-t">Answer Bank <span id="ua-ans-cnt" style="color:#00c985"></span></div>
           <div style="display:flex;gap:6px;align-items:center">
             <span style="font-size:10px;color:#6b7280" id="ua-ans-info">Learned answers help fill forms faster</span>
@@ -2544,6 +2934,85 @@
     document.getElementById('ua-export')?.addEventListener('click', exportQueueCSV);
     document.getElementById('ua-del').addEventListener('click', removeSelected);
 
+    // ---- Saved Responses bindings ----
+    const respCnt = document.getElementById('ua-resp-cnt');
+    const respList = document.getElementById('ua-resp-list');
+    const respSearch = document.getElementById('ua-resp-search');
+    const respFile = document.getElementById('ua-resp-file');
+
+    function renderResponses(filter = '') {
+      if (!respList) return;
+      const filt = filter.toLowerCase().trim();
+      const filtered = _savedResponses.filter(r => {
+        if (!filt) return true;
+        return (r.keywords || []).some(k => k.toLowerCase().includes(filt)) ||
+               (r.response || '').toLowerCase().includes(filt);
+      });
+      if (!filtered.length) {
+        respList.innerHTML = `<div style="text-align:center;padding:12px;color:#9ca3af">${filt ? 'No matches' : 'No saved responses yet'}</div>`;
+      } else {
+        respList.innerHTML = filtered.map((r, i) => {
+          const idx = _savedResponses.indexOf(r);
+          return `<div style="padding:6px 8px;border:1px solid #f3f4f6;border-radius:6px;margin-bottom:4px;background:#fafafa" data-resp-idx="${idx}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="color:#7c3aed;font-weight:600;font-size:9px">${(r.keywords||[]).join(', ')}</span>
+              <span style="color:#d1d5db;font-size:8px">×${r.appearances||1}</span>
+            </div>
+            <div style="color:#374151;font-size:10px;margin-top:2px;word-break:break-word">${(r.response||'').slice(0,120)}${(r.response||'').length>120?'…':''}</div>
+            <button class="ua-resp-del-one" data-idx="${idx}" style="font-size:8px;color:#ef4444;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px">remove</button>
+          </div>`;
+        }).join('');
+        respList.querySelectorAll('.ua-resp-del-one').forEach(btn => {
+          btn.addEventListener('click', async e => {
+            const idx = parseInt(e.target.dataset.idx);
+            _savedResponses.splice(idx, 1);
+            await saveSavedResponses();
+            renderResponses(respSearch?.value || '');
+            if (respCnt) respCnt.textContent = `(${_savedResponses.length})`;
+          });
+        });
+      }
+      if (respCnt) respCnt.textContent = `(${_savedResponses.length})`;
+    }
+
+    if (respSearch) respSearch.addEventListener('input', () => renderResponses(respSearch.value));
+
+    document.getElementById('ua-resp-export')?.addEventListener('click', exportSavedResponses);
+
+    document.getElementById('ua-resp-import')?.addEventListener('click', () => respFile?.click());
+    if (respFile) respFile.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const count = importSavedResponses(reader.result);
+        renderResponses(respSearch?.value || '');
+        alert(`Imported ${count} saved responses`);
+      };
+      reader.readAsText(file);
+      respFile.value = '';
+    });
+
+    document.getElementById('ua-resp-new')?.addEventListener('click', () => {
+      const kw = prompt('Keywords (comma-separated):');
+      if (!kw) return;
+      const resp = prompt('Response:');
+      if (!resp) return;
+      addSavedResponse(kw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean), resp);
+      renderResponses(respSearch?.value || '');
+    });
+
+    document.getElementById('ua-resp-delete')?.addEventListener('click', async () => {
+      if (confirm(`Delete all ${_savedResponses.length} saved responses?`)) {
+        _savedResponses = [];
+        await saveSavedResponses();
+        renderResponses();
+      }
+    });
+
+    // Initial render of saved responses
+    loadSavedResponses().then(() => renderResponses());
+
     // Answer bank
     const ansCnt = document.getElementById('ua-ans-cnt');
     const ansInfo = document.getElementById('ua-ans-info');
@@ -2666,7 +3135,7 @@
   // ===================== INIT =====================
   async function init() {
     if (window.self !== window.top) return;
-    await load(); await loadAnswerBank(); injectCSS(); buildUI(); setupKeyboardShortcuts();
+    await load(); await loadAnswerBank(); await loadSavedResponses(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
     // Update answer bank count in UI
