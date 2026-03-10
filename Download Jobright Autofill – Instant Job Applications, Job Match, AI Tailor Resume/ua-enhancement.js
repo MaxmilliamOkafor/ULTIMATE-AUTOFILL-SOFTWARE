@@ -1,8 +1,18 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v10.0 ===
-// Accuracy-first: deliberate pacing, verification passes, robust matching
+// === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
+// Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
+
+  // ===================== GLOBAL ERROR HANDLER (prevent extension freeze on unhandled rejections) =====================
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = event.reason?.message || String(event.reason || '');
+    // Suppress known non-critical extension errors that cause freeze loops
+    if (/Could not establish connection|Receiving end does not exist|Extension context invalidated|useOriginalResume|No form fields found/i.test(msg)) {
+      event.preventDefault();
+      console.warn('[UA] Suppressed unhandled rejection:', msg);
+    }
+  });
 
   // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
   const _C = {autofill:99999,tailorResume:99999,coverLetter:99999,resumeReview:99999,jobMatch:99999,agentApply:99999,resumeTailor:99999,customResume:99999,aiApply:99999,smartApply:99999,quickApply:99999,bulkApply:99999,networkScan:99999,referralRequest:99999,aiResponse:99999,essayAnswer:99999,coins:99999,tokens:99999};
@@ -3193,4 +3203,45 @@
     if (isJobright()) { await sleep(2000); resumeTailoringAutomation(); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+// === ICON CLICK HANDLER: Toggle Plasmo CSUI Sidebar ===
+(function() {
+  chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
+    if (msg.message === 'iconClicked') {
+      // Find all Plasmo CSUI containers (custom elements injected by Plasmo framework)
+      var containers = document.querySelectorAll('[id^="plasmo-"], [class*="plasmo"], plasmo-csui, [data-plasmo]');
+      // Also try to find by common Plasmo shadow host patterns
+      if (containers.length === 0) {
+        containers = document.querySelectorAll('[style*="position: fixed"]');
+        // Filter to only extension-injected elements (they often have shadow roots)
+        containers = Array.from(containers).filter(function(el) {
+          return el.shadowRoot || el.tagName.toLowerCase().includes('plasmo');
+        });
+      }
+      // If still no containers found, look for any element with a shadow root that contains Jobright UI
+      if (containers.length === 0) {
+        var allElements = document.querySelectorAll('*');
+        containers = Array.from(allElements).filter(function(el) {
+          return el.shadowRoot && (
+            el.id && el.id.toLowerCase().includes('plasmo') ||
+            el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('plasmo') ||
+            el.tagName && el.tagName.toLowerCase().includes('plasmo')
+          );
+        });
+      }
+      if (containers.length > 0) {
+        containers.forEach(function(c) {
+          if (c.style.display === 'none') {
+            c.style.display = '';
+          } else {
+            c.style.display = 'none';
+          }
+        });
+        console.log('[UA] Toggled', containers.length, 'Plasmo CSUI container(s)');
+      } else {
+        console.log('[UA] No Plasmo CSUI containers found to toggle');
+      }
+    }
+  });
 })();
