@@ -1,3 +1,5 @@
+// === ULTIMATE AUTOFILL ENHANCEMENT v6.1 ===
+// Tailor-first flow, answer-learning, fallback form-fill, auto-submit, freeze-proof error handling
 // === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
 // Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
 (function () {
@@ -14,6 +16,8 @@
     }
   });
 
+  // ===================== CREDIT BYPASS =====================
+  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999 };
   // ===================== TOGGLE SIDEBAR ON ICON CLICK =====================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && (message.action === 'toggleSidebar' || message.name === 'toggleSidebar')) {
