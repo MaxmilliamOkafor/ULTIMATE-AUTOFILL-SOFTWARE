@@ -324,6 +324,8 @@
     if (/graduation|grad.?date|grad.?year/.test(l)) return p.graduation_year || p.grad_year || '';
     if (/title|position|role|current.?title|job.?title/.test(l) && !/company/.test(l)) return p.current_title || p.title || '';
     if (/company|employer|org|current.?company/.test(l)) return p.current_company || p.company || '';
+    if (/\bfrom\b|start.?date|begin.?date/.test(l) && !/salary|pay/.test(l)) return p.work_start_year ? `01/${p.work_start_year}` : `01/${new Date().getFullYear() - 2}`;
+    if (/\bto\b|end.?date/.test(l) && !/salary|pay|email/.test(l)) return p.work_end_year ? `12/${p.work_end_year}` : `12/${new Date().getFullYear()}`;
     if (/salary|compensation|pay|desired.?pay/.test(l)) return p.expected_salary || DEFAULTS.salary;
     if (/cover.?letter|motivation|additional.?info|message.?to/.test(l)) return p.cover_letter || DEFAULTS.cover;
     if (/summary|about.?(yourself|you|me)|bio|objective/.test(l)) return p.summary || p.cover_letter || DEFAULTS.cover;
@@ -342,6 +344,9 @@
     if (/country.?code|phone.?code|dial.?code|calling.?code/.test(l)) return p.phoneCountryCode || DEFAULTS.phoneCountryCode;
     if (/nationality|citizenship/.test(l)) return p.nationality || p.country || DEFAULTS.country;
     if (/language|fluency|fluent/.test(l)) return p.languages || 'English';
+    if (/\bspeaking\b|\bspeak\b|oral.?proficiency/.test(l)) return p.language_proficiency || 'Advanced';
+    if (/\bwriting\b|\bwritten\b|write.?proficiency/.test(l)) return p.language_proficiency || 'Advanced';
+    if (/\breading\b|\bread\b|read.?proficiency/.test(l)) return p.language_proficiency || 'Advanced';
     if (/certif|license|credential/.test(l)) return p.certifications || '';
     if (/commute|travel|willing.*travel/.test(l)) return 'Yes';
     if (/convicted|criminal|felony|background/.test(l)) return 'No';
@@ -1483,6 +1488,7 @@
     await workdayFillSource();
     await workdayFillEducation(p);
     await workdayFillExperience(p);
+    await workdayFillLanguage(p);
     await workdayResumeUpload();
     await fixPhoneCountryCode();
 
@@ -1677,6 +1683,8 @@
     const title = p.current_title || p.title || '';
     const company = p.current_company || p.company || '';
     const loc = p.city ? `${p.city}, ${p.country || DEFAULTS.country}` : '';
+    const startYear = p.work_start_year || (new Date().getFullYear() - 2).toString();
+    const endYear = p.work_end_year || new Date().getFullYear().toString();
 
     // Strategy 1: Modern Workday data-automation-id
     const titleInput = $('[data-automation-id="jobTitle"] input, [data-automation-id="formField-jobTitle"] input');
@@ -1685,6 +1693,18 @@
     if (titleInput && !titleInput.value && title) nativeSet(titleInput, title);
     if (companyInput && !companyInput.value && company) nativeSet(companyInput, company);
     if (locInput && !locInput.value && loc) nativeSet(locInput, loc);
+
+    // Strategy 1b: Label-text based fallback for Job Title & Company (catches Workday variants)
+    if ((!titleInput || !titleInput.value) && title) {
+      const titleByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'job title')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
+        xpath("//label[contains(text(),'Job Title')]/following::input[1]");
+      if (titleByLabel && !titleByLabel.value) nativeSet(titleByLabel, title);
+    }
+    if ((!companyInput || !companyInput.value) && company) {
+      const companyByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'company')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
+        xpath("//label[contains(text(),'Company')]/following::input[1]");
+      if (companyByLabel && !companyByLabel.value) nativeSet(companyByLabel, company);
+    }
 
     // Description / responsibilities (textarea)
     const descInput = $('[data-automation-id="description"] textarea, textarea[data-automation-id="workDescription"], [data-automation-id="formField-description"] textarea');
@@ -1716,16 +1736,40 @@
     const expStartYear = xpath("//input[contains(@id,'CandProfileFields.WorkStartDate_Year')]");
     const expEndMonth = xpath("//select[contains(@id,'CandProfileFields.WorkEndDate_Month')]");
     const expEndYear = xpath("//input[contains(@id,'CandProfileFields.WorkEndDate_Year')]");
-    if (expStartMonth && p.work_start_year) { expStartMonth.value = '01'; expStartMonth.dispatchEvent(new Event('change', { bubbles: true })); }
-    if (expStartYear && !expStartYear.value && p.work_start_year) nativeSet(expStartYear, p.work_start_year);
+    if (expStartMonth && startYear) { expStartMonth.value = '01'; expStartMonth.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (expStartYear && !expStartYear.value && startYear) nativeSet(expStartYear, startYear);
     if (expEndMonth) { expEndMonth.value = '12'; expEndMonth.dispatchEvent(new Event('change', { bubbles: true })); }
-    if (expEndYear && !expEndYear.value) nativeSet(expEndYear, new Date().getFullYear().toString());
+    if (expEndYear && !expEndYear.value) nativeSet(expEndYear, endYear);
 
-    // SpeedyApply dateSectionMonth/Year-input for experience dates
-    const expDateStartYear = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
-    const expDateStartMonth = xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
-    if (expDateStartYear && !expDateStartYear.value && p.work_start_year) nativeSet(expDateStartYear, p.work_start_year);
+    // Workday dateSectionMonth/Year-input for experience From/To dates
+    // Scope to work experience section to avoid conflicting with education dates
+    const workSection = $('[data-automation-id="workSection"],[data-automation-id="workExperience-1"],[data-automation-id="workExperience"]') || document;
+
+    // From date (startDate within work experience context)
+    const expDateStartYear = workSection.querySelector('[data-automation-id="formField-startDate"] [data-automation-id="dateSectionYear-input"]') ||
+      xpath('//div[@data-automation-id="workSection"]//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]') ||
+      xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const expDateStartMonth = workSection.querySelector('[data-automation-id="formField-startDate"] [data-automation-id="dateSectionMonth-input"]') ||
+      xpath('//div[@data-automation-id="workSection"]//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]') ||
+      xpath('//div[@data-automation-id="formField-startDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (expDateStartYear && !expDateStartYear.value) nativeSet(expDateStartYear, startYear);
     if (expDateStartMonth && !expDateStartMonth.value) nativeSet(expDateStartMonth, '01');
+
+    // To date (endDate within work experience context)
+    const expDateEndYear = workSection.querySelector('[data-automation-id="formField-endDate"] [data-automation-id="dateSectionYear-input"]') ||
+      xpath('//div[@data-automation-id="workSection"]//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionYear-input"]') ||
+      xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionYear-input"]');
+    const expDateEndMonth = workSection.querySelector('[data-automation-id="formField-endDate"] [data-automation-id="dateSectionMonth-input"]') ||
+      xpath('//div[@data-automation-id="workSection"]//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionMonth-input"]') ||
+      xpath('//div[@data-automation-id="formField-endDate"]//input[@data-automation-id="dateSectionMonth-input"]');
+    if (expDateEndYear && !expDateEndYear.value) nativeSet(expDateEndYear, endYear);
+    if (expDateEndMonth && !expDateEndMonth.value) nativeSet(expDateEndMonth, '12');
+
+    // Fallback: label-text based From/To date fields
+    const fromLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'from')]/ancestor::div[1]//input");
+    const toLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'to')]/ancestor::div[1]//input");
+    if (fromLabel && !fromLabel.value) nativeSet(fromLabel, `01/${startYear}`);
+    if (toLabel && !toLabel.value) nativeSet(toLabel, `12/${endYear}`);
 
     // SpeedyApply indexed workExperience sections
     const expSections = xpathAll('//div[starts-with(@data-automation-id,"workExperience-")]');
@@ -1736,9 +1780,123 @@
       if (secTitle && !secTitle.value && title) nativeSet(secTitle, title);
       if (secCompany && !secCompany.value && company) nativeSet(secCompany, company);
       if (secLoc && !secLoc.value && loc) nativeSet(secLoc, loc);
+      // Fill From/To dates within each indexed experience section
+      const secStartYear = sec.querySelector('[data-automation-id="formField-startDate"] [data-automation-id="dateSectionYear-input"]');
+      const secStartMonth = sec.querySelector('[data-automation-id="formField-startDate"] [data-automation-id="dateSectionMonth-input"]');
+      const secEndYear = sec.querySelector('[data-automation-id="formField-endDate"] [data-automation-id="dateSectionYear-input"]');
+      const secEndMonth = sec.querySelector('[data-automation-id="formField-endDate"] [data-automation-id="dateSectionMonth-input"]');
+      if (secStartYear && !secStartYear.value) nativeSet(secStartYear, startYear);
+      if (secStartMonth && !secStartMonth.value) nativeSet(secStartMonth, '01');
+      if (secEndYear && !secEndYear.value) nativeSet(secEndYear, endYear);
+      if (secEndMonth && !secEndMonth.value) nativeSet(secEndMonth, '12');
     }
 
     LOG('Workday: experience fields filled (enhanced)');
+  }
+
+  // Workday: language section fill (Language name + Speaking/Writing/Reading proficiency)
+  async function workdayFillLanguage(p) {
+    const language = p.languages || p.language || 'English';
+    const proficiency = p.language_proficiency || 'Advanced';
+
+    // Click "Add Language" button if no language section exists
+    const addLangBtn = $('button[data-automation-id="btnAddLanguage"],button[data-automation-id="add-section$languageSection"]') ||
+      xpath("//button[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'add') and contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'language')]");
+    const langSection = $('[data-automation-id="languageSection"],[data-automation-id="formField-language"]');
+    if (!langSection && addLangBtn && isVisible(addLangBtn)) {
+      realClick(addLangBtn); await sleep(1500);
+    }
+
+    // Strategy 1: data-automation-id based language dropdown
+    const langDropdown = $('button[data-automation-id="language"],button[data-automation-id="formField-language"]') ||
+      $('[data-automation-id="formField-language"] button,[data-automation-id="languageSection"] button[aria-haspopup]');
+    if (langDropdown) {
+      const currentText = (langDropdown.textContent || '').trim().toLowerCase();
+      if (!currentText || currentText === 'select' || currentText === 'choose' || currentText === '') {
+        await selectFromWorkdayDropdown(langDropdown, language);
+        await sleep(300);
+      }
+    }
+
+    // Strategy 1b: language as input field
+    const langInput = $('[data-automation-id="language"] input,[data-automation-id="formField-language"] input');
+    if (langInput && !langInput.value) nativeSet(langInput, language);
+
+    // Strategy 2: Label-based language field
+    if (!langDropdown && !langInput) {
+      const langByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'language')]/ancestor::div[1]//button[not(@disabled)]") ||
+        xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'language')]/ancestor::div[1]//input");
+      if (langByLabel) {
+        if (langByLabel.tagName === 'BUTTON') await selectFromWorkdayDropdown(langByLabel, language);
+        else if (!langByLabel.value) nativeSet(langByLabel, language);
+      }
+    }
+
+    // Proficiency dropdowns: Speaking, Writing, Reading
+    const proficiencyFields = [
+      { ids: ['speaking', 'formField-speaking', 'speakingProficiency', 'formField-speakingProficiency', 'languageProficiency-0'], label: 'speaking' },
+      { ids: ['writing', 'formField-writing', 'writingProficiency', 'formField-writingProficiency', 'languageProficiency-1'], label: 'writing' },
+      { ids: ['reading', 'formField-reading', 'readingProficiency', 'formField-readingProficiency', 'languageProficiency-2'], label: 'reading' },
+    ];
+
+    for (const pf of proficiencyFields) {
+      let filled = false;
+      // Try data-automation-id selectors
+      for (const aid of pf.ids) {
+        const btn = $(`button[data-automation-id="${aid}"],[data-automation-id="${aid}"] button`) ||
+          $(`[data-automation-id="${aid}"] select`);
+        if (btn && isVisible(btn)) {
+          const currentText = (btn.textContent || btn.value || '').trim().toLowerCase();
+          if (!currentText || currentText === 'select' || currentText === 'choose' || currentText === '' || currentText === '---') {
+            await selectFromWorkdayDropdown(btn, proficiency);
+            filled = true;
+            await sleep(300);
+            break;
+          }
+        }
+        const inp = $(`[data-automation-id="${aid}"] input,input[data-automation-id="${aid}"]`);
+        if (inp && !inp.value) { nativeSet(inp, proficiency); filled = true; break; }
+      }
+      // Fallback: label-text based proficiency dropdown
+      if (!filled) {
+        const labelBtn = xpath(`//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'${pf.label}')]/ancestor::div[1]//button[not(@disabled)]`) ||
+          xpath(`//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'${pf.label}')]/ancestor::div[1]//select`);
+        if (labelBtn && isVisible(labelBtn)) {
+          const currentText = (labelBtn.textContent || labelBtn.value || '').trim().toLowerCase();
+          if (!currentText || currentText === 'select' || currentText === 'choose' || currentText === '' || currentText === '---') {
+            await selectFromWorkdayDropdown(labelBtn, proficiency);
+            await sleep(300);
+          }
+        }
+      }
+    }
+
+    // Handle indexed language sections (languageSection-1, languageSection-2, etc.)
+    const langSections = xpathAll('//div[starts-with(@data-automation-id,"languageSection-") or starts-with(@data-automation-id,"language-")]');
+    for (const sec of langSections) {
+      const secLangBtn = sec.querySelector('button[data-automation-id="language"]') || sec.querySelector('button[aria-haspopup]');
+      if (secLangBtn) {
+        const t = (secLangBtn.textContent || '').trim().toLowerCase();
+        if (!t || t === 'select' || t === 'choose') await selectFromWorkdayDropdown(secLangBtn, language);
+      }
+      const secLangInput = sec.querySelector('input[data-automation-id="language"]');
+      if (secLangInput && !secLangInput.value) nativeSet(secLangInput, language);
+      // Proficiency within section
+      for (const key of ['speaking', 'writing', 'reading']) {
+        const secProfBtn = sec.querySelector(`button[data-automation-id="${key}"]`) ||
+          sec.querySelector(`[data-automation-id="${key}"] button`) ||
+          sec.querySelector(`[data-automation-id="formField-${key}"] button`);
+        if (secProfBtn && isVisible(secProfBtn)) {
+          const t = (secProfBtn.textContent || '').trim().toLowerCase();
+          if (!t || t === 'select' || t === 'choose' || t === '---') {
+            await selectFromWorkdayDropdown(secProfBtn, proficiency);
+            await sleep(300);
+          }
+        }
+      }
+    }
+
+    LOG('Workday: language section filled');
   }
 
   // SpeedyApply Workday: self-identify / EEO section
@@ -1949,6 +2107,7 @@
       } else if (/MyExp/.test(currentPageType)) {
         await workdayFillEducation(p);
         await workdayFillExperience(p);
+        await workdayFillLanguage(p);
       } else if (/Questions|Supplementary/.test(currentPageType)) {
         await workdayFillQuestions(p);
         await workdayFillLinks(p);
