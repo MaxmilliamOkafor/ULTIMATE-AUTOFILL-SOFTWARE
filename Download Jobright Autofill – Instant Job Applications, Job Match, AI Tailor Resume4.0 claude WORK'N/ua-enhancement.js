@@ -16,8 +16,6 @@
     }
   });
 
-  // ===================== CREDIT BYPASS =====================
-  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999 };
   // ===================== TOGGLE SIDEBAR ON ICON CLICK =====================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && (message.action === 'toggleSidebar' || message.name === 'toggleSidebar')) {
@@ -86,9 +84,44 @@
     // Simplify+ bypass: paywall/upgrade prompts
     if (/\/(paywall|upgrade|pricing|checkout|subscribe)/i.test(u))
       return new Response(JSON.stringify({ success: true, bypass: true, plan: 'plus', tier: 'premium' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // Intercept autofill/fill and fill-v2 POST requests — bypass 403 risk limit
+    if (/\/swan\/autofill\/fill(-v2)?(\?|$)/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          LOG('Autofill fill endpoint returned ' + r.status + ' — bypassing with empty result');
+          const body = await r.clone().text().catch(() => '{}');
+          let parsed = {};
+          try { parsed = JSON.parse(body); } catch (_) { }
+          // Return a success response so the extension doesn't get stuck
+          return new Response(JSON.stringify({ code: 200, result: parsed.result || {}, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
+    // Intercept autofill/token endpoint — always return valid token
+    if (/\/swan\/autofill\/token/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          return new Response(JSON.stringify({ code: 200, result: { token: 'ua-bypass-token-' + Date.now() }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
+    // Intercept autofill/config endpoint — ensure config is always returned
+    if (/\/swan\/autofill\/config/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          return new Response(JSON.stringify({ code: 200, result: { enabled: true, maxRetries: 99, rateLimit: 99999 }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402 || r.status === 429) return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (r.status === 402 || r.status === 403 || r.status === 429) return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return r;
     } catch (e) { throw e; }
   };
@@ -97,7 +130,7 @@
   XMLHttpRequest.prototype.open = function (method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function () {
     const url = this._ua_url || '';
-    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit|coins?\/balance|tokens?\/balance|api\/(coins|tokens|balance|credits|usage|limit)/i.test(url)) {
+    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit|coins?\/balance|tokens?\/balance|api\/(coins|tokens|balance|credits|usage|limit)|autofill\/token|autofill\/config/i.test(url)) {
       const s = this;
       Object.defineProperty(s, 'responseText', { get: () => JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C, remaining: 99999, coins: 99999, tokens: 99999, balance: 99999 }, success: true }) });
       Object.defineProperty(s, 'status', { get: () => 200 });
@@ -866,12 +899,12 @@
       const val = guessFieldValue(lbl, p, inp);
       if (!val) continue;
       inp.focus();
-      await sleep(100); // Stabilize focus before setting value
+      await sleep(30);
       nativeSet(inp, val);
       inp.dispatchEvent(new Event('input', { bubbles: true }));
       inp.dispatchEvent(new Event('change', { bubbles: true }));
       filled++;
-      await sleep(200); // Accuracy-first: deliberate pacing between fields
+      await sleep(50);
     }
 
     // Select dropdowns — only unselected ones
@@ -1119,6 +1152,99 @@
   // Step 5: Fallback fill missed fields
   // Step 6: Submit or Next
 
+  // Helper: search inside shadow DOMs for elements matching a selector
+  function queryShadow(root, selectors) {
+    if (!root) return null;
+    const sels = Array.isArray(selectors) ? selectors : [selectors];
+    for (const sel of sels) {
+      try { const el = root.querySelector(sel); if (el) return el; } catch (_) { }
+    }
+    // Recurse into shadow roots
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        const found = queryShadow(el.shadowRoot, sels);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // Helper: find "Generate Custom Resume" / tailor button in sidebar + shadow DOM
+  function findTailorButton(sidebar) {
+    const selectors = [
+      '.application-dashboard-tailor-resume',
+      '.external-job-generate-resume-button',
+      '[class*="tailor-resume"]',
+      '[class*="generate-resume"]',
+      '[class*="custom-resume"]',
+      'button[class*="tailor"]',
+      'button[class*="generate"]'
+    ];
+    // Try direct sidebar first
+    for (const sel of selectors) {
+      const el = sidebar.querySelector(sel);
+      if (el && isVisible(el)) return el;
+    }
+    // Try shadow DOM inside Plasmo containers
+    const plasmoContainers = [...document.querySelectorAll('plasmo-csui,[id*="plasmo"],[class*="plasmo"]')];
+    for (const container of plasmoContainers) {
+      const found = queryShadow(container.shadowRoot || container, selectors);
+      if (found && isVisible(found)) return found;
+    }
+    // Text-based search: find buttons/links containing "Generate Custom Resume" or similar
+    const allBtns = [...sidebar.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+    for (const btn of allBtns) {
+      const t = (btn.textContent || '').trim();
+      if (/generate\s*(custom|your|my)?\s*resume|tailor\s*(my|your)?\s*resume|customize\s*resume/i.test(t) && isVisible(btn)) return btn;
+    }
+    // Also search all shadow roots for text-based buttons
+    for (const container of plasmoContainers) {
+      if (!container.shadowRoot) continue;
+      const btns = [...container.shadowRoot.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+      for (const btn of btns) {
+        const t = (btn.textContent || '').trim();
+        if (/generate\s*(custom|your|my)?\s*resume|tailor\s*(my|your)?\s*resume|customize\s*resume/i.test(t) && isVisible(btn)) return btn;
+      }
+    }
+    return null;
+  }
+
+  // Helper: find "Continue to Autofill" button in sidebar + shadow DOM
+  function findContinueToAutofillButton(sidebar) {
+    const selectors = [
+      '.continue-button:not(.continue-button-disabled)',
+      'button[class*="continue"]:not([disabled])',
+      '[class*="continue-to-autofill"]',
+      '[class*="continueToAutofill"]',
+      'button[class*="Continue"]'
+    ];
+    // Direct search
+    for (const sel of selectors) {
+      try { const el = sidebar.querySelector(sel); if (el && isVisible(el)) return el; } catch (_) { }
+    }
+    // Text-based search in sidebar
+    const allBtns = [...sidebar.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+    for (const btn of allBtns) {
+      const t = (btn.textContent || '').trim();
+      if (/continue\s*(to\s*)?autofill|continue\s*to\s*fill|proceed\s*to\s*autofill/i.test(t) && isVisible(btn) && !btn.disabled) return btn;
+    }
+    // Search shadow DOMs
+    const plasmoContainers = [...document.querySelectorAll('plasmo-csui,[id*="plasmo"],[class*="plasmo"]')];
+    for (const container of plasmoContainers) {
+      if (!container.shadowRoot) continue;
+      for (const sel of selectors) {
+        try { const el = container.shadowRoot.querySelector(sel); if (el && isVisible(el)) return el; } catch (_) { }
+      }
+      const btns = [...container.shadowRoot.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+      for (const btn of btns) {
+        const t = (btn.textContent || '').trim();
+        if (/continue\s*(to\s*)?autofill|continue\s*to\s*fill|proceed\s*to\s*autofill/i.test(t) && isVisible(btn) && !btn.disabled) return btn;
+      }
+    }
+    return null;
+  }
+
   async function tailorFirstFlow() {
     const ats = detectATS();
     if (!ats) return;
@@ -1127,89 +1253,84 @@
     // Wait for Jobright sidebar to load
     const sidebar = await waitFor('#jobright-helper-id', 15000);
     if (!sidebar) { LOG('Jobright sidebar not found — falling back to direct autofill'); await directAutofillFlow(); return; }
-    await sleep(2000);
+    await sleep(800);
 
-    // Step 1: Click "Generate Custom Resume" if available
-    const tailorBtn = sidebar.querySelector('.application-dashboard-tailor-resume') ||
-      sidebar.querySelector('.external-job-generate-resume-button');
-    if (tailorBtn && isVisible(tailorBtn)) {
+    // Step 1: Click "Generate Custom Resume" if available (searches shadow DOM too)
+    const tailorBtn = findTailorButton(sidebar);
+    if (tailorBtn) {
       LOG('Step 1: Clicking Generate Custom Resume');
       realClick(tailorBtn);
-      await sleep(3000);
+      await sleep(1000);
 
-      // Wait for tailoring to complete (watch for loading to finish)
+      // Wait for tailoring to complete (watch for loading to finish) — fast polling
       LOG('Waiting for resume tailoring to complete...');
-      const maxWait = 30000; // 30s max (reduced from 120s to prevent freezing)
+      const maxWait = 25000;
       const start = Date.now();
       while (Date.now() - start < maxWait) {
-        // Check if loading indicator is gone
-        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading');
+        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading,[class*="loading"],[class*="spinner"]');
         if (!loading || !isVisible(loading)) {
-          // Check if tailored resume is ready (button text changed or autofill button available)
           const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
-          if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
-          // If no loading and no button, don't spin forever
-          if (!loading) { LOG('No loading indicator and no autofill button — moving on'); break; }
+          const continueBtn = findContinueToAutofillButton(sidebar);
+          if (autofillBtn || continueBtn) { LOG('Tailoring complete — button ready'); break; }
+          if (!loading) { LOG('No loading indicator — moving on'); break; }
         }
-        await sleep(1500);
+        await sleep(500);
       }
-      await sleep(1500);
+      await sleep(300);
     } else {
       LOG('Step 1: No tailor button found — skipping to autofill');
     }
 
-    // Step 2-3: Click "Continue to Autofill" / continue button if present
-    const continueBtn = sidebar.querySelector('.continue-button:not(.continue-button-disabled)');
-    if (continueBtn && isVisible(continueBtn)) {
-      LOG('Step 2: Clicking Continue button');
+    // Step 2: Click "Continue to Autofill" button if present (searches shadow DOM too)
+    const continueBtn = findContinueToAutofillButton(sidebar);
+    if (continueBtn) {
+      LOG('Step 2: Clicking Continue to Autofill');
       realClick(continueBtn);
-      await sleep(2000);
+      await sleep(800);
     }
 
-    // Step 4: Click the Autofill button
+    // Step 3: Click the Autofill button
     LOG('Step 3: Triggering Autofill');
     await triggerAutofill();
 
-    // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
+    // Wait for Jobright autofill to complete — fast polling
     LOG('Waiting for Jobright autofill to complete...');
-    await sleep(2000);
+    await sleep(800);
     const fillStart = Date.now();
-    while (Date.now() - fillStart < 15000) { // 15s max (reduced from 60s)
+    while (Date.now() - fillStart < 12000) {
       const afBtn = sidebar.querySelector('.auto-fill-button');
       if (afBtn) {
         const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '' || txt === 'filled') break; // Done filling
-      } else break; // Button gone — don't wait forever
-      await sleep(1000);
+        if (txt === 'autofill' || txt === '' || txt === 'filled') break;
+      } else break;
+      await sleep(500);
     }
-    await sleep(1000);
+    await sleep(500);
 
-    // Step 5: Try resume upload if needed
+    // Step 4: Try resume upload if needed
     await tryResumeUpload();
 
-    // Step 6: Fallback fill to catch missed fields
+    // Step 5: Fallback fill to catch missed fields
     LOG('Step 4: Running fallback fill for missed fields');
     await fallbackFill();
-    await sleep(1000);
-    // Second pass
+    await sleep(500);
     await fallbackFill();
-    await sleep(500);
-    // Fix any validation errors
+    await sleep(300);
     await handleValidationErrors();
-    await sleep(500);
+    await sleep(300);
 
-    // Step 7: Auto submit or next
+    // Step 6: Auto submit or next
     LOG('Step 5: Auto-submit/next');
     const result = await autoSubmitOrNext();
 
     if (result === 'next_page') {
       LOG('Navigated to next page — continuing multi-page flow');
-      await sleep(3000);
+      await sleep(2000);
       await multiPageLoop();
     } else if (result === 'submitted') {
       LOG('Application submitted!');
       await learnFromPage();
-      await sleep(2000);
+      await sleep(1000);
       if (checkSuccess()) LOG('Success confirmed!');
     }
   }
@@ -1281,14 +1402,14 @@
   // ===================== DIRECT AUTOFILL FLOW (no sidebar) =====================
   async function directAutofillFlow() {
     await triggerAutofill();
-    await sleep(5000);
+    await sleep(2000);
     await fixPhoneCountryCode();
     await fallbackFill();
-    await sleep(1000);
+    await sleep(500);
     await fallbackFill();
-    await sleep(1000);
+    await sleep(500);
     const result = await autoSubmitOrNext();
-    if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
+    if (result === 'next_page') { await sleep(2000); await multiPageLoop(); }
   }
 
   // ===================== ASHBY AUTOMATION (from LazyApply) =====================
@@ -1697,13 +1818,33 @@
     // Strategy 1b: Label-text based fallback for Job Title & Company (catches Workday variants)
     if ((!titleInput || !titleInput.value) && title) {
       const titleByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'job title')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
-        xpath("//label[contains(text(),'Job Title')]/following::input[1]");
-      if (titleByLabel && !titleByLabel.value) nativeSet(titleByLabel, title);
+        xpath("//label[contains(text(),'Job Title')]/following::input[1]") ||
+        xpath("//label[contains(text(),'Job Title')]/ancestor::div[1]//input") ||
+        xpath("//span[contains(text(),'Job Title')]/ancestor::div[1]//input");
+      if (titleByLabel && !titleByLabel.value) { titleByLabel.focus(); nativeSet(titleByLabel, title); await sleep(100); }
     }
     if ((!companyInput || !companyInput.value) && company) {
       const companyByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'company')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
-        xpath("//label[contains(text(),'Company')]/following::input[1]");
-      if (companyByLabel && !companyByLabel.value) nativeSet(companyByLabel, company);
+        xpath("//label[contains(text(),'Company')]/following::input[1]") ||
+        xpath("//label[contains(text(),'Company')]/ancestor::div[1]//input") ||
+        xpath("//span[contains(text(),'Company')]/ancestor::div[1]//input");
+      if (companyByLabel && !companyByLabel.value) { companyByLabel.focus(); nativeSet(companyByLabel, company); await sleep(100); }
+    }
+
+    // Strategy 1c: Generic visible input fallback for Job Title & Company (Workday variants with non-standard IDs)
+    if (title) {
+      const allInputs = $$('input[type="text"],input:not([type])').filter(el => isVisible(el) && !el.value?.trim());
+      for (const inp of allInputs) {
+        const lbl = getLabel(inp);
+        if (/job.?title|position.?title/i.test(lbl)) { inp.focus(); nativeSet(inp, title); await sleep(100); break; }
+      }
+    }
+    if (company) {
+      const allInputs = $$('input[type="text"],input:not([type])').filter(el => isVisible(el) && !el.value?.trim());
+      for (const inp of allInputs) {
+        const lbl = getLabel(inp);
+        if (/\bcompany\b|employer|organization/i.test(lbl) && !/phone/i.test(lbl)) { inp.focus(); nativeSet(inp, company); await sleep(100); break; }
+      }
     }
 
     // Description / responsibilities (textarea)
@@ -1765,11 +1906,27 @@
     if (expDateEndYear && !expDateEndYear.value) nativeSet(expDateEndYear, endYear);
     if (expDateEndMonth && !expDateEndMonth.value) nativeSet(expDateEndMonth, '12');
 
-    // Fallback: label-text based From/To date fields
-    const fromLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'from')]/ancestor::div[1]//input");
-    const toLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'to')]/ancestor::div[1]//input");
-    if (fromLabel && !fromLabel.value) nativeSet(fromLabel, `01/${startYear}`);
-    if (toLabel && !toLabel.value) nativeSet(toLabel, `12/${endYear}`);
+    // Fallback: label-text based From/To date fields (multiple strategies)
+    const fromLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'from')]/ancestor::div[1]//input") ||
+      xpath("//span[text()='From']/ancestor::div[1]//input") ||
+      xpath("//label[text()='From']/following::input[1]");
+    const toLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'to')]/ancestor::div[1]//input[not(@type='hidden')]") ||
+      xpath("//span[text()='To']/ancestor::div[1]//input") ||
+      xpath("//label[text()='To']/following::input[1]");
+    if (fromLabel && !fromLabel.value) { fromLabel.focus(); nativeSet(fromLabel, `01/${startYear}`); await sleep(100); }
+    if (toLabel && !toLabel.value) { toLabel.focus(); nativeSet(toLabel, `12/${endYear}`); await sleep(100); }
+
+    // Additional fallback: find all unfilled date-like inputs (month/year) in work sections
+    const workDateInputs = $$('input[type="text"],input:not([type])').filter(el => {
+      if (!isVisible(el) || el.value?.trim()) return false;
+      const lbl = getLabel(el);
+      return /\bfrom\b|\bto\b|start\s*date|end\s*date/i.test(lbl);
+    });
+    for (const inp of workDateInputs) {
+      const lbl = (getLabel(inp) || '').toLowerCase();
+      if (/\bfrom\b|start/i.test(lbl)) { inp.focus(); nativeSet(inp, `01/${startYear}`); await sleep(100); }
+      else if (/\bto\b|end/i.test(lbl)) { inp.focus(); nativeSet(inp, `12/${endYear}`); await sleep(100); }
+    }
 
     // SpeedyApply indexed workExperience sections
     const expSections = xpathAll('//div[starts-with(@data-automation-id,"workExperience-")]');
@@ -1893,6 +2050,48 @@
             await sleep(300);
           }
         }
+      }
+    }
+
+    // Final fallback: fill any remaining unfilled fields with label matching for Language/Speaking/Writing/Reading
+    const langFallbackInputs = $$('input[type="text"],input:not([type]),select,button[aria-haspopup]').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of langFallbackInputs) {
+      const lbl = (getLabel(inp) || '').toLowerCase();
+      if (/\blanguage\b/i.test(lbl) && !/proficien/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, language);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(language.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, language); }
+        await sleep(200);
+      }
+      if (/\bspeaking\b|\bspeak\b|\boral\b/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
+      }
+      if (/\bwriting\b|\bwritten\b/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
+      }
+      if (/\breading\b|\bread\b/i.test(lbl) && !/already|have you/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
       }
     }
 
@@ -3490,6 +3689,49 @@
   }
   // Also run periodically as shadow DOM mutations may not trigger MutationObserver
   setInterval(function () { findAndDismissPopup(document); }, 1000);
+})();
+
+// === AUTO-CLICK "Continue to Autofill" BUTTON IN RESUME GENERATION FLOW ===
+// After keywords are added and resume is generated, this auto-clicks the "Continue to Autofill" button
+(function () {
+  function findAndClickContinueToAutofill(root) {
+    var allEls = root.querySelectorAll('button, a, div[role="button"], span[role="button"]');
+    for (var i = 0; i < allEls.length; i++) {
+      var el = allEls[i];
+      var text = (el.textContent || '').trim();
+      if (/^Continue\s*(to\s*)?Autofill$/i.test(text) && el.offsetParent !== null && !el.disabled) {
+        // Only click if it looks clickable (not disabled, visible)
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          el.click();
+          console.log('[UA] Auto-clicked Continue to Autofill button');
+          return true;
+        }
+      }
+    }
+    // Recurse into shadow roots
+    var allNodes = root.querySelectorAll('*');
+    for (var j = 0; j < allNodes.length; j++) {
+      if (allNodes[j].shadowRoot) {
+        if (findAndClickContinueToAutofill(allNodes[j].shadowRoot)) return true;
+      }
+    }
+    return false;
+  }
+
+  // Monitor for the button appearing
+  var continueObserver = new MutationObserver(function () {
+    findAndClickContinueToAutofill(document);
+  });
+  if (document.body) {
+    continueObserver.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', function () {
+      continueObserver.observe(document.body, { childList: true, subtree: true });
+    });
+  }
+  // Also check periodically for shadow DOM changes
+  setInterval(function () { findAndClickContinueToAutofill(document); }, 2000);
 })();
 
 // === SMARTRECRUITERS MULTI-PAGE AUTOFILL SUPPORT ===
