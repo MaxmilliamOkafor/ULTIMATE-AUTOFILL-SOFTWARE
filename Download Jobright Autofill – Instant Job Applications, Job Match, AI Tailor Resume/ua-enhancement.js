@@ -2248,6 +2248,592 @@
     LOG('Lever automation complete');
   }
 
+  // ===================== SMARTRECRUITERS AUTOMATION =====================
+  async function smartRecruitersAutomation() {
+    LOG('SmartRecruiters automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Click Apply if on job detail page
+    const applyBtn = $('button[data-test="apply-button"],a[data-test="apply-button"],.st-apply-button,button.js-apply-button,.apply-btn,a[href*="/apply"]');
+    if (applyBtn && isVisible(applyBtn) && !/\/apply/i.test(location.pathname)) {
+      LOG('Clicking SmartRecruiters Apply button');
+      realClick(applyBtn);
+      await sleep(3000);
+    }
+
+    // Wait for form
+    const form = await waitFor('form,.application-form,.apply-form,.application-step,[class*="application"]', 10000);
+    if (!form) { LOG('No SmartRecruiters form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // SmartRecruiters multi-step flow
+    const MAX_STEPS = 8;
+    for (let step = 1; step <= MAX_STEPS; step++) {
+      if (checkSuccess()) { LOG('SmartRecruiters: success detected'); break; }
+      LOG(`SmartRecruiters: step ${step}`);
+
+      // Fill basic fields
+      const srFields = {
+        '#firstName,input[name="firstName"],input[data-test="firstName"]': p.first_name || p.firstName || '',
+        '#lastName,input[name="lastName"],input[data-test="lastName"]': p.last_name || p.lastName || '',
+        '#email,input[name="email"],input[data-test="email"]': p.email || '',
+        '#phone,input[name="phone"],input[data-test="phoneNumber"]': p.phone || '',
+        'input[name="location"],input[data-test="location"],#location': p.city ? [p.city, p.state || p.region || '', p.country || DEFAULTS.country].filter(Boolean).join(', ') : '',
+        'input[name="currentCompany"],input[data-test="currentCompany"]': p.current_company || p.company || '',
+        'input[name="currentTitle"],input[data-test="currentTitle"]': p.current_title || p.title || '',
+      };
+      for (const [sels, val] of Object.entries(srFields)) {
+        if (!val) continue;
+        for (const sel of sels.split(',')) {
+          const el = $(sel.trim());
+          if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+        }
+      }
+
+      // Handle location autocomplete (SmartRecruiters uses Google Places-style)
+      const locInput = $('input[name="location"],input[data-test="location"],#location');
+      if (locInput && locInput.value) {
+        await sleep(800);
+        const autoComplete = $('[class*="autocomplete"] li,[class*="suggestion"] li,[role="option"],.pac-item,.location-suggestion');
+        if (autoComplete && isVisible(autoComplete)) { realClick(autoComplete); await sleep(300); }
+      }
+
+      // Fill remaining fields with fallback
+      await fallbackFill();
+      await sleep(500);
+
+      // Handle SmartRecruiters consent checkboxes
+      $$('input[type="checkbox"]').filter(el => {
+        const lbl = getLabel(el);
+        return isVisible(el) && !el.checked && /consent|agree|privacy|gdpr|terms|data.?process/i.test(lbl || '');
+      }).forEach(cb => realClick(cb));
+
+      // Handle file upload
+      await tryResumeUpload();
+
+      // Trigger Jobright autofill
+      await triggerAutofillQuick();
+      await sleep(1000);
+      await fallbackFill();
+      await handleValidationErrors();
+
+      // Next / Submit
+      const nextBtn = $('button[data-test="footer-next"],button[data-test="next-btn"],.next-step-button,button[type="submit"]');
+      const submitBtn = $('button[data-test="footer-submit"],button[data-test="submit-btn"],.submit-application-button');
+      if (submitBtn && isVisible(submitBtn)) {
+        LOG('SmartRecruiters: clicking Submit');
+        await sleep(500);
+        realClick(submitBtn);
+        await sleep(3000);
+        break;
+      }
+      if (nextBtn && isVisible(nextBtn)) {
+        LOG('SmartRecruiters: clicking Next');
+        realClick(nextBtn);
+        await sleep(2500);
+        continue;
+      }
+      // Text-based fallback
+      const txtBtn = $$('button').filter(isVisible).find(b => /^(next|continue|submit|apply)\b/i.test((b.textContent || '').trim()));
+      if (txtBtn) { realClick(txtBtn); await sleep(2500); continue; }
+      break;
+    }
+    learnFromFilledFields();
+    LOG('SmartRecruiters automation complete');
+  }
+
+  // ===================== TALEO / ORACLE AUTOMATION =====================
+  async function taleoAutomation() {
+    LOG('Taleo/Oracle automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Wait for Taleo form (various selectors)
+    const form = await waitFor('#requisitionDescriptionInterface,form[name="submitAction"],.candidate-self-service,#contentContainer,.requisitionContent,form', 10000);
+    if (!form) { LOG('No Taleo form found'); await directAutofillFlow(); return; }
+    await sleep(2000);
+
+    // Taleo uses numbered fieldsets and iframe-heavy layouts
+    // Phase 1: Fill personal info fields
+    const taleoFields = {
+      '#FirstName,input[id*="FirstName"]': p.first_name || p.firstName || '',
+      '#LastName,input[id*="LastName"]': p.last_name || p.lastName || '',
+      '#Email,input[id*="Email"],input[id*="email"]': p.email || '',
+      '#PhoneNumber,input[id*="Phone"],input[id*="phone"]': p.phone || '',
+      'input[id*="Address"],input[id*="Street"]': p.address || '',
+      'input[id*="City"]': p.city || '',
+      'input[id*="ZipCode"],input[id*="PostalCode"]': p.postal_code || p.zip || '',
+    };
+    for (const [sels, val] of Object.entries(taleoFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+      }
+    }
+
+    // Phase 2: Fill selects (country, state, source)
+    const countrySelect = $('select[id*="Country"],select[name*="country"]');
+    if (countrySelect && !hasFieldValue(countrySelect)) {
+      const opt = $$('option', countrySelect).find(o => new RegExp(p.country || DEFAULTS.country, 'i').test(o.text));
+      if (opt) { countrySelect.value = opt.value; countrySelect.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    const stateSelect = $('select[id*="State"],select[id*="Province"],select[name*="state"]');
+    if (stateSelect && !hasFieldValue(stateSelect) && p.state) {
+      const opt = $$('option', stateSelect).find(o => o.text.toLowerCase().includes(p.state.toLowerCase()));
+      if (opt) { stateSelect.value = opt.value; stateSelect.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+
+    // Phase 3: Taleo multi-page navigation
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+  }
+
+  // ===================== JOBVITE AUTOMATION =====================
+  async function jobviteAutomation() {
+    LOG('Jobvite automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Click Apply if on listing page
+    const applyBtn = $('a.jv-button-apply,.jv-apply-button,a[href*="/apply"],button.apply-button');
+    if (applyBtn && isVisible(applyBtn) && !/\/apply/i.test(location.pathname)) {
+      realClick(applyBtn);
+      await sleep(3000);
+    }
+
+    const form = await waitFor('.jv-application-form,form[name="applicationForm"],.application-form,form', 10000);
+    if (!form) { LOG('No Jobvite form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Jobvite field patterns
+    const jvFields = {
+      'input[name="firstName"],input[id*="firstName"]': p.first_name || p.firstName || '',
+      'input[name="lastName"],input[id*="lastName"]': p.last_name || p.lastName || '',
+      'input[name="email"],input[id*="email"]': p.email || '',
+      'input[name="phone"],input[id*="phone"]': p.phone || '',
+      'input[name="address"],input[id*="address"]': p.address || '',
+      'input[name="city"],input[id*="city"]': p.city || '',
+      'input[name="linkedIn"],input[id*="linkedin"]': p.linkedin_profile_url || p.linkedin || '',
+    };
+    for (const [sels, val] of Object.entries(jvFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+      }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('Jobvite automation complete');
+  }
+
+  // ===================== WORKABLE AUTOMATION =====================
+  async function workableAutomation() {
+    LOG('Workable automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('.application-form,form[data-ui="application-form"],form', 10000);
+    if (!form) { LOG('No Workable form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Workable uses data-ui attributes
+    const wkFields = {
+      'input[data-ui="firstname"],input[name="firstname"]': p.first_name || p.firstName || '',
+      'input[data-ui="lastname"],input[name="lastname"]': p.last_name || p.lastName || '',
+      'input[data-ui="email"],input[name="email"]': p.email || '',
+      'input[data-ui="phone"],input[name="phone"]': p.phone || '',
+      'input[data-ui="address"],input[name="address"]': p.address || '',
+      'input[data-ui="city"],input[name="city"]': p.city || '',
+      'textarea[data-ui="cover_letter"],textarea[name="cover_letter"]': p.cover_letter || DEFAULTS.cover,
+    };
+    for (const [sels, val] of Object.entries(wkFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+      }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('Workable automation complete');
+  }
+
+  // ===================== INDEED EASY APPLY =====================
+  async function indeedEasyApply() {
+    LOG('Indeed Easy Apply automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Click Apply Now / Easy Apply
+    const applyBtn = $('button[id="indeedApplyButton"],#applyButtonLinkContainer a,button[class*="apply"],a[class*="apply"]');
+    if (applyBtn && isVisible(applyBtn)) {
+      realClick(applyBtn);
+      await sleep(3000);
+    }
+
+    // Indeed uses an iframe for the application
+    const iframe = $('iframe[id*="indeedapply"],iframe[src*="indeedapply"]');
+    if (iframe) {
+      LOG('Indeed apply iframe detected — content script limited to main page');
+    }
+
+    // Wait for form (Indeed sometimes uses inline forms)
+    const form = await waitFor('form[id*="apply"],form[class*="apply"],.ia-Questions,form', 8000);
+    if (!form) { LOG('No Indeed form found'); return; }
+    await sleep(1500);
+
+    // Indeed multi-step flow
+    const MAX_STEPS = 8;
+    for (let step = 1; step <= MAX_STEPS; step++) {
+      if (checkSuccess()) break;
+      LOG(`Indeed: step ${step}`);
+
+      // Fill all visible fields
+      const fields = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+        .filter(el => isVisible(el) && !hasFieldValue(el));
+      for (const field of fields) {
+        const lbl = getLabel(field);
+        if (!lbl) continue;
+        const val = guessFieldValue(lbl, p, field);
+        if (!val) continue;
+        if (field.tagName === 'SELECT') {
+          const opt = $$('option', field).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+          if (opt) { field.value = opt.value; field.dispatchEvent(new Event('change', { bubbles: true })); }
+        } else { field.focus(); nativeSet(field, val); }
+        await sleep(80);
+      }
+
+      // Radio groups
+      const groups = {};
+      $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
+      for (const [, radios] of Object.entries(groups)) {
+        if (radios.some(r => r.checked)) continue;
+        const parent = radios[0].closest('fieldset,.ia-Questions-item,.form-group,[class*="question"]');
+        answerKnockoutRadioGroup(radios, parent, p);
+      }
+
+      answerButtonStyleQuestions(p);
+      await handleValidationErrors();
+
+      // Indeed Continue / Submit
+      const continueBtn = $('button[id*="continue"],button.ia-continueButton,.ia-NavigationButtons button[data-testid*="continue"]');
+      const submitBtn = $('button[id*="submit"],button.ia-submitButton,.ia-NavigationButtons button[data-testid*="submit"]');
+      if (submitBtn && isVisible(submitBtn)) {
+        LOG('Indeed: clicking Submit');
+        await sleep(500);
+        realClick(submitBtn);
+        await sleep(3000);
+        break;
+      }
+      if (continueBtn && isVisible(continueBtn)) {
+        realClick(continueBtn);
+        await sleep(2500);
+        continue;
+      }
+      const txtBtn = $$('button').filter(isVisible).find(b => /^(continue|next|submit|apply)\b/i.test((b.textContent || '').trim()));
+      if (txtBtn) { realClick(txtBtn); await sleep(2500); continue; }
+      break;
+    }
+    learnFromFilledFields();
+    LOG('Indeed Easy Apply complete');
+  }
+
+  // ===================== BREEZYHR AUTOMATION =====================
+  async function breezyhrAutomation() {
+    LOG('BreezyHR automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('.breezy-apply-form,form[id*="application"],.position-apply,form', 10000);
+    if (!form) { LOG('No BreezyHR form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // BreezyHR field patterns
+    const brFields = {
+      'input[name="name"],input[placeholder*="name" i]': `${p.first_name || p.firstName || ''} ${p.last_name || p.lastName || ''}`.trim(),
+      'input[name="email"],input[type="email"]': p.email || '',
+      'input[name="phone"],input[type="tel"]': p.phone || '',
+      'input[name="address"],input[placeholder*="address" i]': p.address || '',
+      'input[name="headline"],input[placeholder*="headline" i]': p.current_title || p.title || '',
+      'textarea[name="summary"],textarea[placeholder*="summary" i]': p.summary || p.cover_letter || DEFAULTS.cover,
+    };
+    for (const [sels, val] of Object.entries(brFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+      }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('BreezyHR automation complete');
+  }
+
+  // ===================== RIPPLING AUTOMATION =====================
+  async function ripplingAutomation() {
+    LOG('Rippling automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('form,[class*="application-form"],[data-testid*="application"]', 10000);
+    if (!form) { LOG('No Rippling form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Rippling uses React-based forms
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+
+    // Handle React Select dropdowns (common in Rippling)
+    const reactSelects = $$('[class*="react-select"],[class*="Select__control"],[class*="css-"][class*="control"]')
+      .filter(el => isVisible(el) && !el.querySelector('[class*="singleValue"]')?.textContent?.trim());
+    for (const rs of reactSelects) {
+      const lbl = getLabel(rs);
+      const val = guessFieldValue(lbl, p, rs);
+      if (!val) continue;
+      const input = rs.querySelector('input');
+      if (input) { input.focus(); nativeSet(input, val); await sleep(500); }
+      const option = await waitFor('[class*="option"]', 1000);
+      if (option && isVisible(option)) { realClick(option); await sleep(200); }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('Rippling automation complete');
+  }
+
+  // ===================== ADP AUTOMATION =====================
+  async function adpAutomation() {
+    LOG('ADP automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('.apply-form,form[id*="application"],form[class*="candidate"],form', 10000);
+    if (!form) { LOG('No ADP form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    const adpFields = {
+      'input[id*="firstName"],input[name*="firstName"]': p.first_name || p.firstName || '',
+      'input[id*="lastName"],input[name*="lastName"]': p.last_name || p.lastName || '',
+      'input[id*="email"],input[name*="email"],input[type="email"]': p.email || '',
+      'input[id*="phone"],input[name*="phone"],input[type="tel"]': p.phone || '',
+      'input[id*="address"],input[name*="address"]': p.address || '',
+      'input[id*="city"],input[name*="city"]': p.city || '',
+      'input[id*="zip"],input[id*="postal"],input[name*="zip"]': p.postal_code || p.zip || '',
+    };
+    for (const [sels, val] of Object.entries(adpFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
+      }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('ADP automation complete');
+  }
+
+  // ===================== SUCCESSFACTORS AUTOMATION =====================
+  async function successFactorsAutomation() {
+    LOG('SuccessFactors automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('form[id*="application"],form,.applicationForm,[class*="applyForm"]', 10000);
+    if (!form) { LOG('No SuccessFactors form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // SuccessFactors uses various field naming conventions
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+
+    // Radio/checkbox groups
+    const groups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
+    for (const [, radios] of Object.entries(groups)) {
+      if (radios.some(r => r.checked)) continue;
+      const parent = radios[0].closest('fieldset,.form-group,[class*="question"],[class*="field"]');
+      answerKnockoutRadioGroup(radios, parent, p);
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('SuccessFactors automation complete');
+  }
+
+  // ===================== JAZZHR AUTOMATION =====================
+  async function jazzhrAutomation() {
+    LOG('JazzHR automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('#jazzhr-apply,form[id*="apply"],form.resume-form,form', 10000);
+    if (!form) { LOG('No JazzHR form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    const jzFields = {
+      '#first_name,input[name="first_name"]': p.first_name || p.firstName || '',
+      '#last_name,input[name="last_name"]': p.last_name || p.lastName || '',
+      '#email,input[name="email"]': p.email || '',
+      '#phone,input[name="phone"]': p.phone || '',
+      '#address,input[name="address"]': p.address || '',
+      '#city,input[name="city"]': p.city || '',
+      '#linkedin_url,input[name*="linkedin"]': p.linkedin_profile_url || p.linkedin || '',
+      '#eeo_gender,select[name="eeo_gender"]': DEFAULTS.gender,
+      '#eeo_race,select[name="eeo_race"]': DEFAULTS.ethnicity,
+      '#eeo_veteran,select[name="eeo_veteran"]': DEFAULTS.veteran,
+      '#eeo_disability,select[name="eeo_disability"]': DEFAULTS.disability,
+    };
+    for (const [sels, val] of Object.entries(jzFields)) {
+      if (!val) continue;
+      for (const sel of sels.split(',')) {
+        const el = $(sel.trim());
+        if (!el || hasFieldValue(el)) continue;
+        if (el.tagName === 'SELECT') {
+          const opt = $$('option', el).find(o => o.text.toLowerCase().includes(val.toLowerCase()) || /prefer not|decline/i.test(o.text));
+          if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', { bubbles: true })); }
+        } else { el.focus(); nativeSet(el, val); }
+        await sleep(80);
+        break;
+      }
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('JazzHR automation complete');
+  }
+
+  // ===================== HANDSHAKE AUTOMATION =====================
+  async function handshakeAutomation() {
+    LOG('Handshake automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('form[class*="application"],form,.apply-form', 10000);
+    if (!form) { LOG('No Handshake form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Fill all visible empty fields using generic approach
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('Handshake automation complete');
+  }
+
+  // ===================== USAJOBS AUTOMATION =====================
+  async function usajobsAutomation() {
+    LOG('USAJOBS automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // USAJOBS has a specific flow — Apply button redirects to agency site
+    const applyBtn = $('a[href*="apply"],button[data-automation*="apply"],.usajobs-apply-button');
+    if (applyBtn && isVisible(applyBtn)) {
+      LOG('USAJOBS: Apply button found — click to proceed to agency site');
+      // Don't auto-click — let user decide
+    }
+
+    // Fill any inline forms
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+
+    await fixPhoneCountryCode();
+    await fallbackFill();
+    learnFromFilledFields();
+    LOG('USAJOBS automation complete');
+  }
+
+  // ===================== EIGHTFOLD AUTOMATION =====================
+  async function eightfoldAutomation() {
+    LOG('Eightfold automation starting...');
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    const form = await waitFor('.apply-form,form[class*="application"],[class*="ApplicationForm"],form', 10000);
+    if (!form) { LOG('No Eightfold form found'); await directAutofillFlow(); return; }
+    await sleep(1500);
+
+    // Eightfold uses React with custom components
+    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
+      .filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of inputs) {
+      const lbl = getLabel(inp);
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      if (inp.tagName === 'SELECT') {
+        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
+        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else { inp.focus(); nativeSet(inp, val); }
+      await sleep(80);
+    }
+
+    await fixPhoneCountryCode();
+    await tailorFirstFlow();
+    learnFromFilledFields();
+    LOG('Eightfold automation complete');
+  }
+
   // ===================== iCIMS AUTOMATION =====================
   async function icimsAutomation() {
     LOG('iCIMS automation starting...');
@@ -2513,6 +3099,25 @@
           e.preventDefault();
           exportQueueCSV();
           break;
+        case 'd': // Alt+D: Toggle dark mode
+          e.preventDefault();
+          toggleDarkMode().then(dark => {
+            const btn = document.getElementById('ua-dark-toggle');
+            if (btn) btn.textContent = dark ? '☀️' : '🌙';
+          });
+          break;
+        case 'g': // Alt+G: Scrape jobs from page
+          e.preventDefault();
+          scrapeAndAddToQueue();
+          break;
+        case 'r': // Alt+R: Retry failed jobs
+          e.preventDefault();
+          retryFailedJobs();
+          break;
+        case 'h': // Alt+H: Export application history
+          e.preventDefault();
+          exportAppHistory();
+          break;
       }
     });
   }
@@ -2605,14 +3210,7 @@
 
           // Run ATS-specific flow
           await withRetry(async () => {
-            if (isWorkday()) await workdayAutomation();
-            else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
-            else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
-            else if (/icims\.com/i.test(location.href)) await icimsAutomation();
-            else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
-            else if (/ashbyhq\.com/i.test(location.href)) await ashbyAutomation();
-            else if (/bamboohr\.com/i.test(location.href)) await bamboohrAutomation();
-            else await tailorFirstFlow();
+            await dispatchATSAutomation();
           }, 'Queue job automation');
 
           // Clear timeout — job completed normally
@@ -2632,10 +3230,12 @@
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed successfully');
+            await recordApplication(c.url, c.title, 'applied', c.jobBoard, c.duration);
           } else {
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed (success not confirmed)');
+            await recordApplication(c.url, c.title, 'completed', c.jobBoard, c.duration);
           }
           qStats.totalTime += c.duration;
 
@@ -2669,7 +3269,7 @@
       const idx = queue.indexOf(n);
       st.set('ua_q_stopped_at', idx);
       saveQ().then(() => {
-        const delay = QUEUE_DELAYS[qSpeed] || 2000;
+        const delay = Math.max(_rateLimitDelay || 3000, QUEUE_DELAYS[qSpeed] || 2000);
         setTimeout(() => { location.href = n.url; }, delay);
       });
     } else {
@@ -2684,6 +3284,10 @@
       const skipped = queue.filter(j => j.status === 'skipped').length;
       LOG(`Results: ${done} done, ${failed} failed, ${timedOut} timed out, ${skipped} skipped of ${queue.length} total`);
       if (qStats.totalTime > 0) LOG(`Average time: ${Math.round(qStats.totalTime / Math.max(done, 1) / 1000)}s per application`);
+      // Browser notification
+      st.get('ua_notif_enabled').then(enabled => {
+        if (enabled) sendNotification('Queue Complete!', `${done} applied, ${failed} failed, ${skipped} skipped of ${queue.length} total`);
+      });
       renderQ(); updateCtrl();
     }
   }
@@ -2775,6 +3379,373 @@
     const required = fields.filter(isFieldRequired).length;
     const requiredFilled = fields.filter(f => isFieldRequired(f) && hasFieldValue(f)).length;
     return { total: fields.length, filled, unfilled: fields.length - filled, required, requiredFilled, requiredUnfilled: required - requiredFilled };
+  }
+
+  // ===================== APPLICATION HISTORY TRACKING =====================
+  let _appHistory = [];
+  let _appHistoryLoaded = false;
+
+  async function loadAppHistory() {
+    if (_appHistoryLoaded) return _appHistory;
+    _appHistory = (await st.get('ua_app_history')) || [];
+    _appHistoryLoaded = true;
+    return _appHistory;
+  }
+
+  async function saveAppHistory() {
+    await st.set('ua_app_history', _appHistory);
+  }
+
+  async function recordApplication(url, title, status, atsName, duration) {
+    await loadAppHistory();
+    _appHistory.unshift({
+      url, title: title || shortUrl(url),
+      status: status || 'applied',
+      ats: atsName || detectATS() || 'Unknown',
+      appliedAt: Date.now(),
+      duration: duration || 0,
+      company: extractCompanyFromUrl(url),
+    });
+    // Keep last 500 applications
+    if (_appHistory.length > 500) _appHistory = _appHistory.slice(0, 500);
+    await saveAppHistory();
+  }
+
+  function extractCompanyFromUrl(url) {
+    try {
+      const h = new URL(url).hostname;
+      // Extract company from ATS subdomain patterns
+      const m = h.match(/([^.]+)\.(myworkdayjobs|greenhouse|lever|icims|smartrecruiters|jobvite|bamboohr|ashbyhq|workable|breezy)/);
+      if (m) return m[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      // Fallback: second-level domain
+      const parts = h.replace('www.', '').split('.');
+      return parts[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    } catch { return 'Unknown'; }
+  }
+
+  function getHistoryStats() {
+    const now = Date.now();
+    const today = _appHistory.filter(a => now - a.appliedAt < 86400000);
+    const thisWeek = _appHistory.filter(a => now - a.appliedAt < 604800000);
+    const thisMonth = _appHistory.filter(a => now - a.appliedAt < 2592000000);
+    const atsCounts = {};
+    _appHistory.forEach(a => { atsCounts[a.ats] = (atsCounts[a.ats] || 0) + 1; });
+    const topAts = Object.entries(atsCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const companyCounts = {};
+    _appHistory.forEach(a => { if (a.company) companyCounts[a.company] = (companyCounts[a.company] || 0) + 1; });
+    const avgDuration = _appHistory.filter(a => a.duration > 0).reduce((s, a) => s + a.duration, 0) / Math.max(_appHistory.filter(a => a.duration > 0).length, 1);
+    return {
+      total: _appHistory.length,
+      today: today.length,
+      thisWeek: thisWeek.length,
+      thisMonth: thisMonth.length,
+      topAts,
+      avgDuration: Math.round(avgDuration / 1000),
+      companies: Object.keys(companyCounts).length,
+    };
+  }
+
+  function exportAppHistory() {
+    const header = 'URL,Title,Company,ATS,Status,Applied At,Duration (s)\n';
+    const rows = _appHistory.map(a => {
+      const url = (a.url || '').replace(/"/g, '""');
+      const title = (a.title || '').replace(/"/g, '""');
+      const company = (a.company || '').replace(/"/g, '""');
+      const date = a.appliedAt ? new Date(a.appliedAt).toISOString() : '';
+      return `"${url}","${title}","${company}","${a.ats || ''}","${a.status || ''}","${date}","${Math.round((a.duration || 0) / 1000)}"`;
+    }).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `application-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    LOG(`Exported ${_appHistory.length} application records`);
+  }
+
+  // ===================== RESUME MANAGER (Multi-Resume Support) =====================
+  let _resumes = [];
+  let _resumesLoaded = false;
+  let _activeResumeIdx = 0;
+
+  async function loadResumes() {
+    if (_resumesLoaded) return _resumes;
+    _resumes = (await st.get('ua_resumes')) || [];
+    _activeResumeIdx = (await st.get('ua_active_resume')) || 0;
+    _resumesLoaded = true;
+    // Migrate old single resume
+    const oldResume = await st.get('ua_resume_data');
+    if (oldResume && !_resumes.length) {
+      _resumes.push({ name: oldResume.fileName || 'Resume', base64: oldResume.base64, mimeType: oldResume.mimeType || 'application/pdf', fileName: oldResume.fileName, addedAt: Date.now() });
+      await saveResumes();
+    }
+    return _resumes;
+  }
+
+  async function saveResumes() {
+    await st.set('ua_resumes', _resumes);
+    await st.set('ua_active_resume', _activeResumeIdx);
+    // Also sync to ua_resume_data for backward compatibility
+    if (_resumes[_activeResumeIdx]) {
+      await st.set('ua_resume_data', _resumes[_activeResumeIdx]);
+    }
+  }
+
+  function addResume(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        _resumes.push({
+          name: file.name.replace(/\.[^.]+$/, ''),
+          fileName: file.name,
+          base64: reader.result,
+          mimeType: file.type || 'application/pdf',
+          size: file.size,
+          addedAt: Date.now(),
+        });
+        _activeResumeIdx = _resumes.length - 1;
+        await saveResumes();
+        resolve(true);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function removeResume(idx) {
+    _resumes.splice(idx, 1);
+    if (_activeResumeIdx >= _resumes.length) _activeResumeIdx = Math.max(0, _resumes.length - 1);
+    await saveResumes();
+  }
+
+  async function setActiveResume(idx) {
+    _activeResumeIdx = idx;
+    await saveResumes();
+  }
+
+  // ===================== PROFILE IMPORT/EXPORT =====================
+  async function exportProfile() {
+    const p = await getProfile();
+    const data = JSON.stringify(p, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `profile-${new Date().toISOString().slice(0, 10)}.json`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    LOG('Profile exported');
+  }
+
+  async function importProfile(jsonStr) {
+    try {
+      const data = JSON.parse(jsonStr);
+      if (typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid profile format');
+      await st.set(SK.PROF, data);
+      LOG('Profile imported successfully');
+      return true;
+    } catch (e) {
+      LOG('Profile import error:', e.message);
+      return false;
+    }
+  }
+
+  // ===================== AUTO-RETRY FAILED JOBS =====================
+  async function retryFailedJobs() {
+    const failed = queue.filter(j => j.status === 'failed' || j.status === 'timeout');
+    if (!failed.length) { LOG('No failed jobs to retry'); return; }
+    let count = 0;
+    for (const j of failed) {
+      j.status = 'pending';
+      j.error = null;
+      j.startedAt = null;
+      j.completedAt = null;
+      j.duration = null;
+      count++;
+    }
+    await saveQ();
+    renderQ();
+    LOG(`Reset ${count} failed jobs for retry`);
+  }
+
+  // ===================== RATE LIMITING =====================
+  let _rateLimitDelay = 3000; // ms between applications (default 3s)
+  let _rateLimitLoaded = false;
+
+  async function loadRateLimitDelay() {
+    if (_rateLimitLoaded) return;
+    const saved = await st.get('ua_rate_limit');
+    if (saved) _rateLimitDelay = saved;
+    _rateLimitLoaded = true;
+  }
+
+  async function setRateLimitDelay(ms) {
+    _rateLimitDelay = ms;
+    await st.set('ua_rate_limit', ms);
+  }
+
+  // ===================== BROWSER NOTIFICATIONS =====================
+  function sendNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, icon: chrome.runtime.getURL?.('icon128.plasmo.3c1ed2d2.png') || '' });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') new Notification(title, { body });
+      });
+    }
+  }
+
+  // ===================== FORM ANALYSIS =====================
+  function getFormAnalysis() {
+    const analysis = analyzeCurrentForm();
+    const ats = detectATS();
+    const successCheck = checkSuccess();
+    return {
+      ...analysis,
+      ats: ats || 'None detected',
+      successDetected: successCheck,
+      pageUrl: location.href,
+      missingRequired: getMissingRequired(),
+    };
+  }
+
+  // ===================== DARK MODE =====================
+  let _darkMode = false;
+
+  async function loadDarkMode() {
+    _darkMode = (await st.get('ua_dark_mode')) || false;
+    return _darkMode;
+  }
+
+  async function toggleDarkMode() {
+    _darkMode = !_darkMode;
+    await st.set('ua_dark_mode', _darkMode);
+    applyDarkMode();
+    return _darkMode;
+  }
+
+  function applyDarkMode() {
+    const drawer = document.getElementById('ua-drawer');
+    if (!drawer) return;
+    if (_darkMode) {
+      drawer.classList.add('ua-dark');
+    } else {
+      drawer.classList.remove('ua-dark');
+    }
+  }
+
+  // ===================== CUSTOMIZABLE DEFAULTS =====================
+  let _customDefaults = null;
+
+  async function loadCustomDefaults() {
+    const saved = await st.get('ua_custom_defaults');
+    if (saved) {
+      _customDefaults = saved;
+      Object.assign(DEFAULTS, saved);
+    }
+    return DEFAULTS;
+  }
+
+  async function saveCustomDefaults(newDefaults) {
+    _customDefaults = newDefaults;
+    Object.assign(DEFAULTS, newDefaults);
+    await st.set('ua_custom_defaults', newDefaults);
+  }
+
+  // ===================== JOB SCRAPER (LinkedIn/Indeed/Glassdoor Search Pages) =====================
+  function scrapeJobListings() {
+    const url = location.href;
+    const jobs = [];
+
+    // LinkedIn search results
+    if (/linkedin\.com\/(jobs\/search|jobs\/collections)/i.test(url)) {
+      $$('.job-card-container a.job-card-list__title,.jobs-search-results__list-item a,.job-card-container__link,.scaffold-layout__list-item a[href*="/jobs/view/"]').forEach(a => {
+        const href = a.href?.split('?')[0];
+        const title = a.textContent?.trim() || '';
+        if (href && /\/jobs\/view\//i.test(href)) jobs.push({ url: href, title });
+      });
+    }
+
+    // Indeed search results
+    if (/indeed\.com\/(jobs|q-)/i.test(url)) {
+      $$('a[data-jk],a.jcs-JobTitle,h2.jobTitle a,.job_seen_beacon a[href*="/viewjob"],.resultContent a[href*="/rc/clk"]').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href && /viewjob|clk/i.test(href)) jobs.push({ url: href, title });
+      });
+    }
+
+    // Glassdoor search results
+    if (/glassdoor\.com\/Job/i.test(url)) {
+      $$('a[data-test="job-link"],a.jobLink,.JobCard a[href*="/job-listing/"]').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href) jobs.push({ url: href, title });
+      });
+    }
+
+    // ZipRecruiter search results
+    if (/ziprecruiter\.com\/jobs/i.test(url)) {
+      $$('a.job_link,a[data-job-id],article a[href*="/c/"]').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href) jobs.push({ url: href, title });
+      });
+    }
+
+    // Dice search results
+    if (/dice\.com\/jobs/i.test(url)) {
+      $$('a[data-cy="card-title-link"],a.card-title-link,.search-card a[href*="/job-detail/"]').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href) jobs.push({ url: href, title });
+      });
+    }
+
+    // Wellfound/AngelList
+    if (/wellfound\.com|angel\.co/i.test(url) && /\/jobs/i.test(url)) {
+      $$('a[href*="/jobs/"],.styles_component__container a,.browse-table-row a').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href && title.length > 3 && title.length < 120) jobs.push({ url: href, title });
+      });
+    }
+
+    // Generic career pages
+    if (/\/careers?\/|\/jobs?\//i.test(url) && !jobs.length) {
+      $$('a[href*="/job"],a[href*="/position"],a[href*="/opening"],a[href*="/career"]').forEach(a => {
+        const href = a.href;
+        const title = a.textContent?.trim() || '';
+        if (href && title.length > 5 && title.length < 120 && href !== url) jobs.push({ url: href, title });
+      });
+    }
+
+    // Deduplicate
+    const seen = new Set();
+    return jobs.filter(j => {
+      if (seen.has(j.url)) return false;
+      seen.add(j.url);
+      return true;
+    });
+  }
+
+  async function scrapeAndAddToQueue() {
+    const jobs = scrapeJobListings();
+    if (!jobs.length) { LOG('No job listings found on this page'); return 0; }
+    let added = 0;
+    for (const j of jobs) {
+      if (!queue.some(q => q.url === j.url)) {
+        await addJob(j.url, j.title);
+        added++;
+      }
+    }
+    LOG(`Scraped and added ${added} jobs from search results (${jobs.length} found, ${jobs.length - added} duplicates)`);
+    return added;
   }
 
   // ===================== CREDIT HIDE =====================
@@ -2931,6 +3902,74 @@
 #ua-ats{position:fixed;top:12px;right:12px;z-index:2147483646;background:#064e3b;color:#6ee7b7;padding:5px 12px;border-radius:10px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;box-shadow:0 2px 12px rgba(0,0,0,.15);display:none;align-items:center;gap:5px}
 #ua-ats.show{display:flex}
 #ua-ats .dot{width:5px;height:5px;border-radius:50%;background:#34d399;animation:uap 1.5s infinite}
+
+/* === DARK MODE === */
+#ua-drawer.ua-dark{background:#1f2937;color:#e5e7eb;border-color:#374151}
+#ua-drawer.ua-dark .ua-body{scrollbar-color:#4b5563 #1f2937}
+#ua-drawer.ua-dark .ua-sec-t{color:#6b7280}
+#ua-drawer.ua-dark .ua-tog{background:#111827;border-color:#374151}
+#ua-drawer.ua-dark .ua-tog-l{color:#e5e7eb}
+#ua-drawer.ua-dark .ua-tog-d{color:#6b7280}
+#ua-drawer.ua-dark .ua-drop{border-color:#4b5563;background:#111827}
+#ua-drawer.ua-dark .ua-drop:hover{border-color:#00c985;background:#064e3b}
+#ua-drawer.ua-dark .ua-drop-t{color:#9ca3af}
+#ua-drawer.ua-dark .ua-url-inp{background:#111827;border-color:#4b5563;color:#e5e7eb}
+#ua-drawer.ua-dark .ua-qlist{border-color:#374151}
+#ua-drawer.ua-dark .ua-qi{border-color:#374151}
+#ua-drawer.ua-dark .ua-qi:hover{background:#111827}
+#ua-drawer.ua-dark .ua-qi .url{color:#d1d5db}
+#ua-drawer.ua-dark .ua-qi .num{background:#374151;color:#9ca3af}
+#ua-drawer.ua-dark .ua-qbtns .sec{background:#374151;color:#d1d5db}
+#ua-drawer.ua-dark .ua-qbtns .dan{background:#1f2937;border-color:#ef4444;color:#f87171}
+#ua-drawer.ua-dark .ua-stat.off{background:#111827;color:#6b7280}
+#ua-drawer.ua-dark input[type="text"],#ua-drawer.ua-dark input[type="number"],#ua-drawer.ua-dark select{background:#111827;border-color:#4b5563;color:#e5e7eb}
+#ua-drawer.ua-dark .ua-q-bar .info{color:#6b7280}
+#ua-drawer.ua-dark #ua-prof{background:#111827;border-color:#374151}
+#ua-drawer.ua-dark #ua-prof-toggle{background:#111827;border-color:#374151;color:#9ca3af}
+#ua-drawer.ua-dark kbd{background:#374151;border-color:#4b5563;color:#d1d5db}
+
+/* === HISTORY PANEL === */
+.ua-hist-item{padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:10px;display:flex;gap:6px;align-items:center}
+.ua-hist-item:last-child{border-bottom:none}
+.ua-hist-item .company{font-weight:600;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ua-hist-item .ats{font-size:8px;padding:1px 5px;border-radius:3px;background:#dbeafe;color:#1e40af}
+.ua-hist-item .date{font-size:8px;color:#9ca3af}
+#ua-drawer.ua-dark .ua-hist-item{border-color:#374151}
+#ua-drawer.ua-dark .ua-hist-item .company{color:#e5e7eb}
+
+/* === STATS CARDS === */
+.ua-stats-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.ua-stat-card{flex:1;min-width:70px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;padding:8px;text-align:center}
+.ua-stat-card .num{font-size:18px;font-weight:800;color:#059669}
+.ua-stat-card .lbl{font-size:8px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+#ua-drawer.ua-dark .ua-stat-card{background:#064e3b;border-color:#065f46}
+#ua-drawer.ua-dark .ua-stat-card .num{color:#6ee7b7}
+#ua-drawer.ua-dark .ua-stat-card .lbl{color:#9ca3af}
+
+/* === RESUME LIST === */
+.ua-resume-item{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#f9fafb;border:1px solid #f3f4f6;border-radius:6px;margin-bottom:4px;font-size:10px}
+.ua-resume-item.active{border-color:#00c985;background:#ecfdf5}
+.ua-resume-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#111827}
+.ua-resume-item .size{color:#9ca3af;font-size:8px}
+.ua-resume-item button{background:none;border:none;cursor:pointer;padding:2px;color:#9ca3af;font-size:12px}
+.ua-resume-item button:hover{color:#ef4444}
+#ua-drawer.ua-dark .ua-resume-item{background:#111827;border-color:#374151}
+#ua-drawer.ua-dark .ua-resume-item.active{border-color:#00c985;background:#064e3b}
+#ua-drawer.ua-dark .ua-resume-item .name{color:#e5e7eb}
+
+/* === FORM ANALYSIS === */
+.ua-form-bar{display:flex;gap:4px;margin-bottom:6px}
+.ua-form-pill{padding:3px 8px;border-radius:12px;font-size:9px;font-weight:600}
+.ua-form-pill.good{background:#d1fae5;color:#065f46}
+.ua-form-pill.warn{background:#fef3c7;color:#92400e}
+.ua-form-pill.bad{background:#fee2e2;color:#991b1b}
+.ua-form-progress{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-bottom:4px}
+.ua-form-progress .fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#00c985,#059669);transition:width .3s}
+
+/* === SCRAPE BUTTON === */
+.ua-scrape-btn{width:100%;padding:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border:none;border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.4px;margin-top:6px}
+.ua-scrape-btn:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8)}
+.ua-scrape-btn:disabled{background:#e5e7eb;color:#9ca3af;cursor:default}
     `;
     document.head.appendChild(s);
   }
@@ -2986,7 +4025,7 @@
     // --- Drawer ---
     const dw = document.createElement('div'); dw.id = 'ua-drawer';
     dw.innerHTML = `
-      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><span class="ua-hdr-badge">UNLIMITED</span></div>
+      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><div style="display:flex;gap:6px;align-items:center"><button id="ua-dark-toggle" title="Dark Mode" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px">🌙</button><span class="ua-hdr-badge">UNLIMITED</span></div></div>
       <div class="ua-body">
         <div class="ua-sec">
           <div class="ua-sec-t">Auto-Apply</div>
@@ -2994,9 +4033,43 @@
           <div id="ua-stat" class="ua-stat off"><span class="dot"></span><span id="ua-stat-t">Inactive</span></div>
         </div>
         <div class="ua-sec">
+          <div class="ua-sec-t">Form Analysis</div>
+          <div id="ua-form-analysis">
+            <div class="ua-form-progress"><div class="fill" id="ua-form-progress-fill" style="width:0%"></div></div>
+            <div class="ua-form-bar" id="ua-form-pills"></div>
+            <div style="display:flex;gap:4px">
+              <button id="ua-fill-now" style="flex:1;padding:6px;background:#00c985;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Fill Now (Alt+F)</button>
+              <button id="ua-analyze" style="flex:1;padding:6px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">Analyze</button>
+            </div>
+          </div>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Application History</div>
+          <div class="ua-stats-row" id="ua-hist-stats">
+            <div class="ua-stat-card"><div class="num" id="ua-hist-today">0</div><div class="lbl">Today</div></div>
+            <div class="ua-stat-card"><div class="num" id="ua-hist-week">0</div><div class="lbl">This Week</div></div>
+            <div class="ua-stat-card"><div class="num" id="ua-hist-total">0</div><div class="lbl">Total</div></div>
+            <div class="ua-stat-card"><div class="num" id="ua-hist-companies">0</div><div class="lbl">Companies</div></div>
+          </div>
+          <div id="ua-hist-list" style="max-height:120px;overflow-y:auto;border:1px solid #f3f4f6;border-radius:8px;margin-bottom:6px"></div>
+          <div style="display:flex;gap:4px">
+            <button id="ua-hist-export" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export History</button>
+            <button id="ua-hist-clear" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer">Clear History</button>
+          </div>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Resumes <span id="ua-resume-cnt" style="color:#00c985"></span></div>
+          <div id="ua-resume-list" style="margin-bottom:6px"></div>
+          <div style="display:flex;gap:4px">
+            <button id="ua-resume-add" style="flex:1;padding:6px;background:#00c985;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">Upload Resume</button>
+            <input type="file" id="ua-resume-file" accept=".pdf,.doc,.docx,.txt,.rtf" style="display:none">
+          </div>
+        </div>
+        <div class="ua-sec">
           <div class="ua-sec-t">Import Jobs</div>
           <div id="ua-drop" class="ua-drop"><div class="ua-drop-t">Drop CSV or click to browse</div><div class="ua-drop-sub">.csv .txt .tsv — or paste multiple URLs</div><input type="file" id="ua-csv" class="ua-csv-in" accept=".csv,.txt,.tsv,.json"></div>
           <div class="ua-url-row"><input type="text" id="ua-url" class="ua-url-inp" placeholder="Paste job URL..."><button id="ua-add" class="ua-url-btn">Add</button></div>
+          <button id="ua-scrape-btn" class="ua-scrape-btn">Scrape Jobs From This Page</button>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Saved Responses <span id="ua-resp-cnt" style="color:#00c985"></span></div>
@@ -3024,10 +4097,49 @@
             <div style="display:flex;gap:6px"><button class="ua-url-btn" id="ua-prof-save" style="flex:1">Save Profile</button><button class="ua-url-btn" id="ua-prof-cancel" style="flex:1;background:#6b7280">Cancel</button></div>
           </div>
           <button id="ua-prof-toggle" style="width:100%;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;text-align:left">Edit Profile (name, email, phone...)</button>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <button id="ua-prof-export-btn" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export Profile</button>
+            <button id="ua-prof-import-btn" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Import Profile</button>
+            <input type="file" id="ua-prof-file" accept=".json" style="display:none">
+          </div>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Customizable Defaults</div>
+          <div id="ua-defaults-panel" style="display:none;padding:8px;background:#f9fafb;border-radius:8px;border:1px solid #f3f4f6">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px" id="ua-defaults-fields"></div>
+            <div style="display:flex;gap:6px"><button class="ua-url-btn" id="ua-defaults-save" style="flex:1">Save Defaults</button><button class="ua-url-btn" id="ua-defaults-cancel" style="flex:1;background:#6b7280">Cancel</button></div>
+          </div>
+          <button id="ua-defaults-toggle" style="width:100%;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;text-align:left">Edit Default Answers (authorization, sponsorship...)</button>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Queue Settings</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <label style="font-size:10px;color:#6b7280;white-space:nowrap">Delay between jobs:</label>
+            <select id="ua-rate-limit" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;flex:1">
+              <option value="1000">1s (Fast)</option>
+              <option value="2000">2s</option>
+              <option value="3000" selected>3s (Default)</option>
+              <option value="5000">5s</option>
+              <option value="10000">10s (Cautious)</option>
+              <option value="15000">15s (Very Safe)</option>
+              <option value="30000">30s (Ultra Safe)</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <label style="font-size:10px;color:#6b7280;white-space:nowrap">Job timeout:</label>
+            <select id="ua-timeout" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;flex:1">
+              <option value="60000">60s</option>
+              <option value="90000" selected>90s (Default)</option>
+              <option value="120000">120s</option>
+              <option value="180000">180s</option>
+              <option value="300000">300s</option>
+            </select>
+          </div>
+          <div class="ua-tog" style="margin-bottom:6px"><div><div class="ua-tog-l">Browser Notifications</div><div class="ua-tog-d">Notify on queue complete/errors</div></div><label class="ua-sw"><input type="checkbox" id="ua-notif"><span class="ua-sw-s"></span></label></div>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Queue <span id="ua-q-cnt" style="color:#00c985">(0)</span></div>
-          <div class="ua-q-bar"><label><input type="checkbox" id="ua-selall">Select all</label><button class="del" id="ua-del" disabled>Delete selected</button><span class="info" id="ua-q-info"></span></div>
+          <div class="ua-q-bar"><label><input type="checkbox" id="ua-selall">Select all</label><button class="del" id="ua-del" disabled>Delete selected</button><button class="del" id="ua-retry-failed" style="border-color:#fbbf24;color:#b45309">Retry failed</button><span class="info" id="ua-q-info"></span></div>
           <div class="ua-qlist" id="ua-qlist"></div>
           <div class="ua-qsum" id="ua-qsum"></div>
           <div class="ua-qbtns" id="ua-qbtns"></div>
@@ -3041,7 +4153,12 @@
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+F</kbd> Fill form now</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+J</kbd> Add page to queue</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+S</kbd> Start/stop queue</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+P</kbd> Pause/resume queue</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+N</kbd> Skip current job</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+E</kbd> Export CSV</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+D</kbd> Dark mode toggle</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+G</kbd> Scrape jobs from page</div>
+            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+R</kbd> Retry failed jobs</div>
           </div>
         </div>
       </div>`;
@@ -3106,14 +4223,7 @@
     tog.addEventListener('change', async e => {
       autoApply = e.target.checked; await st.set(SK.AA, autoApply); updateStat();
       if (autoApply && detectATS()) {
-        if (isWorkday()) workdayAutomation();
-        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) greenhouseAutomation();
-        else if (/lever\.co|jobs\.lever/i.test(location.href)) leverAutomation();
-        else if (/icims\.com/i.test(location.href)) icimsAutomation();
-        else if (/linkedin\.com.*\/jobs/i.test(location.href)) linkedinEasyApply();
-        else if (/ashbyhq\.com/i.test(location.href)) ashbyAutomation();
-        else if (/bamboohr\.com/i.test(location.href)) bamboohrAutomation();
-        else tailorFirstFlow();
+        dispatchATSAutomation();
       }
     });
 
@@ -3229,10 +4339,244 @@
       if (confirm('Clear all learned answers?')) {
         _answerBank = {}; _answerBankLoaded = false;
         await st.set(SK.ANS, {});
-        ansCnt.textContent = '(0 answers)';
-        ansInfo.textContent = 'Cleared!';
-        setTimeout(() => { ansInfo.textContent = 'Learned answers help fill forms faster'; }, 2000);
+        if (ansCnt) ansCnt.textContent = '(0 answers)';
+        if (ansInfo) {
+          ansInfo.textContent = 'Cleared!';
+          setTimeout(() => { ansInfo.textContent = 'Learned answers help fill forms faster'; }, 2000);
+        }
       }
+    });
+
+    // ---- Dark Mode ----
+    document.getElementById('ua-dark-toggle')?.addEventListener('click', async () => {
+      const dark = await toggleDarkMode();
+      document.getElementById('ua-dark-toggle').textContent = dark ? '☀️' : '🌙';
+    });
+    loadDarkMode().then(dark => {
+      applyDarkMode();
+      const btn = document.getElementById('ua-dark-toggle');
+      if (btn) btn.textContent = dark ? '☀️' : '🌙';
+    });
+
+    // ---- Form Analysis ----
+    function updateFormAnalysis() {
+      const analysis = getFormAnalysis();
+      const progress = analysis.total > 0 ? Math.round((analysis.filled / analysis.total) * 100) : 0;
+      const fill = document.getElementById('ua-form-progress-fill');
+      if (fill) fill.style.width = progress + '%';
+      const pills = document.getElementById('ua-form-pills');
+      if (pills) {
+        const parts = [];
+        parts.push(`<span class="ua-form-pill ${progress >= 80 ? 'good' : progress >= 50 ? 'warn' : 'bad'}">${analysis.filled}/${analysis.total} filled</span>`);
+        if (analysis.ats !== 'None detected') parts.push(`<span class="ua-form-pill good">${analysis.ats}</span>`);
+        if (analysis.requiredUnfilled > 0) parts.push(`<span class="ua-form-pill bad">${analysis.requiredUnfilled} required empty</span>`);
+        if (analysis.successDetected) parts.push(`<span class="ua-form-pill good">Success!</span>`);
+        pills.innerHTML = parts.join('');
+      }
+    }
+    document.getElementById('ua-fill-now')?.addEventListener('click', async () => {
+      LOG('Manual fill triggered via button');
+      await fallbackFill();
+      updateFormAnalysis();
+    });
+    document.getElementById('ua-analyze')?.addEventListener('click', updateFormAnalysis);
+    setInterval(updateFormAnalysis, 5000);
+    setTimeout(updateFormAnalysis, 1500);
+
+    // ---- Application History ----
+    function getTimeAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60000) return 'just now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+      if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+      return new Date(ts).toLocaleDateString();
+    }
+    async function renderHistory() {
+      await loadAppHistory();
+      const stats = getHistoryStats();
+      const todayEl = document.getElementById('ua-hist-today');
+      const weekEl = document.getElementById('ua-hist-week');
+      const totalEl = document.getElementById('ua-hist-total');
+      const companiesEl = document.getElementById('ua-hist-companies');
+      if (todayEl) todayEl.textContent = stats.today;
+      if (weekEl) weekEl.textContent = stats.thisWeek;
+      if (totalEl) totalEl.textContent = stats.total;
+      if (companiesEl) companiesEl.textContent = stats.companies;
+      const listEl = document.getElementById('ua-hist-list');
+      if (listEl) {
+        if (!_appHistory.length) {
+          listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No applications yet</div>';
+        } else {
+          listEl.innerHTML = _appHistory.slice(0, 50).map(a => {
+            const timeAgo = getTimeAgo(a.appliedAt);
+            return `<div class="ua-hist-item"><span class="company" title="${(a.url || '').replace(/"/g, '&quot;')}">${a.company || a.title || 'Unknown'}</span><span class="ats">${a.ats || ''}</span><span class="date">${timeAgo}</span></div>`;
+          }).join('');
+        }
+      }
+    }
+    document.getElementById('ua-hist-export')?.addEventListener('click', exportAppHistory);
+    document.getElementById('ua-hist-clear')?.addEventListener('click', async () => {
+      if (confirm(`Clear ${_appHistory.length} application history records?`)) {
+        _appHistory = [];
+        await saveAppHistory();
+        renderHistory();
+      }
+    });
+    renderHistory();
+
+    // ---- Resume Manager ----
+    async function renderResumes() {
+      await loadResumes();
+      const cntEl = document.getElementById('ua-resume-cnt');
+      if (cntEl) cntEl.textContent = `(${_resumes.length})`;
+      const listEl = document.getElementById('ua-resume-list');
+      if (!listEl) return;
+      if (!_resumes.length) {
+        listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No resumes uploaded</div>';
+      } else {
+        listEl.innerHTML = _resumes.map((r, i) => {
+          const sizeStr = r.size ? (r.size < 1024 ? r.size + 'B' : Math.round(r.size / 1024) + 'KB') : '';
+          return `<div class="ua-resume-item ${i === _activeResumeIdx ? 'active' : ''}" data-idx="${i}">
+            <input type="radio" name="ua-resume-active" ${i === _activeResumeIdx ? 'checked' : ''} data-idx="${i}" style="accent-color:#00c985">
+            <span class="name">${r.name || r.fileName || 'Resume'}</span>
+            <span class="size">${sizeStr}</span>
+            <button data-idx="${i}" title="Remove">&times;</button>
+          </div>`;
+        }).join('');
+        listEl.querySelectorAll('input[name="ua-resume-active"]').forEach(r => {
+          r.addEventListener('change', async e => {
+            await setActiveResume(parseInt(e.target.dataset.idx));
+            renderResumes();
+          });
+        });
+        listEl.querySelectorAll('button[data-idx]').forEach(btn => {
+          btn.addEventListener('click', async e => {
+            const idx = parseInt(e.currentTarget.dataset.idx);
+            if (confirm(`Remove "${_resumes[idx]?.name || 'this resume'}"?`)) {
+              await removeResume(idx);
+              renderResumes();
+            }
+          });
+        });
+      }
+    }
+    document.getElementById('ua-resume-add')?.addEventListener('click', () => {
+      document.getElementById('ua-resume-file')?.click();
+    });
+    document.getElementById('ua-resume-file')?.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      await addResume(file);
+      renderResumes();
+      LOG(`Resume uploaded: ${file.name}`);
+      e.target.value = '';
+    });
+    renderResumes();
+
+    // ---- Profile Import/Export ----
+    document.getElementById('ua-prof-export-btn')?.addEventListener('click', exportProfile);
+    document.getElementById('ua-prof-import-btn')?.addEventListener('click', () => {
+      document.getElementById('ua-prof-file')?.click();
+    });
+    document.getElementById('ua-prof-file')?.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const ok = await importProfile(text);
+      if (ok) {
+        alert('Profile imported successfully!');
+        const profStatusEl = document.getElementById('ua-prof-status');
+        if (profStatusEl) { profStatusEl.textContent = '(imported)'; profStatusEl.style.color = '#059669'; }
+      } else {
+        alert('Failed to import profile. Check JSON format.');
+      }
+      e.target.value = '';
+    });
+
+    // ---- Customizable Defaults ----
+    const defaultsFields = [
+      { k: 'authorized', l: 'Authorized to Work' }, { k: 'sponsorship', l: 'Need Sponsorship' },
+      { k: 'relocation', l: 'Open to Relocation' }, { k: 'remote', l: 'Remote Preference' },
+      { k: 'veteran', l: 'Veteran Status' }, { k: 'disability', l: 'Disability Status' },
+      { k: 'gender', l: 'Gender (EEO)' }, { k: 'ethnicity', l: 'Ethnicity (EEO)' },
+      { k: 'years', l: 'Years Experience' }, { k: 'salary', l: 'Expected Salary' },
+      { k: 'notice', l: 'Notice Period' }, { k: 'availability', l: 'Availability' },
+      { k: 'country', l: 'Default Country' }, { k: 'phoneCountryCode', l: 'Phone Code' },
+      { k: 'howHeard', l: 'How Did You Hear' }, { k: 'cover', l: 'Default Cover Letter' },
+    ];
+    const defaultsPanel = document.getElementById('ua-defaults-panel');
+    const defaultsToggle = document.getElementById('ua-defaults-toggle');
+    const defaultsContainer = document.getElementById('ua-defaults-fields');
+    defaultsToggle?.addEventListener('click', async () => {
+      if (defaultsPanel.style.display === 'none') {
+        defaultsPanel.style.display = 'block';
+        defaultsToggle.style.display = 'none';
+        await loadCustomDefaults();
+        defaultsContainer.innerHTML = defaultsFields.map(f =>
+          `<div><label style="font-size:9px;color:#6b7280;display:block;margin-bottom:2px">${f.l}</label>${f.k === 'cover' ?
+            `<textarea data-dk="${f.k}" style="width:100%;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;box-sizing:border-box;height:60px;resize:vertical">${DEFAULTS[f.k] || ''}</textarea>` :
+            `<input type="text" data-dk="${f.k}" value="${(DEFAULTS[f.k] || '').replace(/"/g, '&quot;')}" style="width:100%;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;box-sizing:border-box">`
+          }</div>`
+        ).join('');
+      }
+    });
+    document.getElementById('ua-defaults-save')?.addEventListener('click', async () => {
+      const newDefaults = {};
+      defaultsContainer.querySelectorAll('[data-dk]').forEach(el => {
+        newDefaults[el.dataset.dk] = (el.value || el.textContent || '').trim();
+      });
+      await saveCustomDefaults(newDefaults);
+      defaultsPanel.style.display = 'none';
+      defaultsToggle.style.display = 'block';
+      LOG('Custom defaults saved');
+    });
+    document.getElementById('ua-defaults-cancel')?.addEventListener('click', () => {
+      defaultsPanel.style.display = 'none';
+      defaultsToggle.style.display = 'block';
+    });
+
+    // ---- Queue Settings ----
+    loadRateLimitDelay().then(() => {
+      const rlSelect = document.getElementById('ua-rate-limit');
+      if (rlSelect) rlSelect.value = _rateLimitDelay.toString();
+    });
+    document.getElementById('ua-rate-limit')?.addEventListener('change', e => {
+      setRateLimitDelay(parseInt(e.target.value));
+    });
+    document.getElementById('ua-timeout')?.addEventListener('change', e => {
+      qTimeout = parseInt(e.target.value);
+      st.set('ua_timeout', qTimeout);
+    });
+    st.get('ua_timeout').then(v => {
+      if (v) { qTimeout = v; const el = document.getElementById('ua-timeout'); if (el) el.value = v.toString(); }
+    });
+
+    // Notifications toggle
+    let _notifEnabled = false;
+    st.get('ua_notif_enabled').then(v => {
+      _notifEnabled = !!v;
+      const el = document.getElementById('ua-notif');
+      if (el) el.checked = _notifEnabled;
+    });
+    document.getElementById('ua-notif')?.addEventListener('change', async e => {
+      _notifEnabled = e.target.checked;
+      await st.set('ua_notif_enabled', _notifEnabled);
+      if (_notifEnabled && 'Notification' in window && Notification.permission !== 'granted') {
+        Notification.requestPermission();
+      }
+    });
+
+    // Retry failed
+    document.getElementById('ua-retry-failed')?.addEventListener('click', retryFailedJobs);
+
+    // ---- Job Scraper ----
+    document.getElementById('ua-scrape-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('ua-scrape-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Scraping...'; }
+      const count = await scrapeAndAddToQueue();
+      if (btn) { btn.disabled = false; btn.textContent = count > 0 ? `Added ${count} jobs!` : 'No jobs found'; }
+      setTimeout(() => { if (btn) btn.textContent = 'Scrape Jobs From This Page'; }, 3000);
     });
 
     // Profile editor
@@ -3340,10 +4684,36 @@
   // ===================== OBSERVER =====================
   function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, { childList: true, subtree: true }); }
 
+  // ===================== ATS DISPATCHER =====================
+  async function dispatchATSAutomation() {
+    const url = location.href;
+    if (isWorkday()) return await workdayAutomation();
+    if (/greenhouse\.io|boards\.greenhouse/i.test(url)) return await greenhouseAutomation();
+    if (/lever\.co|jobs\.lever/i.test(url)) return await leverAutomation();
+    if (/icims\.com/i.test(url)) return await icimsAutomation();
+    if (/linkedin\.com.*\/jobs/i.test(url)) return await linkedinEasyApply();
+    if (/ashbyhq\.com/i.test(url)) return await ashbyAutomation();
+    if (/bamboohr\.com/i.test(url)) return await bamboohrAutomation();
+    if (/smartrecruiters\.com/i.test(url)) return await smartRecruitersAutomation();
+    if (/taleo\.net|oraclecloud\.com.*Candidate/i.test(url)) return await taleoAutomation();
+    if (/jobvite\.com/i.test(url)) return await jobviteAutomation();
+    if (/workable\.com/i.test(url)) return await workableAutomation();
+    if (/indeed\.com/i.test(url)) return await indeedEasyApply();
+    if (/breezy\.hr|breezyhr\.com/i.test(url)) return await breezyhrAutomation();
+    if (/ats\.rippling\.com/i.test(url)) return await ripplingAutomation();
+    if (/adp\.com|workforcenow\.adp/i.test(url)) return await adpAutomation();
+    if (/successfactors\.com/i.test(url)) return await successFactorsAutomation();
+    if (/jazz\.co|applytojob\.com/i.test(url)) return await jazzhrAutomation();
+    if (/joinhandshake\.com/i.test(url)) return await handshakeAutomation();
+    if (/governmentjobs\.com|usajobs\.gov/i.test(url)) return await usajobsAutomation();
+    if (/eightfold\.ai/i.test(url)) return await eightfoldAutomation();
+    return await tailorFirstFlow();
+  }
+
   // ===================== INIT =====================
   async function init() {
     if (window.self !== window.top) return;
-    await load(); await loadAnswerBank(); await loadSavedResponses(); injectCSS(); buildUI(); setupKeyboardShortcuts();
+    await load(); await loadAnswerBank(); await loadSavedResponses(); await loadAppHistory(); await loadResumes(); await loadCustomDefaults(); await loadRateLimitDelay(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
     // Update answer bank count in UI
@@ -3356,12 +4726,7 @@
       // Auto-start ATS-specific flow when detected and auto-apply is on
       if (autoApply) {
         await sleep(2000);
-        if (isWorkday()) await workdayAutomation();
-        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
-        else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
-        else if (/icims\.com/i.test(location.href)) await icimsAutomation();
-        else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
-        else await tailorFirstFlow();
+        await dispatchATSAutomation();
       }
     }
     if (qActive) { await sleep(2000); processQ(); }
