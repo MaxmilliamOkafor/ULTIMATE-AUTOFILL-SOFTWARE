@@ -1,5 +1,6 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
+// === ULTIMATE AUTOFILL ENHANCEMENT v10.2 ===
 // Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
+// + Sidebar toggle, autofill fill/token/config bypass from v6.1
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
@@ -11,6 +12,38 @@
     if (/Could not establish connection|Receiving end does not exist|Extension context invalidated|useOriginalResume|No form fields found/i.test(msg)) {
       event.preventDefault();
       console.warn('[UA] Suppressed unhandled rejection:', msg);
+    }
+  });
+
+  // ===================== TOGGLE SIDEBAR ON ICON CLICK =====================
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message && (message.action === 'toggleSidebar' || message.name === 'toggleSidebar')) {
+      LOG('Toggle sidebar requested');
+      // Find all Plasmo CSUI containers (sidebar shadow roots)
+      const containers = [
+        ...document.querySelectorAll('plasmo-csui'),
+        ...document.querySelectorAll('[id*="plasmo"]'),
+        ...document.querySelectorAll('[class*="plasmo"]'),
+        ...document.querySelectorAll('[id*="jobright"]'),
+        ...document.querySelectorAll('[id*="Jobright"]')
+      ];
+      // Deduplicate
+      const unique = [...new Set(containers)];
+      if (unique.length > 0) {
+        unique.forEach(el => {
+          if (el.style.display === 'none') {
+            el.style.display = '';
+            LOG('Sidebar shown');
+          } else {
+            el.style.display = 'none';
+            LOG('Sidebar hidden');
+          }
+        });
+      } else {
+        LOG('No Plasmo CSUI containers found to toggle');
+      }
+      sendResponse({ ok: true });
+      return true; // keep message channel open for async
     }
   });
 
@@ -50,9 +83,43 @@
     // Simplify+ bypass: paywall/upgrade prompts
     if (/\/(paywall|upgrade|pricing|checkout|subscribe)/i.test(u))
       return new Response(JSON.stringify({ success: true, bypass: true, plan: 'plus', tier: 'premium' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // Intercept autofill/fill and fill-v2 POST requests — bypass 403 risk limit
+    if (/\/swan\/autofill\/fill(-v2)?(\?|$)/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          LOG('Autofill fill endpoint returned ' + r.status + ' — bypassing with empty result');
+          const body = await r.clone().text().catch(() => '{}');
+          let parsed = {};
+          try { parsed = JSON.parse(body); } catch (_) { }
+          return new Response(JSON.stringify({ code: 200, result: parsed.result || {}, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
+    // Intercept autofill/token endpoint — always return valid token
+    if (/\/swan\/autofill\/token/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          return new Response(JSON.stringify({ code: 200, result: { token: 'ua-bypass-token-' + Date.now() }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
+    // Intercept autofill/config endpoint — ensure config is always returned
+    if (/\/swan\/autofill\/config/i.test(u)) {
+      try {
+        const r = await _fetch.apply(window, arguments);
+        if (r.status === 402 || r.status === 403 || r.status === 429) {
+          return new Response(JSON.stringify({ code: 200, result: { enabled: true, maxRetries: 99, rateLimit: 99999 }, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return r;
+      } catch (e) { throw e; }
+    }
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402 || r.status === 429) return new Response(JSON.stringify({ success: true, code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (r.status === 402 || r.status === 403 || r.status === 429) return new Response(JSON.stringify({ success: true, code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return r;
     } catch (e) { throw e; }
   };
