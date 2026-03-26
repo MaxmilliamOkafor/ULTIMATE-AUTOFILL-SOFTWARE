@@ -21,7 +21,7 @@
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
  *
- * v4.1 fixes:
+ * v4.2 fixes:
  *   - autoSkipSeconds capped at 5s via sendMessage intercept (update-proof)
  *   - getProfile() reads ALL storage keys: candidateDetails, cachedSeekerInfo,
  *     seekerDetails, userDetails — merges nested .seeker sub-objects and
@@ -273,12 +273,21 @@
     merged.first_name = pick('first_name', 'firstName', 'given_name', 'givenName');
     merged.last_name  = pick('last_name',  'lastName',  'family_name','familyName', 'surname');
     merged.linkedin_profile_url = pick('linkedin_profile_url','linkedin_url','linkedinUrl','linkedin','LinkedIn');
-    merged.github_url  = pick('github_url',  'github',  'githubUrl',  'GitHub');
-    merged.website_url = pick('website_url', 'website', 'websiteUrl', 'portfolio', 'portfolioUrl');
+    merged.github_url    = pick('github_url', 'github', 'githubUrl', 'GitHub');
+    merged.website_url   = pick('website_url', 'website', 'websiteUrl', 'portfolio', 'portfolioUrl', 'personal_website');
+    merged.twitter_url   = pick('twitter_url', 'twitter', 'twitterUrl', 'x_url', 'x_handle');
+    merged.stackoverflow_url = pick('stackoverflow_url', 'stackoverflow', 'stack_overflow', 'stackOverflow');
     merged.city        = pick('city', 'location_city', 'locationCity');
     merged.state       = pick('state', 'location_state', 'locationState');
     merged.country     = pick('country', 'location_country', 'locationCountry');
     merged.postal_code = pick('postal_code', 'zip', 'postalCode', 'zipCode');
+    merged.street      = pick('street', 'street_address', 'address_line1', 'address1');
+    merged.current_title   = pick('current_title', 'currentTitle', 'job_title', 'jobTitle', 'title', 'position');
+    merged.current_company = pick('current_company', 'currentCompany', 'company', 'employer', 'organization');
+    merged.expected_salary = pick('expected_salary', 'expectedSalary', 'desired_salary', 'salary');
+    merged.years_experience = pick('years_experience', 'yearsExperience', 'years_of_experience', 'experience_years');
+    merged.cover_letter    = pick('cover_letter', 'coverLetter', 'cover_letter_body');
+    merged.summary         = pick('summary', 'bio', 'about', 'profile_summary', 'professional_summary');
     return merged;
   }
 
@@ -344,34 +353,46 @@
     if (/preferred.?name|display.?name|nickname/.test(l)) return fullName;
     if (/\bemail\b/.test(l))                              return p.email         || '';
     if (/phone|mobile|cell/.test(l))                      return p.phone         || '';
-    if (/^city$|city\b/.test(l))                          return p.city          || '';
+    if (/^city$|city\b|current.?location|location.*city/.test(l)) return p.city || `${p.city||'Dublin'}, ${p.country||'Ireland'}`;
     if (/state|province/.test(l))                         return p.state         || '';
     if (/zip|postal/.test(l))                             return p.postal_code   || p.zip || '';
-    if (/country/.test(l))                                return p.country       || 'Ireland';
-    if (/address/.test(l))                                return p.address       || '';
+    if (/^country/.test(l))                               return p.country       || 'Ireland';
+    if (/address/.test(l))                                return p.address       || p.street || '';
     if (/linkedin/.test(l))                               return p.linkedin_profile_url || '';
     if (/github/.test(l))                                 return p.github_url    || '';
-    if (/website|portfolio/.test(l))                      return p.website_url   || '';
-    if (/university|school|college/.test(l))              return p.school        || p.university || '';
+    if (/stack.*exchange|stackexchange|stack.*overflow|stackoverflow/.test(l)) return p.stackoverflow_url || '';
+    if (/twitter|x\.com|x handle/.test(l))               return p.twitter_url   || '';
+    if (/website|portfolio|personal.?site/.test(l))       return p.website_url   || '';
+    if (/university|school|college|education/.test(l))    return p.school        || p.university || '';
     if (/\bdegree\b/.test(l))                             return p.degree        || "Bachelor's";
     if (/major|field of study/.test(l))                   return p.major         || '';
     if (/gpa/.test(l))                                    return p.gpa           || '';
+    if (/summary|bio|about|profile|introduce/.test(l))    return p.summary       || DEFAULTS.cover;
     if (/title|position|role/.test(l))                    return p.current_title || p.title || '';
-    if (/company|employer|org/.test(l))                   return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l))                return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation/.test(l))               return p.cover_letter  || DEFAULTS.cover;
-    if (/why.*compan|why.*role/.test(l))                  return DEFAULTS.why;
-    if (/how.*hear|where.*find|how.*you.*find/.test(l))   return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years/.test(l))           return DEFAULTS.years;
+    if (/current.*company|most.*recent.*company|current.*employer|last.*company/.test(l))
+                                                          return p.current_company || p.company || '';
+    if (/previously.*work|worked.*before|work.*for.*before/i.test(l)) return 'No';
+    if (/company|employer|current.*org/.test(l))          return p.current_company || p.company || '';
+    if (/please.*email.*future|email.*job.*opening|job.*alert|receive.*update/i.test(l)) return 'Yes';
+    if (/salary|compensation|pay\b|remun/.test(l))        return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.*info/.test(l)) return p.cover_letter || DEFAULTS.cover;
+    if (/why.*compan|why.*role|why.*interest|what.*excite/.test(l)) return DEFAULTS.why;
+    if (/how.*hear|where.*find|how.*you.*find|how.*discover|referr.*source/.test(l)) return DEFAULTS.howHeard;
+    if (/years.*(exp|work)|exp.*years|experience.*(long|total)/.test(l)) return p.years_experience || DEFAULTS.years;
     if (/availab|start.?date|notice/.test(l))             return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right|right.*work/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa/.test(l))                           return DEFAULTS.sponsorship;
+    if (/authoriz|eligible|work.*right|right.*work|legally.*work/.test(l)) return DEFAULTS.authorized;
+    if (/require.*sponsor|need.*visa|visa.*sponsor|sponsor|future.*visa/.test(l)) return DEFAULTS.sponsorship;
+    if (/will.*sponsor|currently.*sponsor/.test(l))       return DEFAULTS.sponsorship;
     if (/relocat/.test(l))                                return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid/.test(l))               return DEFAULTS.remote;
-    if (/veteran|military/.test(l))                       return DEFAULTS.veteran;
+    if (/remote|work.*home|hybrid|onsite|in.person/.test(l)) return DEFAULTS.remote;
+    if (/veteran|military|protected/.test(l))             return DEFAULTS.veteran;
     if (/disabilit/.test(l))                              return DEFAULTS.disability;
     if (/gender|sex\b/.test(l))                           return DEFAULTS.gender;
-    if (/ethnic|race|racial/.test(l))                     return DEFAULTS.ethnicity;
+    if (/ethnic|race|racial|hispanic|latino/.test(l))     return DEFAULTS.ethnicity;
+    if (/driver.?s.?licen|driving.?licen/.test(l))        return 'Yes';
+    if (/agree|accept|confirm|consent|certif/.test(l))    return 'Yes';
+    if (/willing|happy|open\s+to|comfortable|able\s+to/.test(l)) return 'Yes';
+    if (/do you have|have you|are you|can you|will you/.test(l)) return 'Yes';
     return '';
   }
 
@@ -395,6 +416,142 @@
         status: status, // 'filled', 'pending', 'failed'
       }).catch(() => {});
     } catch (_) {}
+  }
+
+  /* ── URL_FIELDS: labels where a URL value is EXPECTED ───────── */
+  const URL_FIELD_PATTERNS = /linkedin|github|website|portfolio|gitlab|bitbucket|stack.*overflow|stackoverflow|stackexchange|twitter|x\.com|behance|dribbble|codepen|devto|medium|personal.?site|blog|url|link/i;
+
+  /**
+   * isWrongUrlForField — returns true when a URL value was placed into a
+   * field that should either have a different URL or no URL at all.
+   *
+   * Specific URL fields (linkedin, github, website, etc.) are allowed to have
+   * URLs only when the URL MATCHES what the profile says for that field.
+   * Any other URL → wrong fill.
+   */
+  function isWrongUrlForField(val, lbl, p) {
+    if (!/^https?:\/\//i.test(val)) return false; // not a URL → not our problem
+    const l = lbl.toLowerCase();
+
+    // Non-URL fields that got a URL → definitely wrong
+    if (!URL_FIELD_PATTERNS.test(l)) return true;
+
+    // URL fields: verify the URL matches what we expect for that label
+    if (/linkedin/i.test(l) && p.linkedin_profile_url && val !== p.linkedin_profile_url) return true;
+    if (/github/i.test(l) && p.github_url && val !== p.github_url) return true;
+    if (/website|portfolio/i.test(l) && p.website_url && val !== p.website_url) return true;
+    if (/twitter|x\.com/i.test(l) && p.twitter_url && val !== p.twitter_url) return true;
+    if (/stackoverflow|stackexchange/i.test(l) && p.stackoverflow_url && val !== p.stackoverflow_url) return true;
+
+    return false;
+  }
+
+  /**
+   * sanitizeBadFills — corrects OptimHire's tendency to spam the LinkedIn URL
+   * into every empty field.  Designed to run multiple times (it's idempotent).
+   */
+  async function sanitizeBadFills() {
+    const p = await getProfile();
+    const inputs = $$(
+      'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),' +
+      'textarea'
+    ).filter(isVisible);
+
+    for (const inp of inputs) {
+      const val = inp.value?.trim() || '';
+      if (!val) continue;
+      const lbl = getLabel(inp) || inp.name || inp.id || '';
+      const inputType = (inp.type || '').toLowerCase();
+      if (inputType === 'url') continue;
+
+      if (isWrongUrlForField(val, lbl, p)) {
+        const correct = guessValue(lbl, p, inputType);
+        if (correct && !/^https?:\/\//i.test(correct)) {
+          LOG(`sanitize: bad URL in "${lbl}" → "${correct}"`);
+          inp.focus(); nativeSet(inp, correct); await sleep(40);
+        } else if (!correct || /^https?:\/\//i.test(correct)) {
+          // No text value available — clear the field so form validates cleanly
+          LOG(`sanitize: clearing bad URL from "${lbl}"`);
+          inp.focus(); nativeSet(inp, ''); await sleep(40);
+        }
+        continue;
+      }
+
+      // Fix raw numbers (e.g. "80000") in non-salary / non-experience fields
+      if (/^\d+$/.test(val)) {
+        if (/salary|compensation|pay\b|remun|expectation|years.*exp|exp.*years/i.test(lbl)) continue;
+        const correct = guessValue(lbl, p, inputType);
+        if (correct && correct !== val && !/^\d+$/.test(correct)) {
+          inp.focus(); nativeSet(inp, correct); await sleep(40);
+        } else if (!correct) {
+          inp.focus(); nativeSet(inp, ''); await sleep(40);
+        }
+      }
+    }
+
+    // Fix select elements filled with wrong values (e.g. a URL in a yes/no dropdown)
+    for (const sel of $$('select').filter(isVisible)) {
+      const val = sel.value?.trim() || '';
+      if (!val || !/^https?:\/\//i.test(val)) continue;
+      const lbl = getLabel(sel) || sel.name || '';
+      if (URL_FIELD_PATTERNS.test(lbl)) continue;
+      LOG(`sanitize: clearing URL from select "${lbl}"`);
+      sel.value = '';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  /* ── Continuous sanitizer: re-runs after OptimHire fills post ours ──────
+   * OptimHire's FILL_COMPLEX_FORM pipeline fills fields AFTER our pass.
+   * We watch for input-value mutations and debounce a re-sanitize.        */
+  let _sanitizeDebounce = null;
+  function scheduleSanitize() {
+    clearTimeout(_sanitizeDebounce);
+    _sanitizeDebounce = setTimeout(() => sanitizeBadFills().catch(() => {}), 600);
+  }
+
+  // Watch for any programmatic value changes on the page
+  (function installSanitizeWatcher() {
+    try {
+      const inputDesc   = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,   'value');
+      const textaDesc   = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      if (inputDesc?.set) {
+        Object.defineProperty(HTMLInputElement.prototype, 'value', {
+          set(v) {
+            inputDesc.set.call(this, v);
+            if (typeof v === 'string' && /^https?:\/\//i.test(v)) scheduleSanitize();
+          },
+          get() { return inputDesc.get.call(this); },
+          configurable: true,
+        });
+      }
+      if (textaDesc?.set) {
+        Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
+          set(v) {
+            textaDesc.set.call(this, v);
+            if (typeof v === 'string' && /^https?:\/\//i.test(v)) scheduleSanitize();
+          },
+          get() { return textaDesc.get.call(this); },
+          configurable: true,
+        });
+      }
+    } catch (_) { /* CSP/sandbox may block — fall back to MutationObserver */ }
+  })();
+
+  /**
+   * bestSelectOption — finds the best <option> in a <select> for a given value.
+   * Uses: exact match → starts-with → contains → first non-empty.
+   */
+  function bestSelectOption(sel, target) {
+    if (!target) return null;
+    const t = target.toLowerCase();
+    const opts = $$('option', sel).filter(o => o.value && o.value !== '');
+    const exact   = opts.find(o => o.text.toLowerCase() === t);
+    if (exact) return exact;
+    const starts  = opts.find(o => o.text.toLowerCase().startsWith(t));
+    if (starts) return starts;
+    const contains = opts.find(o => o.text.toLowerCase().includes(t) || t.includes(o.text.toLowerCase()));
+    return contains || null;
   }
 
   async function autoFillPage() {
@@ -460,21 +617,85 @@
     const selects = allSelects.filter(el => !el.value);
     for (const sel of selects) {
       const lbl = getLabel(sel);
+      const l   = lbl.toLowerCase();
+      const opts = $$('option', sel).filter(o => o.value && o.value !== '' && !/^select/i.test(o.text));
+      if (!opts.length) continue;
+
+      let chosen = null;
       const val = guessValue(lbl, p);
-      if (!val) {
-        if (lbl) reportFieldFilled(lbl, 'failed');
-        continue;
+
+      // 1) Direct label → value match via bestSelectOption
+      if (val) chosen = bestSelectOption(sel, val);
+
+      // 2) Yes/No fallback: if it's a small option set with yes/no options,
+      //    pick the appropriate answer based on question polarity
+      if (!chosen && opts.length <= 6) {
+        const hasYes = opts.some(o => /^yes$/i.test(o.text.trim()));
+        const hasNo  = opts.some(o => /^no$/i.test(o.text.trim()));
+        if (hasYes || hasNo) {
+          // Questions with negative framing → pick No
+          const negative = /\bnot\b|\bno longer\b|don.t|cannot|unable|lack|without|decline/i.test(l);
+          chosen = opts.find(o => negative
+            ? /^no$/i.test(o.text.trim())
+            : /^yes$/i.test(o.text.trim()));
+          // If no exact "Yes", pick first option that contains "yes"
+          if (!chosen) {
+            chosen = opts.find(o => negative
+              ? /\bno\b/i.test(o.text)
+              : /\byes\b/i.test(o.text));
+          }
+        }
       }
-      const opt = $$('option', sel).find(
-        o => o.text.toLowerCase().includes(val.toLowerCase())
-      );
-      if (opt) {
-        sel.value = opt.value;
+
+      // 3) Salary range: pick the band closest to expected salary
+      if (!chosen && /salary|compensation|pay\b|remun|expectation|range/i.test(l)) {
+        const target = parseInt((p.expected_salary || DEFAULTS.salary).toString().replace(/\D/g,'')) || 80000;
+        let bestDist = Infinity;
+        for (const o of opts) {
+          const nums = (o.text.match(/\d[\d,]*/g) || []).map(n => parseInt(n.replace(/,/g,''))).filter(Boolean);
+          if (!nums.length) continue;
+          const mid   = nums.reduce((a, b) => a + b, 0) / nums.length;
+          const dist  = Math.abs(mid - target);
+          if (dist < bestDist) { bestDist = dist; chosen = o; }
+        }
+      }
+
+      // 4) Boolean-looking options (True/False, Agree/Disagree, etc.)
+      if (!chosen && opts.length === 2) {
+        chosen = opts[0]; // pick first non-empty option
+      }
+
+      if (chosen) {
+        sel.value = chosen.value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         filledCount++;
-        reportFieldFilled(lbl, 'filled');
+        if (lbl) reportFieldFilled(lbl, 'filled');
       } else {
-        reportFieldFilled(lbl, 'failed');
+        if (lbl) reportFieldFilled(lbl, 'failed');
+      }
+    }
+
+    /* Fix selects that were wrongly filled (e.g. "80000" in a yes/no dropdown) */
+    for (const sel of allSelects.filter(el => el.value)) {
+      const lbl = getLabel(sel);
+      const l   = lbl.toLowerCase();
+      const curText = sel.options[sel.selectedIndex]?.text?.trim() || sel.value;
+      // If value looks like a raw number in a non-salary field, it's wrong
+      if (/^\d+$/.test(sel.value) && !/salary|compensation|pay\b|remun|expectation/i.test(l)) {
+        sel.value = '';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        // Re-trigger to fill correctly
+        const opts2 = $$('option', sel).filter(o => o.value && o.value !== '' && !/^select/i.test(o.text));
+        const hasYes = opts2.some(o => /^yes$/i.test(o.text.trim()));
+        if (hasYes) {
+          const yesOpt = opts2.find(o => /^yes$/i.test(o.text.trim())) ||
+                         opts2.find(o => /\byes\b/i.test(o.text));
+          if (yesOpt) {
+            sel.value = yesOpt.value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            if (lbl) reportFieldFilled(lbl, 'filled');
+          }
+        }
       }
     }
 
@@ -516,6 +737,9 @@
         responses: Object.keys(p).length,
       }).catch(() => {});
     } catch (_) {}
+
+    // Sanitize: fix any fields that got filled with wrong values (e.g. LinkedIn URL in non-URL fields)
+    await sanitizeBadFills();
 
     LOG(`autoFillPage: ${filledCount} of ${allFields.length} fields filled`);
   }
@@ -1010,7 +1234,7 @@
           LOG('LinkedIn: Easy Apply');
           realClick(easy);
           await sleep(1500);
-          await fillLinkedInModal();
+          await fillLinkedInModalFull();
         }
       } finally {
         setTimeout(() => { _linkedInActing = false; }, 3000);
@@ -1065,6 +1289,179 @@
     new MutationObserver(tryClick).observe(document.body, { childList: true, subtree: true });
   }
   handleHiringCafe();
+
+  /* ── Ashby autofill ──────────────────────────────────────── */
+  async function ashbyAutofill() {
+    if (CURRENT_ATS !== 'Ashby') return;
+    const p = await getProfile();
+    LOG('Ashby: filling');
+
+    // Ashby uses semantic input names and data attributes
+    const ASHBY_MAP = {
+      '_systemfield_name':      () => `${p.first_name||''} ${p.last_name||''}`.trim(),
+      '_systemfield_email':     () => p.email,
+      '_systemfield_phone':     () => p.phone,
+      '_systemfield_linkedin':  () => p.linkedin_profile_url,
+      '_systemfield_github':    () => p.github_url,
+      '_systemfield_website':   () => p.website_url,
+      '_systemfield_location':  () => `${p.city||''}, ${p.country||''}`.replace(/^, |, $/,''),
+    };
+    for (const [name, valFn] of Object.entries(ASHBY_MAP)) {
+      const el = $(`input[name="${name}"],textarea[name="${name}"]`);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        const v = valFn();
+        if (v) { el.focus(); nativeSet(el, v); await sleep(50); }
+      }
+    }
+
+    // Generic fallback for Ashby custom fields
+    await autoFillPage();
+    await sleep(500);
+
+    // Try to click continue/next on single-page Ashby forms
+    const submitBtn = $$('button[type="submit"],button').find(el =>
+      isVisible(el) && /submit|apply|send.*application/i.test(el.textContent)
+    );
+    if (submitBtn) { await sleep(400); realClick(submitBtn); }
+  }
+
+  /* ── BambooHR autofill ───────────────────────────────────── */
+  async function bambooAutofill() {
+    if (CURRENT_ATS !== 'BambooHR') return;
+    const p = await getProfile();
+    LOG('BambooHR: filling');
+
+    const BAMBOO_MAP = {
+      'firstName':     p.first_name,
+      'lastName':      p.last_name,
+      'email':         p.email,
+      'phone':         p.phone,
+      'address':       p.street,
+      'city':          p.city,
+      'state':         p.state,
+      'zip':           p.postal_code,
+      'country':       p.country,
+      'linkedInUrl':   p.linkedin_profile_url,
+      'websiteUrl':    p.website_url,
+      'coverLetter':   p.cover_letter || DEFAULTS.cover,
+    };
+    for (const [name, val] of Object.entries(BAMBOO_MAP)) {
+      if (!val) continue;
+      const el = $(`input[name="${name}"],textarea[name="${name}"],input[id*="${name}"],textarea[id*="${name}"]`);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        el.focus(); nativeSet(el, val); await sleep(50);
+      }
+    }
+    await autoFillPage();
+  }
+
+  /* ── Jobvite autofill ────────────────────────────────────── */
+  async function jobviteAutofill() {
+    if (CURRENT_ATS !== 'Jobvite') return;
+    const p = await getProfile();
+    LOG('Jobvite: filling');
+
+    const JOBVITE_MAP = [
+      ['input[id*="first"],input[name*="first"],input[placeholder*="First"]',  p.first_name],
+      ['input[id*="last"],input[name*="last"],input[placeholder*="Last"]',     p.last_name],
+      ['input[type="email"],input[id*="email"],input[name*="email"]',          p.email],
+      ['input[type="tel"],input[id*="phone"],input[name*="phone"]',            p.phone],
+      ['input[id*="city"],input[name*="city"]',                                p.city],
+      ['input[id*="linkedin"],input[name*="linkedin"]',                        p.linkedin_profile_url],
+      ['input[id*="website"],input[name*="website"]',                          p.website_url],
+      ['textarea[id*="cover"],textarea[name*="cover"]',                        p.cover_letter || DEFAULTS.cover],
+    ];
+    for (const [sel, val] of JOBVITE_MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await autoFillPage();
+  }
+
+  /* ── Improved LinkedIn Easy Apply (multi-step) ───────────── */
+  async function fillLinkedInModalFull() {
+    const modal = $('[data-test-modal],.jobs-easy-apply-modal,[aria-modal="true"]');
+    if (!modal) return;
+
+    let maxPages = 8; // guard against infinite loops
+    while (maxPages-- > 0) {
+      await sleep(800);
+      await autoFillPage();
+      await sleep(500);
+
+      // Look for next/continue button FIRST, submit last
+      const next = $$('button', modal).find(el =>
+        isVisible(el) && /next|continue/i.test(el.textContent)
+      );
+      if (next) { realClick(next); await sleep(1200); continue; }
+
+      const review = $$('button', modal).find(el =>
+        isVisible(el) && /review/i.test(el.textContent)
+      );
+      if (review) { realClick(review); await sleep(1200); continue; }
+
+      const submit = $$('button', modal).find(el =>
+        isVisible(el) && /submit|send application/i.test(el.textContent)
+      );
+      if (submit) { realClick(submit); break; }
+
+      break; // no recognisable button — stop
+    }
+  }
+
+  /* ── Lever autofill (targeted field IDs) ────────────────── */
+  async function leverAutofill() {
+    if (CURRENT_ATS !== 'Lever') return;
+    const p = await getProfile();
+    LOG('Lever: filling');
+
+    const LEVER_MAP = {
+      'name':        `${p.first_name||''} ${p.last_name||''}`.trim(),
+      'email':       p.email,
+      'phone':       p.phone,
+      'org':         p.current_company,
+      'urls[LinkedIn]': p.linkedin_profile_url,
+      'urls[GitHub]':   p.github_url,
+      'urls[Portfolio]':p.website_url,
+      'urls[Twitter]':  p.twitter_url,
+    };
+    for (const [name, val] of Object.entries(LEVER_MAP)) {
+      if (!val) continue;
+      const el = $(`input[name="${name}"],textarea[name="${name}"]`);
+      if (el && isVisible(el) && !el.value?.trim()) {
+        el.focus(); nativeSet(el, val); await sleep(60);
+      }
+    }
+
+    // Cover letter textarea
+    const cl = $$('textarea').find(el => isVisible(el) &&
+      /cover|motivation|additional/i.test(getLabel(el)));
+    if (cl && !cl.value?.trim()) {
+      nativeSet(cl, p.cover_letter || DEFAULTS.cover);
+    }
+
+    await autoFillPage();
+  }
+
+  /* ── waitForFormStable — wait until DOM stops changing ──────
+   * Waits up to `timeout` ms for the form to stop mutating, then
+   * resolves.  Prevents filling fields that are still being added
+   * by React / SPA routing.                                       */
+  function waitForFormStable(timeout = 3000) {
+    return new Promise(resolve => {
+      let timer = null;
+      const mo = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { mo.disconnect(); resolve(); }, 300);
+      });
+      mo.observe(document.body, { childList: true, subtree: true, attributes: false });
+      // Also resolve after max timeout regardless
+      setTimeout(() => { mo.disconnect(); resolve(); }, timeout);
+      // Kick off initial timer in case DOM is already stable
+      timer = setTimeout(() => { mo.disconnect(); resolve(); }, 300);
+    });
+  }
 
   /* ── T9: Deduplication ───────────────────────────────────── */
   function normalizeUrl(url) {
@@ -1139,6 +1536,26 @@
   }
   setInterval(processFreshness, 4000);
   processFreshness();
+
+  /* ── Shared ATS dispatch helper ─────────────────────────── */
+  async function runAtsAutofill() {
+    await waitForFormStable(2000);
+    switch (CURRENT_ATS) {
+      case 'Workday':          await workdayAutofill();  break;
+      case 'OracleCloud':      await oracleAutofill();   break;
+      case 'SmartRecruiters':  await srAutofill();       break;
+      case 'Greenhouse':       await greenhouseAutofill(); break;
+      case 'Ashby':            await ashbyAutofill();    break;
+      case 'BambooHR':         await bambooAutofill();   break;
+      case 'Jobvite':          await jobviteAutofill();  break;
+      case 'Lever':            await leverAutofill();    break;
+      default:                 await autoFillPage();     break;
+    }
+    // Generic pass after platform-specific (catches missed fields)
+    if (!['Ashby','BambooHR','Jobvite','Lever'].includes(CURRENT_ATS)) {
+      await autoFillPage();
+    }
+  }
 
   /* ── T19: CSV Auto-Apply bridge ─────────────────────────── */
   async function initCsvBridge(overrideJobId = null) {
@@ -1219,16 +1636,16 @@
       }).catch(() => {});
     } catch (_) {}
 
-    if (CURRENT_ATS === 'Workday')         await workdayAutofill();
-    else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
-    else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-    else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
-    await autoFillPage();
+    await waitForFormStable(3000);
+    await runAtsAutofill();
     await solveCaptcha();
 
+    // Run sanitize passes after OptimHire's own fill pipeline may have run
+    await sleep(800);  await sanitizeBadFills();
+    await sleep(1000); await sanitizeBadFills(); // second pass catches late fills
+
     // After all fields filled, try to find and click submit button
-    // This ensures the application is actually submitted
-    await sleep(1500);
+    await sleep(800);
     await tryClickSubmit();
   }
 
@@ -1314,12 +1731,8 @@
       (async () => {
         // Initialize the CSV bridge for this tab (passes jobId for multi-tab correctness)
         await initCsvBridge(msg.jobId || null);
-        // Also run ATS-specific autofill directly as a belt-and-suspenders measure
-        if (CURRENT_ATS === 'Workday')              await workdayAutofill();
-        else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
-        else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-        else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
-        await autoFillPage();
+        // Belt-and-suspenders ATS-specific autofill
+        await runAtsAutofill();
         await solveCaptcha();
         sendResponse({ ok: true });
       })();
@@ -1364,13 +1777,7 @@
   /* Run platform autofill in CSV mode */
   ST.get('csvActiveJobId').then(({ csvActiveJobId }) => {
     if (!csvActiveJobId) return;
-    sleep(2000).then(async () => {
-      if (CURRENT_ATS === 'Workday')         await workdayAutofill();
-      else if (CURRENT_ATS === 'OracleCloud')await oracleAutofill();
-      else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-      else if (CURRENT_ATS === 'Greenhouse') await greenhouseAutofill();
-      else await autoFillPage();
-    });
+    sleep(2000).then(() => runAtsAutofill());
   }).catch(() => {});
 
   /* ── AUTO-TRIGGER: Detect supported ATS pages and auto-fill ──────
@@ -1535,15 +1942,12 @@
     chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'analyzing_form', atsName: CURRENT_ATS, url: location.href }).catch(() => {});
 
     try {
-      /* ATS-specific autofill */
-      if (CURRENT_ATS === 'Workday')              await workdayAutofill();
-      else if (CURRENT_ATS === 'OracleCloud')     await oracleAutofill();
-      else if (CURRENT_ATS === 'SmartRecruiters') await srAutofill();
-      else if (CURRENT_ATS === 'Greenhouse')      await greenhouseAutofill();
-      /* LinkedIn/Lever/Ashby/others: generic fill covers them */
-
-      await autoFillPage();
+      /* ATS-specific autofill (all platforms via shared helper) */
+      await runAtsAutofill();
       await solveCaptcha();
+      // Extra sanitize passes — OptimHire may fill after us
+      await sleep(700);  await sanitizeBadFills();
+      await sleep(1000); await sanitizeBadFills();
 
       /* Remember */
       ohAutoFilledUrls.push(norm);
@@ -2032,5 +2436,5 @@
 
   })();
 
-  LOG(`v4.1 loaded | ${CURRENT_ATS || HOST}`);
+  LOG(`v4.2 loaded | ${CURRENT_ATS || HOST}`);
 })();
