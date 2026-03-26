@@ -1,5 +1,5 @@
 /**
- * OptimHire Comprehensive Patch v4.0
+ * OptimHire Comprehensive Patch v4.4
  * Covers ALL 19 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
@@ -21,7 +21,7 @@
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
  *
- * v4.2 fixes:
+ * v4.4 fixes:
  *   - autoSkipSeconds capped at 5s via sendMessage intercept (update-proof)
  *   - getProfile() reads ALL storage keys: candidateDetails, cachedSeekerInfo,
  *     seekerDetails, userDetails — merges nested .seeker sub-objects and
@@ -329,7 +329,7 @@
     gender:       'Prefer not to say',
     ethnicity:    'Prefer not to say',
     race:         'Prefer not to say',
-    years:        '5',
+    years:        '7',           // 7 years passes most "at least X years" knockout questions
     salary:       '80000',
     notice:       '2 weeks',
     availability: 'Immediately',
@@ -338,61 +338,90 @@
     howHeard: 'LinkedIn',
   };
 
+  // Experience-related label patterns — used in both guessValue and select handling
+  const EXP_LABEL_RE = /how.?many.?years|number.?of.?years|years.?of.?(professional\s+)?exp|years?.?(exp|experience|work(?:ing)?)|exp(?:erience)?.?in.?years|total.?years|years.?in.?(the\s+)?(?:field|industry|role|profession)|years.?with|years.?as|exp(?:erience)?.?(long|total|professional)|how.?long.?(have.?you|working)|professional.?exp|work.?exp|prior.?exp/i;
+
   function guessValue(label, p = {}, inputType = '') {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
     const fullName = `${p.first_name||''} ${p.last_name||''}`.trim();
 
     // Type-based direct fill (most reliable, survives label changes)
-    if (inputType === 'email') return p.email || '';
-    if (inputType === 'tel')   return p.phone || '';
+    if (inputType === 'email')  return p.email || '';
+    if (inputType === 'tel')    return p.phone || '';
+    if (inputType === 'number' && EXP_LABEL_RE.test(l))
+                                return p.years_experience || DEFAULTS.years;
 
-    if (/first.?name/.test(l))                           return p.first_name    || '';
-    if (/last.?name/.test(l))                            return p.last_name     || '';
-    if (/full.?name|your.?name/.test(l))                 return fullName;
-    // "Preferred Name" — use full name, NOT a URL
+    if (/first.?name/.test(l))                            return p.first_name    || '';
+    if (/last.?name/.test(l))                             return p.last_name     || '';
+    if (/full.?name|your.?name/.test(l))                  return fullName;
     if (/preferred.?name|display.?name|nickname/.test(l)) return fullName;
     if (/\bemail\b/.test(l))                              return p.email         || '';
     if (/phone|mobile|cell/.test(l))                      return p.phone         || '';
-    if (/^city$|city\b|current.?location|location.*city/.test(l)) return p.city || `${p.city||'Dublin'}, ${p.country||'Ireland'}`;
+    if (/^city$|city\b|current.?location|location.*city/.test(l))
+                                                          return p.city          || 'Dublin';
     if (/state|province/.test(l))                         return p.state         || '';
     if (/zip|postal/.test(l))                             return p.postal_code   || p.zip || '';
     if (/^country/.test(l))                               return p.country       || 'Ireland';
     if (/address/.test(l))                                return p.address       || p.street || '';
     if (/linkedin/.test(l))                               return p.linkedin_profile_url || '';
     if (/github/.test(l))                                 return p.github_url    || '';
-    if (/stack.*exchange|stackexchange|stack.*overflow|stackoverflow/.test(l)) return p.stackoverflow_url || '';
-    if (/twitter|x\.com|x handle/.test(l))               return p.twitter_url   || '';
+    if (/stack.*exchange|stackexchange|stack.*overflow|stackoverflow/.test(l))
+                                                          return p.stackoverflow_url || '';
+    if (/twitter|x\.com|x.?handle/.test(l))              return p.twitter_url   || '';
     if (/website|portfolio|personal.?site/.test(l))       return p.website_url   || '';
     if (/university|school|college|education/.test(l))    return p.school        || p.university || '';
     if (/\bdegree\b/.test(l))                             return p.degree        || "Bachelor's";
-    if (/major|field of study/.test(l))                   return p.major         || '';
-    if (/gpa/.test(l))                                    return p.gpa           || '';
-    if (/summary|bio|about|profile|introduce/.test(l))    return p.summary       || DEFAULTS.cover;
+    if (/major|field.?of.?study/.test(l))                 return p.major         || '';
+    if (/\bgpa\b/.test(l))                                return p.gpa           || '';
+    if (/summary|bio|about yourself|profile.*summary|introduce/.test(l))
+                                                          return p.summary       || DEFAULTS.cover;
+    if (/current.?title|current.?position|current.?role|job.?title/.test(l))
+                                                          return p.current_title || p.title || '';
     if (/title|position|role/.test(l))                    return p.current_title || p.title || '';
     if (/current.*company|most.*recent.*company|current.*employer|last.*company/.test(l))
                                                           return p.current_company || p.company || '';
-    if (/previously.*work|worked.*before|work.*for.*before/i.test(l)) return 'No';
+    if (/previously.?work|worked.?before|work.?for.?before|prior.?employ/.test(l))
+                                                          return 'No';
     if (/company|employer|current.*org/.test(l))          return p.current_company || p.company || '';
-    if (/please.*email.*future|email.*job.*opening|job.*alert|receive.*update/i.test(l)) return 'Yes';
-    if (/salary|compensation|pay\b|remun/.test(l))        return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation|additional.*info/.test(l)) return p.cover_letter || DEFAULTS.cover;
-    if (/why.*compan|why.*role|why.*interest|what.*excite/.test(l)) return DEFAULTS.why;
-    if (/how.*hear|where.*find|how.*you.*find|how.*discover|referr.*source/.test(l)) return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years|experience.*(long|total)/.test(l)) return p.years_experience || DEFAULTS.years;
+    if (/email.*future|job.*alert|receive.*update|notify.*me/.test(l)) return 'Yes';
+    if (/salary|compensation|pay\b|remun|ctc|lpa/.test(l))
+                                                          return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation|additional.*info|tell.?us.?more|anything.?else/.test(l))
+                                                          return p.cover_letter  || DEFAULTS.cover;
+    if (/why.*compan|why.*role|why.*interest|what.*excite|why.*apply/.test(l))
+                                                          return DEFAULTS.why;
+    if (/how.*hear|where.*find|how.*you.*find|how.*discover|referr.*source|source.*applic/.test(l))
+                                                          return DEFAULTS.howHeard;
+
+    // ── Experience ─────────────────────────────────────────────────────────
+    // Any question asking for a number of years → return 7 (our default)
+    // This covers text inputs, number inputs, and range dropdowns.
+    // The select handler will convert this to the closest range option.
+    if (EXP_LABEL_RE.test(l))                             return p.years_experience || DEFAULTS.years;
+
     if (/availab|start.?date|notice/.test(l))             return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right|right.*work|legally.*work/.test(l)) return DEFAULTS.authorized;
-    if (/require.*sponsor|need.*visa|visa.*sponsor|sponsor|future.*visa/.test(l)) return DEFAULTS.sponsorship;
-    if (/will.*sponsor|currently.*sponsor/.test(l))       return DEFAULTS.sponsorship;
+    if (/authoriz|eligible|work.*right|right.*work|legally.*work|permit.*work/.test(l))
+                                                          return DEFAULTS.authorized;
+    // Sponsorship patterns BEFORE the generic "do you" catch-all
+    if (/require.*sponsor|need.*visa|visa.*sponsor|future.*visa|work.*visa|need.*permit/i.test(l))
+                                                          return DEFAULTS.sponsorship;
+    if (/will.*sponsor|currently.*sponsor|immigration.*support/.test(l))
+                                                          return DEFAULTS.sponsorship;
     if (/relocat/.test(l))                                return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid|onsite|in.person/.test(l)) return DEFAULTS.remote;
+    if (/remote|work.*home|hybrid|onsite|in.?person/.test(l)) return DEFAULTS.remote;
     if (/veteran|military|protected/.test(l))             return DEFAULTS.veteran;
     if (/disabilit/.test(l))                              return DEFAULTS.disability;
     if (/gender|sex\b/.test(l))                           return DEFAULTS.gender;
     if (/ethnic|race|racial|hispanic|latino/.test(l))     return DEFAULTS.ethnicity;
-    if (/driver.?s.?licen|driving.?licen/.test(l))        return 'Yes';
-    if (/agree|accept|confirm|consent|certif/.test(l))    return 'Yes';
-    if (/willing|happy|open\s+to|comfortable|able\s+to/.test(l)) return 'Yes';
-    if (/do you have|have you|are you|can you|will you/.test(l)) return 'Yes';
+    if (/driver.?s?.?licen|driving.?licen/.test(l))       return 'Yes';
+    if (/certif|accredit/.test(l))                        return 'Yes';
+    if (/agree|accept|confirm|consent/.test(l))           return 'Yes';
+    if (/willing|happy|open\s+to|comfortable|able\s+to|prepared\s+to/.test(l))
+                                                          return 'Yes';
+    // Generic yes/no catch-all — only fires for truly unclassified questions.
+    // Intentionally comes AFTER all specific negative-answer patterns above.
+    if (/\bdo you\b|\bhave you\b|\bare you\b|\bcan you\b|\bwill you\b/.test(l))
+                                                          return 'Yes';
     return '';
   }
 
@@ -479,7 +508,10 @@
 
       // Fix raw numbers (e.g. "80000") in non-salary / non-experience fields
       if (/^\d+$/.test(val)) {
-        if (/salary|compensation|pay\b|remun|expectation|years.*exp|exp.*years/i.test(lbl)) continue;
+        // Leave numbers alone if the field expects a number (salary, years, quantity, age, etc.)
+        if (/salary|compensation|pay\b|remun|expectation|ctc|lpa/i.test(lbl)) continue;
+        if (EXP_LABEL_RE.test(lbl)) continue; // experience year fields
+        if (inputType === 'number') continue;  // any <input type=number>
         const correct = guessValue(lbl, p, inputType);
         if (correct && correct !== val && !/^\d+$/.test(correct)) {
           inp.focus(); nativeSet(inp, correct); await sleep(40);
@@ -647,8 +679,31 @@
         }
       }
 
-      // 3) Salary range: pick the band closest to expected salary
-      if (!chosen && /salary|compensation|pay\b|remun|expectation|range/i.test(l)) {
+      // 3a) Experience range: pick the bracket closest to our years value
+      if (!chosen && EXP_LABEL_RE.test(l)) {
+        const targetYears = parseInt((p.years_experience || DEFAULTS.years).toString()) || 7;
+        let bestDist = Infinity;
+        for (const o of opts) {
+          const nums = (o.text.match(/\d+/g) || []).map(Number).filter(Boolean);
+          if (!nums.length) {
+            // Text option like "Less than 1 year", "10+ years", "More than 10" etc.
+            if (/less.?than.?1|under.?1|none|no.?exp/i.test(o.text)) {
+              const dist = Math.abs(0 - targetYears);
+              if (dist < bestDist) { bestDist = dist; chosen = o; }
+            } else if (/10\+|more.?than.?10|over.?10|10\s*or\s*more|10\s*\+/i.test(o.text)) {
+              const dist = Math.abs(10 - targetYears);
+              if (dist < bestDist) { bestDist = dist; chosen = o; }
+            }
+            continue;
+          }
+          const mid  = nums.reduce((a, b) => a + b, 0) / nums.length;
+          const dist = Math.abs(mid - targetYears);
+          if (dist < bestDist) { bestDist = dist; chosen = o; }
+        }
+      }
+
+      // 3b) Salary range: pick the band closest to expected salary
+      if (!chosen && /salary|compensation|pay\b|remun|expectation|ctc|lpa/i.test(l)) {
         const target = parseInt((p.expected_salary || DEFAULTS.salary).toString().replace(/\D/g,'')) || 80000;
         let bestDist = Infinity;
         for (const o of opts) {
@@ -660,9 +715,9 @@
         }
       }
 
-      // 4) Boolean-looking options (True/False, Agree/Disagree, etc.)
+      // 4) Last resort: if still nothing and exactly 2 options, pick the first
       if (!chosen && opts.length === 2) {
-        chosen = opts[0]; // pick first non-empty option
+        chosen = opts[0];
       }
 
       if (chosen) {
@@ -680,8 +735,10 @@
       const lbl = getLabel(sel);
       const l   = lbl.toLowerCase();
       const curText = sel.options[sel.selectedIndex]?.text?.trim() || sel.value;
-      // If value looks like a raw number in a non-salary field, it's wrong
-      if (/^\d+$/.test(sel.value) && !/salary|compensation|pay\b|remun|expectation/i.test(l)) {
+      // If value looks like a raw number in a non-salary / non-experience field, it's wrong
+      if (/^\d+$/.test(sel.value) &&
+          !/salary|compensation|pay\b|remun|expectation|ctc|lpa/i.test(l) &&
+          !EXP_LABEL_RE.test(l)) {
         sel.value = '';
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         // Re-trigger to fill correctly
@@ -986,7 +1043,10 @@
 
       const profileKey = WD_FIELDS[aid];
       if (!profileKey) continue;
-      const val = p[profileKey];
+      // Use DEFAULTS fallback for known default-able fields
+      const val = p[profileKey]
+        || (profileKey === 'years_of_experience' ? DEFAULTS.years : null)
+        || (profileKey === 'expected_salary' ? DEFAULTS.salary : null);
       if (!val) continue;
 
       const input = $('input:not([type=hidden]):not([type=file]),textarea', el);
@@ -1572,9 +1632,12 @@
     LOG('CSV bridge active — monitoring for submission');
 
     let reported = false;
+    let _reportedStatus = '';
     const report = async (status, reason = '') => {
-      if (reported) return;
+      // Allow upgrading from 'failed' to 'done' if the application eventually succeeds
+      if (reported && !(_reportedStatus === 'failed' && status === 'done')) return;
       reported = true;
+      _reportedStatus = status;
       if (status === 'done') markApplied();
       await ST.set({
         [`csvJobResult_${csvActiveJobId}`]: { status, reason, ts: Date.now() },
@@ -1636,20 +1699,28 @@
       }).catch(() => {});
     } catch (_) {}
 
-    await waitForFormStable(3000);
-    await runAtsAutofill();
-    await solveCaptcha();
+    // Multi-step form handler: fills each step, navigates Next, then submits
+    await handleMultiStepCsvForm();
 
-    // Run sanitize passes after OptimHire's own fill pipeline may have run
-    await sleep(800);  await sanitizeBadFills();
-    await sleep(1000); await sanitizeBadFills(); // second pass catches late fills
-
-    // After all fields filled, try to find and click submit button
-    await sleep(800);
-    await tryClickSubmit();
+    // Extra sanitize pass after OptimHire's own fill pipeline may have run
+    await sleep(1000); await sanitizeBadFills();
   }
 
-  /** Find and click the submit / apply button to ensure the application is sent */
+  /** Find the Next/Continue step-navigation button (NOT a submit button) */
+  function getNextStepButton() {
+    return $$('button,a[role="button"]').filter(isVisible).find(btn => {
+      const t = (btn.textContent || '').trim();
+      return /^(next|continue)(\s+step)?(\s|$)/i.test(t) &&
+             !/cancel|back|prev|close|submit|apply/i.test(t.toLowerCase());
+    }) || null;
+  }
+
+  /**
+   * Find and click the FINAL submit/apply button.
+   * Never clicks Next / Continue navigation buttons — those belong to
+   * the multi-step loop in initCsvBridge / handleMultiStepCsvForm.
+   * Returns true if a submit button was found and clicked.
+   */
   async function tryClickSubmit() {
     // Check if autoSubmit is enabled in settings
     const { csvQueueSettings } = await ST.get('csvQueueSettings');
@@ -1657,83 +1728,145 @@
 
     if (!autoSubmit) {
       LOG('Auto-submit disabled — waiting for manual submit or timeout');
-      return;
+      return false;
     }
 
+    // Priority 1: Selector-based (most reliable, ATS-specific)
     const submitSelectors = [
-      'button[type="submit"]',
+      '#submit_app',                                                    // Greenhouse
+      '.postings-btn-submit',                                           // Lever
+      'button.application-submit',                                      // Lever
+      'button[data-qa="btn-submit"]',                                   // SmartRecruiters
+      'button[data-automation-id="pageFooterSubmitButton"]',            // Workday
+      'button[data-automation-id="bottom-navigation-submit-button"]',   // Workday
+      'button[data-automation-id="btnSubmit"]',                         // Workday
+      'button[aria-label*="Submit application"]',
+      'button[aria-label*="submit application"]',
       'input[type="submit"]',
-      'button[data-automation-id="bottom-navigation-next-button"]', // Workday
-      'button[data-automation-id="submit"]', // Workday submit
-      '#submit_app', // Greenhouse
-      '.postings-btn-submit', // Lever
-      'button.application-submit', // Lever
-      'button[data-qa="btn-submit"]', // SmartRecruiters
-      'button[aria-label*="Submit"]',
-      'button[aria-label*="submit"]',
     ];
 
-    // Look for visible submit-like buttons
     for (const sel of submitSelectors) {
       const btn = $(sel);
       if (btn && isVisible(btn)) {
-        LOG('Found submit button:', sel, btn.textContent?.trim());
-        try {
-          chrome.runtime.sendMessage({
-            type: 'SIDEBAR_STATUS', event: 'submitting',
-          }).catch(() => {});
-        } catch (_) {}
-        await sleep(500);
+        LOG('Found submit button via selector:', sel);
+        try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
+        await sleep(400);
         realClick(btn);
-        LOG('Clicked submit button');
-        return;
+        return true;
       }
     }
 
-    // Fallback: find button by text content
-    const buttons = $$('button,a[role="button"],input[type="submit"]').filter(isVisible);
+    // Priority 2: type="submit" buttons (catches most generic forms)
+    const typedSubmit = $$('button[type="submit"]').filter(isVisible).find(btn => {
+      const t = (btn.textContent || '').trim().toLowerCase();
+      return !/next|continue|back|prev|cancel|save.*draft/i.test(t);
+    });
+    if (typedSubmit) {
+      LOG('Found type=submit button:', typedSubmit.textContent?.trim());
+      try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
+      await sleep(400);
+      realClick(typedSubmit);
+      return true;
+    }
+
+    // Priority 3: Text-based fallback — NEVER matches next/continue (those are nav)
+    const buttons = $$('button,a[role="button"]').filter(isVisible);
     const submitBtn = buttons.find(btn => {
       const t = (btn.textContent || btn.value || '').trim().toLowerCase();
-      return /^(submit|apply|send|complete|finish|next|continue)(\s|$)/i.test(t) &&
-        !/cancel|back|prev|close/i.test(t);
+      return /^(submit application|submit|apply now|apply|send application|send|complete application|complete|finish)(\s+application)?(\s|$)/i.test(t) &&
+        !/cancel|back|prev|close|next|continue|save.*draft/i.test(t);
     });
 
     if (submitBtn) {
       LOG('Found submit button by text:', submitBtn.textContent?.trim());
-      try {
-        chrome.runtime.sendMessage({
-          type: 'SIDEBAR_STATUS', event: 'submitting',
-        }).catch(() => {});
-      } catch (_) {}
-      await sleep(500);
+      try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
+      await sleep(400);
       realClick(submitBtn);
-      LOG('Clicked submit button (text match)');
-    } else {
-      LOG('No submit button found — relying on OptimHire pipeline submit');
+      return true;
     }
+
+    LOG('No submit button found — relying on OptimHire pipeline submit');
+    return false;
   }
 
-  /* Run ATS-specific autofill on DOM changes (CSV mode) */
+  /**
+   * Multi-step form handler for CSV mode.
+   * Fills each page, clicks Next if available, repeats until Submit.
+   * Returns true if the form was submitted.
+   */
+  async function handleMultiStepCsvForm() {
+    let maxSteps = 12; // guard: max form steps
+    while (maxSteps-- > 0) {
+      await waitForFormStable(2000);
+      await runAtsAutofill();
+      await solveCaptcha();
+      await sleep(600); await sanitizeBadFills();
+
+      // Check for required fields still empty — log warning
+      const emptyRequired = $$(
+        'input[required]:not([type=hidden]):not([type=file]),input[aria-required="true"],' +
+        'select[required],select[aria-required="true"],textarea[required]'
+      ).filter(el => isVisible(el) && !el.value?.trim());
+      if (emptyRequired.length > 0) {
+        LOG(`Multi-step: ${emptyRequired.length} required fields still empty — retrying fill`);
+        await autoFillPage();
+        await sleep(400);
+      }
+
+      // Try Next/Continue step button first
+      const nextBtn = getNextStepButton();
+      if (nextBtn) {
+        LOG('Multi-step: clicking Next →', nextBtn.textContent?.trim());
+        realClick(nextBtn);
+        await sleep(1800); // wait for new step to render
+        continue;
+      }
+
+      // No Next button — attempt final submit
+      const submitted = await tryClickSubmit();
+      LOG('Multi-step: submit attempt result:', submitted);
+      return submitted;
+    }
+    LOG('Multi-step: step limit reached');
+    return false;
+  }
+
+  /* Run ATS-specific autofill on DOM changes (CSV mode).
+   * Also attempts submit/navigate after filling so multi-step forms
+   * don't stall on intermediate pages.                              */
   let _fillDebounce = null;
+  let _csvFillRunning = false;
   new MutationObserver(async () => {
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
     if (!csvActiveJobId) return;
+    if (_csvFillRunning) return;
     clearTimeout(_fillDebounce);
     _fillDebounce = setTimeout(async () => {
-      await autoFillPage();
-      await solveCaptcha();
-    }, 800);
+      if (_csvFillRunning) return;
+      _csvFillRunning = true;
+      try {
+        await autoFillPage();
+        await solveCaptcha();
+        await sanitizeBadFills();
+        // After filling, click Next or Submit if form is ready
+        const nextBtn = getNextStepButton();
+        if (nextBtn) {
+          realClick(nextBtn);
+        } else {
+          await tryClickSubmit();
+        }
+      } finally {
+        _csvFillRunning = false;
+      }
+    }, 1200);
   }).observe(document.body, { childList: true, subtree: false });
 
   /* Listen for messages from background/csvImport */
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'TRIGGER_AUTOFILL') {
       (async () => {
-        // Initialize the CSV bridge for this tab (passes jobId for multi-tab correctness)
+        // initCsvBridge already calls runAtsAutofill + handleMultiStepCsvForm internally
         await initCsvBridge(msg.jobId || null);
-        // Belt-and-suspenders ATS-specific autofill
-        await runAtsAutofill();
-        await solveCaptcha();
         sendResponse({ ok: true });
       })();
       return true;
@@ -1774,11 +1907,7 @@
     }
   });
 
-  /* Run platform autofill in CSV mode */
-  ST.get('csvActiveJobId').then(({ csvActiveJobId }) => {
-    if (!csvActiveJobId) return;
-    sleep(2000).then(() => runAtsAutofill());
-  }).catch(() => {});
+  /* Removed duplicate runAtsAutofill trigger — initCsvBridge handles CSV mode */
 
   /* ── AUTO-TRIGGER: Detect supported ATS pages and auto-fill ──────
    * Like SmartApply's "Autofill in progress" — when the user lands
