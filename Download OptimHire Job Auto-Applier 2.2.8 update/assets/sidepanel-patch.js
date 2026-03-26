@@ -183,6 +183,25 @@
     });
   }
 
+  /* ── Auto-skip timer cap: intercept incoming AUTO_APPLY_STATE_UPDATE ────
+   * Cap autoSkipSeconds at 5 so the "Auto skip in X Sec." countdown never
+   * exceeds 5 seconds, regardless of what the background sends.
+   * This survives OptimHire updates because we override the message listener. */
+  const AUTO_SKIP_MAX = 5;
+  (function patchOnMessage() {
+    const _origAddListener = chrome.runtime.onMessage.addListener.bind(chrome.runtime.onMessage);
+    chrome.runtime.onMessage.addListener = function (listener) {
+      return _origAddListener(function (msg, sender, sendResponse) {
+        if (msg && msg.type === 'AUTO_APPLY_STATE_UPDATE' &&
+            typeof msg.autoSkipSeconds === 'number' &&
+            msg.autoSkipSeconds > AUTO_SKIP_MAX) {
+          msg = Object.assign({}, msg, { autoSkipSeconds: AUTO_SKIP_MAX });
+        }
+        return listener(msg, sender, sendResponse);
+      });
+    };
+  })();
+
   /* ── Message listener — receives status from background / content scripts ── */
   chrome.runtime.onMessage.addListener(function (msg) {
     if (!msg || !msg.type) return;

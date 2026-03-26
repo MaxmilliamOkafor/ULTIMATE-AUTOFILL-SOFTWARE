@@ -21,13 +21,16 @@
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
  *
- * v4.0 fixes:
+ * v4.1 fixes:
+ *   - autoSkipSeconds capped at 5s via sendMessage intercept (update-proof)
+ *   - getProfile() reads ALL storage keys: candidateDetails, cachedSeekerInfo,
+ *     seekerDetails, userDetails — merges nested .seeker sub-objects and
+ *     normalises email/phone/linkedin field name variants
+ *   - guessValue() now accepts inputType arg; fills email/tel by type directly
+ *   - "Preferred Name" now fills with full name (not LinkedIn URL)
+ *   - Country default changed to Ireland
  *   - AudioContext fallback REMOVED (caused "not allowed to start" errors)
- *   - autoSkipDuration patched to 30s (was 5s — caused premature skips)
  *   - Workday: full SpeedyApply data-automation-id coverage
- *   - Workday account creation flow (uses appAccountEmail/appAccountPassword)
- *   - Greenhouse: robust field detection for required fields
- *   - Null-safe autoApplyState guard
  *   - CSP-safe: no inline event handlers
  */
 (function () {
@@ -112,6 +115,25 @@
     : _rawATS;
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
+
+  /* ── Auto-skip cap: patch any global OPTIMHIRE_CONFIG object ───────────
+   * The autofill script (autofill.73df3a6d.js) exposes its config as a
+   * module-internal object. We intercept chrome.runtime.sendMessage here
+   * so any AUTO_APPLY_STATE_UPDATE with autoSkipSeconds > 5 is clamped.   */
+  const AUTO_SKIP_MAX_SECONDS = 5;
+  (function capAutoSkipOnSend() {
+    const _orig = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = function (msg, ...args) {
+      try {
+        if (msg && msg.type === 'AUTO_APPLY_STATE_UPDATE' &&
+            typeof msg.autoSkipSeconds === 'number' &&
+            msg.autoSkipSeconds > AUTO_SKIP_MAX_SECONDS) {
+          msg = { ...msg, autoSkipSeconds: AUTO_SKIP_MAX_SECONDS };
+        }
+      } catch (_) {}
+      return _orig(msg, ...args);
+    };
+  })();
 
   /* ── T2: Credits never run out ──────────────────────────── */
   const CREDIT_FIELDS = [
@@ -225,12 +247,39 @@
 
   /* ── Profile helper ─────────────────────────────────────── */
   async function getProfile() {
-    const { candidateDetails } = await ST.get('candidateDetails');
-    try {
-      return typeof candidateDetails === 'string'
-        ? JSON.parse(candidateDetails)
-        : (candidateDetails || {});
-    } catch (_) { return {}; }
+    const keys = ['candidateDetails', 'cachedSeekerInfo', 'seekerDetails', 'userDetails'];
+    const data = await ST.get(keys);
+    let merged = {};
+
+    // Parse and merge all available profile sources
+    for (const key of keys) {
+      if (!data[key]) continue;
+      try {
+        const parsed = typeof data[key] === 'string' ? JSON.parse(data[key]) : data[key];
+        if (parsed && typeof parsed === 'object') {
+          Object.assign(merged, parsed);
+          // Also flatten a nested .seeker sub-object
+          if (parsed.seeker && typeof parsed.seeker === 'object') {
+            Object.assign(merged, parsed.seeker);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Normalise common field name variants so guessValue() always finds them
+    const pick = (...keys) => { for (const k of keys) if (merged[k]) return merged[k]; return ''; };
+    merged.email    = pick('email', 'email_address', 'emailAddress', 'Email');
+    merged.phone    = pick('phone', 'phone_number', 'phoneNumber', 'mobile', 'cell', 'Phone');
+    merged.first_name = pick('first_name', 'firstName', 'given_name', 'givenName');
+    merged.last_name  = pick('last_name',  'lastName',  'family_name','familyName', 'surname');
+    merged.linkedin_profile_url = pick('linkedin_profile_url','linkedin_url','linkedinUrl','linkedin','LinkedIn');
+    merged.github_url  = pick('github_url',  'github',  'githubUrl',  'GitHub');
+    merged.website_url = pick('website_url', 'website', 'websiteUrl', 'portfolio', 'portfolioUrl');
+    merged.city        = pick('city', 'location_city', 'locationCity');
+    merged.state       = pick('state', 'location_state', 'locationState');
+    merged.country     = pick('country', 'location_country', 'locationCountry');
+    merged.postal_code = pick('postal_code', 'zip', 'postalCode', 'zipCode');
+    return merged;
   }
 
   /* ── Applications Account helper ────────────────────────── */
@@ -280,41 +329,49 @@
     howHeard: 'LinkedIn',
   };
 
-  function guessValue(label, p = {}) {
+  function guessValue(label, p = {}, inputType = '') {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
-    if (/first.?name/.test(l))              return p.first_name    || p.firstName   || '';
-    if (/last.?name/.test(l))               return p.last_name     || p.lastName    || '';
-    if (/full.?name|your name/.test(l))     return `${p.first_name||''} ${p.last_name||''}`.trim();
-    if (/\bemail\b/.test(l))                return p.email         || '';
-    if (/phone|mobile|cell/.test(l))        return p.phone         || '';
-    if (/^city$|city\b/.test(l))            return p.city          || '';
-    if (/state|province/.test(l))           return p.state         || '';
-    if (/zip|postal/.test(l))               return p.postal_code   || p.zip || '';
-    if (/country/.test(l))                  return p.country       || 'United States';
-    if (/address/.test(l))                  return p.address       || '';
-    if (/linkedin/.test(l))                 return p.linkedin_profile_url || p.linkedin || '';
-    if (/github/.test(l))                   return p.github_url    || p.github || '';
-    if (/website|portfolio/.test(l))        return p.website_url   || p.website || '';
-    if (/university|school|college/.test(l))return p.school        || p.university || '';
-    if (/\bdegree\b/.test(l))               return p.degree        || "Bachelor's";
-    if (/major|field of study/.test(l))     return p.major         || '';
-    if (/gpa/.test(l))                      return p.gpa           || '';
-    if (/title|position|role/.test(l))      return p.current_title || p.title || '';
-    if (/company|employer|org/.test(l))     return p.current_company || p.company || '';
-    if (/salary|compensation|pay/.test(l))  return p.expected_salary || DEFAULTS.salary;
-    if (/cover.?letter|motivation/.test(l)) return p.cover_letter  || DEFAULTS.cover;
-    if (/why.*compan|why.*role/.test(l))    return DEFAULTS.why;
-    if (/how.*hear|where.*find/.test(l))    return DEFAULTS.howHeard;
-    if (/years.*(exp|work)|exp.*years/.test(l)) return DEFAULTS.years;
-    if (/availab|start date|notice/.test(l))return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right/.test(l)) return DEFAULTS.authorized;
-    if (/sponsor|visa/.test(l))             return DEFAULTS.sponsorship;
-    if (/relocat/.test(l))                  return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military/.test(l))         return DEFAULTS.veteran;
-    if (/disabilit/.test(l))                return DEFAULTS.disability;
-    if (/gender|sex\b/.test(l))             return DEFAULTS.gender;
-    if (/ethnic|race|racial/.test(l))       return DEFAULTS.ethnicity;
+    const fullName = `${p.first_name||''} ${p.last_name||''}`.trim();
+
+    // Type-based direct fill (most reliable, survives label changes)
+    if (inputType === 'email') return p.email || '';
+    if (inputType === 'tel')   return p.phone || '';
+
+    if (/first.?name/.test(l))                           return p.first_name    || '';
+    if (/last.?name/.test(l))                            return p.last_name     || '';
+    if (/full.?name|your.?name/.test(l))                 return fullName;
+    // "Preferred Name" — use full name, NOT a URL
+    if (/preferred.?name|display.?name|nickname/.test(l)) return fullName;
+    if (/\bemail\b/.test(l))                              return p.email         || '';
+    if (/phone|mobile|cell/.test(l))                      return p.phone         || '';
+    if (/^city$|city\b/.test(l))                          return p.city          || '';
+    if (/state|province/.test(l))                         return p.state         || '';
+    if (/zip|postal/.test(l))                             return p.postal_code   || p.zip || '';
+    if (/country/.test(l))                                return p.country       || 'Ireland';
+    if (/address/.test(l))                                return p.address       || '';
+    if (/linkedin/.test(l))                               return p.linkedin_profile_url || '';
+    if (/github/.test(l))                                 return p.github_url    || '';
+    if (/website|portfolio/.test(l))                      return p.website_url   || '';
+    if (/university|school|college/.test(l))              return p.school        || p.university || '';
+    if (/\bdegree\b/.test(l))                             return p.degree        || "Bachelor's";
+    if (/major|field of study/.test(l))                   return p.major         || '';
+    if (/gpa/.test(l))                                    return p.gpa           || '';
+    if (/title|position|role/.test(l))                    return p.current_title || p.title || '';
+    if (/company|employer|org/.test(l))                   return p.current_company || p.company || '';
+    if (/salary|compensation|pay/.test(l))                return p.expected_salary || DEFAULTS.salary;
+    if (/cover.?letter|motivation/.test(l))               return p.cover_letter  || DEFAULTS.cover;
+    if (/why.*compan|why.*role/.test(l))                  return DEFAULTS.why;
+    if (/how.*hear|where.*find|how.*you.*find/.test(l))   return DEFAULTS.howHeard;
+    if (/years.*(exp|work)|exp.*years/.test(l))           return DEFAULTS.years;
+    if (/availab|start.?date|notice/.test(l))             return DEFAULTS.availability;
+    if (/authoriz|eligible|work.*right|right.*work/.test(l)) return DEFAULTS.authorized;
+    if (/sponsor|visa/.test(l))                           return DEFAULTS.sponsorship;
+    if (/relocat/.test(l))                                return DEFAULTS.relocation;
+    if (/remote|work.*home|hybrid/.test(l))               return DEFAULTS.remote;
+    if (/veteran|military/.test(l))                       return DEFAULTS.veteran;
+    if (/disabilit/.test(l))                              return DEFAULTS.disability;
+    if (/gender|sex\b/.test(l))                           return DEFAULTS.gender;
+    if (/ethnic|race|racial/.test(l))                     return DEFAULTS.ethnicity;
     return '';
   }
 
@@ -385,16 +442,17 @@
 
     for (const inp of inputs) {
       const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessValue(lbl, p);
+      const inputType = (inp.type || '').toLowerCase();
+      if (!lbl && !inputType) continue;
+      const val = guessValue(lbl || '', p, inputType);
       if (!val) {
-        reportFieldFilled(lbl, 'failed');
+        if (lbl) reportFieldFilled(lbl, 'failed');
         continue;
       }
       inp.focus();
       nativeSet(inp, val);
       filledCount++;
-      reportFieldFilled(lbl, 'filled');
+      if (lbl) reportFieldFilled(lbl, 'filled');
       await sleep(60);
     }
 
@@ -1974,5 +2032,5 @@
 
   })();
 
-  LOG(`v4.0 loaded | ${CURRENT_ATS || HOST}`);
+  LOG(`v4.1 loaded | ${CURRENT_ATS || HOST}`);
 })();
