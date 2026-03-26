@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <link rel="stylesheet" href="/tabs/missingDetails.df89bfed.css">
+  <title>OptimHire Job Auto-Applier</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Hide referral / affiliate section in sidepanel */
+    [class*="referral"],
+    [class*="Referral"],
+    [id*="referral"],
+    [data-testid*="referral"],
+    [class*="affiliate"],
+    .referral-section,
+    .referral-card,
+    .referral-banner,
+    [class*="earnCredit"],
+    [class*="inviteFriend"],
+    [class*="invite-friend"],
+    [class*="ReferralScreen"] {
+      display: none !important
+    }
+
+    /* ── Bottom toolbar ── */
+    .oh-bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 99999;
+      background: #0f1117;
+      border-top: 1px solid #2d2f3a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 12px;
+      color: #e2e8f0;
+    }
+
+    /* CSV import section (collapsible) */
+    .csv-section {
+      display: none;
+      padding: 12px 14px;
+      border-bottom: 1px solid #1e2030
+    }
+
+    .csv-section.open {
+      display: block
+    }
+
+    .csv-section textarea {
+      width: 100%;
+      height: 80px;
+      background: #1a1e2e;
+      border: 1px solid #2d2f3a;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 11px;
+      padding: 8px;
+      resize: vertical;
+      font-family: monospace;
+    }
+
+    .csv-section textarea::placeholder {
+      color: #4b5563
+    }
+
+    .csv-section textarea:focus {
+      outline: none;
+      border-color: #6366f1
+    }
+
+    .csv-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+      align-items: center
+    }
+
+    .csv-file-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 10px;
+      background: rgba(99, 102, 241, .15);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, .25);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: background .15s;
+    }
+
+    .csv-file-label:hover {
+      background: rgba(99, 102, 241, .25)
+    }
+
+    .csv-file-input {
+      display: none
+    }
+
+    .csv-start-btn {
+      flex: 1;
+      padding: 7px 0;
+      border: none;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .csv-start-btn:hover {
+      box-shadow: 0 2px 10px rgba(99, 102, 241, .4);
+      transform: translateY(-1px)
+    }
+
+    .csv-start-btn:active {
+      transform: scale(.97)
+    }
+
+    .csv-start-btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none
+    }
+
+    .csv-counter {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 6px
+    }
+
+    .csv-counter b {
+      color: #a78bfa
+    }
+
+    /* Toggle row */
+    .oh-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 14px;
+    }
+
+    .oh-toggle-label {
+      font-size: 11px;
+      color: #6b7280
+    }
+
+    .oh-toggle {
+      position: relative;
+      width: 32px;
+      height: 18px;
+      background: #374151;
+      border-radius: 9px;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      transition: background .2s;
+    }
+
+    .oh-toggle.active {
+      background: #6366f1
+    }
+
+    .oh-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .2s;
+    }
+
+    .oh-toggle.active::after {
+      transform: translateX(14px)
+    }
+
+    /* CSV toggle button (header) */
+    .csv-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid #1e2030;
+    }
+
+    .csv-header:hover {
+      background: rgba(99, 102, 241, .05)
+    }
+
+    .csv-header-left {
+      display: flex;
+      align-items: center;
+      gap: 6px
+    }
+
+    .csv-header-icon {
+      font-size: 13px
+    }
+
+    .csv-header-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #a5b4fc
+    }
+
+    .csv-header-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: #4ade80;
+      background: rgba(74, 222, 128, .12);
+      padding: 1px 7px;
+      border-radius: 10px;
+    }
+
+    .csv-header-arrow {
+      font-size: 10px;
+      color: #6b7280;
+      transition: transform .2s
+    }
+
+    .csv-header.expanded .csv-header-arrow {
+      transform: rotate(180deg)
+    }
+
+    /* Auto-skip countdown banner */
+    .oh-skip-banner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 999999;
+      padding: 10px 16px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
+      animation: ohSkipPulse 1s ease-in-out infinite;
+    }
+
+    .oh-skip-banner.visible {
+      display: block
+    }
+
+    .oh-skip-banner .oh-skip-seconds {
+      display: inline-block;
+      min-width: 18px;
+      font-size: 18px;
+      font-weight: 900;
+      margin: 0 4px;
+    }
+
+    @keyframes ohSkipPulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.85
+      }
+    }
+
+    /* Application Account settings */
+    .oh-account-section {
+      padding: 8px 14px;
+      border-bottom: 1px solid #1e2030;
+    }
+
+    .oh-account-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #a5b4fc;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .oh-account-desc {
+      font-size: 9.5px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .oh-account-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .oh-account-input {
+      flex: 1;
+      padding: 5px 8px;
+      background: #1a1e2e;
+      border: 1px solid #2d2f3a;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .oh-account-input:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    .oh-account-input::placeholder {
+      color: #4b5563;
+    }
+
+    .oh-account-saved {
+      font-size: 9px;
+      color: #4ade80;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .oh-account-saved.show {
+      opacity: 1
+    }
+
+    .oh-account-pw-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .oh-pw-toggle {
+      background: none;
+      border: 1px solid #2d2f3a;
+      border-radius: 6px;
+      color: #6b7280;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px 7px;
+      line-height: 1;
+      transition: color .15s, border-color .15s;
+    }
+
+    .oh-pw-toggle:hover {
+      color: #a5b4fc;
+      border-color: #6366f1;
+    }
+
+    .oh-account-save-btn {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      padding: 5px 0;
+      border: none;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .oh-account-save-btn:hover {
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .oh-account-save-btn:active {
+      transform: scale(.97);
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Auto-skip countdown banner (shown after successful submission) -->
+  <div class="oh-skip-banner" id="ohAutoSkipBanner" data-oh-patch>
+    ✅ Application submitted! Auto skip in <span class="oh-skip-seconds" id="ohSkipSeconds">5</span>s...
+  </div>
+
+  <div id="__plasmo"></div>
+  <script src="/sidepanel.b7741352.js" defer></script>
+
+  <!-- ═══ Bottom Bar: CSV Import + App Account + Toggle ═══ -->
+  <div class="oh-bottom-bar">
+    <!-- CSV toggle header -->
+    <div class="csv-header" id="csvToggleHeader">
+      <div class="csv-header-left">
+        <span class="csv-header-icon">📋</span>
+        <span class="csv-header-title">Import Job URLs</span>
+        <span class="csv-header-badge" id="csvBadge" style="display:none">0 queued</span>
+      </div>
+      <span class="csv-header-arrow" id="csvArrow">▼</span>
+    </div>
+
+    <!-- CSV import section (hidden by default) -->
+    <div class="csv-section" id="csvSection">
+      <textarea id="csvUrls"
+        placeholder="Paste job URLs here, one per line...&#10;https://jobs.lever.co/company/12345&#10;https://boards.greenhouse.io/company/jobs/67890"></textarea>
+      <div class="csv-row">
+        <label class="csv-file-label">
+          📄 CSV File
+          <input type="file" accept=".csv,.txt" class="csv-file-input" id="csvFileInput">
+        </label>
+        <button class="csv-start-btn" id="csvStartBtn">⚡ Add to Queue &amp; Start</button>
+      </div>
+      <div class="csv-counter" id="csvStatus"></div>
+
+      <!-- Queued jobs list -->
+      <div id="csvJobList" style="margin-top:8px;max-height:200px;overflow-y:auto;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;cursor:pointer">
+            <input type="checkbox" id="csvSelectAll" style="accent-color:#6366f1"> Select All
+          </label>
+          <button id="csvDeleteSelected"
+            style="font-size:10px;padding:2px 8px;background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;display:none">🗑
+            Delete Selected</button>
+        </div>
+        <div id="csvJobItems"></div>
+      </div>
+    </div>
+
+    <!-- Applications Account settings -->
+    <div class="oh-account-section">
+      <div class="oh-account-title">🔑 Applications Account <span class="oh-account-saved" id="ohAcctSaved">✓
+          Saved</span></div>
+      <div class="oh-account-desc">This password will be used to create new accounts on application sites. This is not a
+        secure practice but can be used to improve speed and efficiency when filling applications.</div>
+      <div class="oh-account-row">
+        <input type="email" class="oh-account-input" id="ohAcctEmail" placeholder="Email for application accounts">
+      </div>
+      <div class="oh-account-row oh-account-pw-row">
+        <input type="password" class="oh-account-input" id="ohAcctPassword"
+          placeholder="Password for application accounts">
+        <button type="button" class="oh-pw-toggle" id="ohPwToggle" title="Show/Hide password">👁</button>
+      </div>
+      <button type="button" class="oh-account-save-btn" id="ohAcctSaveBtn">💾 Save Credentials</button>
+    </div>
+
+    <!-- Auto-trigger toggle -->
+    <div class="oh-toggle-row">
+      <span class="oh-toggle-label">Auto-fill on supported ATS pages</span>
+      <button class="oh-toggle active" id="oh-auto-trigger-toggle"></button>
+    </div>
+  </div>
+
+  <!-- CSP-safe: all JS in external file -->
+  <script src="/assets/sidepanel-patch.js" defer></script>
+</body>
+
+</html>
