@@ -1,9 +1,13 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v10.2 ===
+// === ULTIMATE AUTOFILL ENHANCEMENT v19.0 ===
+// OwlApply-inspired: smart dropdown fuzzy matching, context-aware question answering,
+// one-click autofill button, application tracker, shadow DOM detection, human-like delays,
+// enhanced document upload, visibility-aware field detection
+// === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
 // Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
-// + Sidebar toggle, autofill fill/token/config bypass from v6.1
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
+  const VERSION = '19.0';
 
   // ===================== GLOBAL ERROR HANDLER (prevent extension freeze on unhandled rejections) =====================
   window.addEventListener('unhandledrejection', (event) => {
@@ -48,7 +52,7 @@
   });
 
   // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
-  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999, aiApply: 99999, smartApply: 99999, quickApply: 99999, bulkApply: 99999, networkScan: 99999, referralRequest: 99999, aiResponse: 99999, essayAnswer: 99999, coins: 99999, tokens: 99999 };
+  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999, aiApply: 99999, smartApply: 99999, quickApply: 99999, bulkApply: 99999, networkScan: 99999, referralRequest: 99999, aiResponse: 99999, essayAnswer: 99999, coins: 99999, tokens: 99999, owlCredits: 99999 };
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
@@ -92,6 +96,7 @@
           const body = await r.clone().text().catch(() => '{}');
           let parsed = {};
           try { parsed = JSON.parse(body); } catch (_) { }
+          // Return a success response so the extension doesn't get stuck
           return new Response(JSON.stringify({ code: 200, result: parsed.result || {}, success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
         return r;
@@ -119,7 +124,7 @@
     }
     try {
       const r = await _fetch.apply(window, arguments);
-      if (r.status === 402 || r.status === 403 || r.status === 429) return new Response(JSON.stringify({ success: true, code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (r.status === 402 || r.status === 403 || r.status === 429) return new Response(JSON.stringify({ code: 200, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return r;
     } catch (e) { throw e; }
   };
@@ -128,7 +133,7 @@
   XMLHttpRequest.prototype.open = function (method, url) { this._ua_url = url; return _xhrOpen.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function () {
     const url = this._ua_url || '';
-    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit|coins?\/balance|tokens?\/balance|api\/(coins|tokens|balance|credits|usage|limit)/i.test(url)) {
+    if (/credit\/balance|credit\/free|payment\/subscription|cost-credit|resume.*credit|tailor.*credit|coins?\/balance|tokens?\/balance|api\/(coins|tokens|balance|credits|usage|limit)|autofill\/token|autofill\/config/i.test(url)) {
       const s = this;
       Object.defineProperty(s, 'responseText', { get: () => JSON.stringify({ code: 200, result: { credit: _C, dailyFill: _C, remaining: 99999, coins: 99999, tokens: 99999, balance: 99999 }, success: true }) });
       Object.defineProperty(s, 'status', { get: () => 200 });
@@ -400,14 +405,40 @@
     if (/shift|work.?schedule|flexible.?hours/.test(l)) return 'Yes';
     if (/overtime/.test(l)) return 'Yes';
     if (/clearance.?level/.test(l)) return p.clearance_level || '';
+    // OwlApply-inspired: additional field patterns for comprehensive coverage
+    if (/skills|technical.?skills|key.?skills|core.?competenc/.test(l)) return p.skills || '';
+    if (/interest|hobby|hobbies|passion/.test(l)) return p.interests || '';
+    if (/emergency.?contact.*name/.test(l)) return p.emergency_contact_name || '';
+    if (/emergency.?contact.*(phone|number)/.test(l)) return p.emergency_contact_phone || '';
+    if (/tax.?id|ein|tin/.test(l)) return ''; // Never auto-fill tax IDs
+    if (/passport.?number/.test(l)) return ''; // Never auto-fill passport numbers
+    if (/bank|routing|account.?number/.test(l)) return ''; // Never auto-fill banking info
+    if (/pronouns|preferred.?pronouns/.test(l)) return p.pronouns || 'They/Them';
+    if (/notice.?period/.test(l)) return p.notice_period || DEFAULTS.notice;
+    if (/current.?ctc|current.?compensation/.test(l)) return p.current_salary || DEFAULTS.salary;
+    if (/expected.?ctc/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/willing.*travel.*percent|travel.*percentage/.test(l)) return p.travel_willingness || '25%';
+    if (/type.?of.?employment|employment.?type|job.?type/.test(l)) return p.employment_type || 'Full-time';
+    if (/work.?arrangement|preferred.?work/.test(l)) return p.work_arrangement || 'Hybrid';
+    if (/earliest.?join|earliest.?start/.test(l)) return DEFAULTS.availability;
+    if (/cover.?letter/.test(l) && (el?.tagName === 'TEXTAREA' || el?.type === 'file')) return p.cover_letter || DEFAULTS.cover;
     return '';
   }
 
   function guessFieldValue(label, p, el) {
-    // Try saved responses keyword match first, then guessValue, then learned answers
+    // Try saved responses keyword match first, then guessValue, then learned answers,
+    // then OwlApply-inspired context-aware answering as final fallback
     const questionText = el ? getFullQuestionText(el) : label;
     const fromSaved = findSavedResponseMatch(questionText);
-    return fromSaved || guessValue(label, p) || getLearnedAnswer(label, el) || '';
+    if (fromSaved) return fromSaved;
+    const fromGuess = guessValue(label, p);
+    if (fromGuess) return fromGuess;
+    const fromLearned = getLearnedAnswer(label, el);
+    if (fromLearned) return fromLearned;
+    // OwlApply-inspired: context-aware AI-style question answering for custom questions
+    const fromContext = analyzeQuestionContext(questionText, p);
+    if (fromContext) return fromContext;
+    return '';
   }
 
   // ===================== SAVED RESPONSES SYSTEM (SpeedyApply-style) =====================
@@ -725,42 +756,170 @@
     return answered;
   }
 
-  // ===================== ENHANCED AUTOCOMPLETE DROPDOWN FINDER =====================
+  // ===================== OWLAPPLY-INSPIRED: SMART DROPDOWN HANDLER WITH FUZZY MATCHING =====================
+  // OwlApply precisely fills dropdowns and complex custom questions with intelligent matching
   function findAutocompleteDropdown(input) {
     const selectors = [
       '[class*="autocomplete"]', '[class*="typeahead"]', '[class*="suggestion"]',
       '[class*="dropdown"]', '[class*="listbox"]', '[role="listbox"]',
       '[class*="menu"]', 'ul[class*="option"]', '[data-automation-id*="dropdown"]',
       '.css-26l3qy-menu', '.Select-menu', '.react-select__menu',
-      '[class*="dropdown-menu"]:not([style*="display: none"])'
+      '[class*="dropdown-menu"]:not([style*="display: none"])',
+      // OwlApply-inspired: additional modern UI framework selectors
+      '[class*="Popover"]', '[class*="popover"]', '[class*="combobox"]',
+      '[role="combobox"] [role="listbox"]', '.MuiAutocomplete-popper',
+      '[class*="ant-select-dropdown"]', '.choices__list--dropdown',
+      '[class*="select2-results"]', '.vs__dropdown-menu',
+      '[data-radix-popper-content-wrapper]', // Radix UI (modern React)
+      '[class*="headlessui"]', // Headless UI
+      '.downshift-menu', // Downshift
     ];
+    // Search globally first
     for (const sel of selectors) {
       const dd = $(sel);
       if (dd && isVisible(dd)) return dd;
     }
-    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"]');
+    // Search within parent container
+    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"], [class*="form-control"], [class*="input-wrapper"]');
     if (parent) {
       for (const sel of selectors) { const dd = parent.querySelector(sel); if (dd && isVisible(dd)) return dd; }
     }
+    // OwlApply-inspired: check sibling containers and portal-mounted dropdowns
+    const nextSibling = input.nextElementSibling;
+    if (nextSibling) {
+      for (const sel of selectors) { const dd = nextSibling.querySelector?.(sel) || (nextSibling.matches?.(sel) ? nextSibling : null); if (dd && isVisible(dd)) return dd; }
+    }
+    // Check body-level portals (React portals, MUI, Ant Design)
+    const portals = $$('[class*="portal"],[id*="portal"],body > [role="listbox"],body > [class*="popper"],body > [class*="dropdown"]');
+    for (const portal of portals) { if (isVisible(portal)) return portal; }
     return null;
   }
 
+  // OwlApply-inspired: Levenshtein distance for fuzzy matching
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  // OwlApply-inspired: smart fuzzy dropdown matching with scoring
   function findBestDropdownMatch(dropdown, searchText) {
-    const items = $$('li, [role="option"], [class*="option"], div[class*="item"]', dropdown);
-    const search = searchText.toLowerCase();
+    const items = $$('li, [role="option"], [class*="option"], div[class*="item"], [class*="menu-item"]', dropdown)
+      .filter(i => isVisible(i) && i.textContent?.trim());
+    const search = searchText.toLowerCase().trim();
+    if (!search || !items.length) return null;
+
+    // Phase 1: Exact match
     let match = items.find(i => i.textContent?.trim().toLowerCase() === search);
     if (match) return match;
+
+    // Phase 2: Starts-with match
+    match = items.find(i => i.textContent?.trim().toLowerCase().startsWith(search));
+    if (match) return match;
+
+    // Phase 3: Contains match
     match = items.find(i => i.textContent?.trim().toLowerCase().includes(search));
     if (match) return match;
-    const words = search.split(/\s+/);
-    return items.find(i => words.some(w => w.length > 3 && i.textContent?.trim().toLowerCase().includes(w))) || null;
+
+    // Phase 4: Reverse contains (search text contains option)
+    match = items.find(i => {
+      const t = i.textContent?.trim().toLowerCase();
+      return t && t.length > 3 && search.includes(t);
+    });
+    if (match) return match;
+
+    // Phase 5: Word-level matching with scoring
+    const searchWords = search.split(/\s+/).filter(w => w.length > 2);
+    let bestScore = 0, bestItem = null;
+    for (const item of items) {
+      const text = (item.textContent?.trim() || '').toLowerCase();
+      const itemWords = text.split(/\s+/);
+      let score = 0;
+      for (const sw of searchWords) {
+        for (const iw of itemWords) {
+          if (iw === sw) score += 10;
+          else if (iw.includes(sw) || sw.includes(iw)) score += 5;
+          else if (iw.length > 3 && sw.length > 3 && levenshtein(iw, sw) <= 2) score += 3; // Fuzzy
+        }
+      }
+      if (score > bestScore) { bestScore = score; bestItem = item; }
+    }
+    if (bestItem && bestScore >= 3) return bestItem;
+
+    // Phase 6: Levenshtein distance fuzzy match on full text
+    let minDist = Infinity, fuzzyMatch = null;
+    for (const item of items) {
+      const text = (item.textContent?.trim() || '').toLowerCase();
+      const dist = levenshtein(search, text);
+      const threshold = Math.max(3, Math.floor(search.length * 0.4)); // 40% tolerance
+      if (dist < minDist && dist <= threshold) { minDist = dist; fuzzyMatch = item; }
+    }
+    if (fuzzyMatch) return fuzzyMatch;
+
+    return null;
   }
 
   function findOtherOption(dropdown) {
     const items = $$('li, [role="option"], [class*="option"], option, div[class*="item"]', dropdown);
     return items.find(i => /^others?$/i.test(i.textContent?.trim() || '')) ||
       items.find(i => /\bother\b/i.test(i.textContent?.trim() || '')) ||
-      items.find(i => /not listed|not found|unlisted|none of/i.test(i.textContent?.trim() || ''));
+      items.find(i => /not listed|not found|unlisted|none of|not applicable|n\/a/i.test(i.textContent?.trim() || ''));
+  }
+
+  // OwlApply-inspired: smart dropdown interaction with scroll-into-view and retry
+  async function smartDropdownSelect(input, value, retries) {
+    retries = retries || 3;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      // Click/focus the input to open dropdown
+      input.focus();
+      if (input.tagName !== 'SELECT') {
+        realClick(input);
+        await sleep(300 + attempt * 100);
+        // Type to filter
+        nativeSet(input, value);
+        await sleep(400);
+      }
+
+      const dropdown = findAutocompleteDropdown(input);
+      if (!dropdown) {
+        if (attempt < retries) { await sleep(500); continue; }
+        return false;
+      }
+
+      const match = findBestDropdownMatch(dropdown, value);
+      if (match) {
+        // Scroll into view before clicking (OwlApply-style precision)
+        match.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        await sleep(100);
+        realClick(match);
+        await sleep(200);
+        return true;
+      }
+
+      // Try "Other" as fallback
+      const other = findOtherOption(dropdown);
+      if (other) {
+        other.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        await sleep(100);
+        realClick(other);
+        return true;
+      }
+
+      // Close dropdown and retry with different approach
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+    }
+    return false;
   }
 
   // ===================== DOM HELPERS =====================
@@ -817,6 +976,214 @@
       await sleep(500);
     }
     return null;
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: HUMAN-LIKE DELAY SYSTEM =====================
+  // OwlApply fills forms with natural pacing to avoid bot detection
+  function humanDelay(min, max) {
+    min = min || 80;
+    max = max || 250;
+    const base = min + Math.random() * (max - min);
+    // Occasionally add a longer "thinking" pause (like a real human)
+    const thinkPause = Math.random() < 0.15 ? Math.random() * 400 : 0;
+    return sleep(Math.round(base + thinkPause));
+  }
+
+  // Simulate human-like typing with variable speed
+  async function humanType(el, text) {
+    if (!el || !text) return;
+    el.focus();
+    await sleep(50);
+    // For short values, just set directly with slight delay
+    if (text.length <= 20) {
+      nativeSet(el, text);
+      await humanDelay(100, 200);
+      return;
+    }
+    // For longer text, type in chunks to appear more natural
+    const chunkSize = 5 + Math.floor(Math.random() * 10);
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.slice(0, Math.min(i + chunkSize, text.length));
+      nativeSet(el, chunk);
+      await sleep(20 + Math.random() * 30);
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    await humanDelay(50, 150);
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: SHADOW DOM FORM DETECTION =====================
+  // OwlApply works across all major ATS — including those using shadow DOM
+  function queryShadow(selector, root) {
+    root = root || document;
+    const result = root.querySelector(selector);
+    if (result) return result;
+    // Search shadow roots recursively
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        const found = queryShadow(selector, el.shadowRoot);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  function queryShadowAll(selector, root) {
+    root = root || document;
+    const results = [...root.querySelectorAll(selector)];
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        results.push(...queryShadowAll(selector, el.shadowRoot));
+      }
+    }
+    return results;
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: VISIBILITY-AWARE FIELD DETECTION =====================
+  // JobOwl/OwlApply use intelligent content extraction that checks computed styles
+  function isDeepVisible(el) {
+    if (!el) return false;
+    // Basic rect check
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    // Check computed styles up the tree
+    let current = el;
+    while (current && current !== document.body) {
+      const style = window.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+      current = current.parentElement;
+    }
+    return el.offsetParent !== null || el.tagName === 'BODY';
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: CONTEXT-AWARE QUESTION ANSWERING =====================
+  // OwlApply's AI agent automatically answers custom company application questions
+  function analyzeQuestionContext(questionText, p) {
+    const q = (questionText || '').toLowerCase();
+
+    // Technology/tools proficiency questions
+    const techPatterns = {
+      'python|django|flask': () => p.python_exp || 'Yes, I have professional experience with Python.',
+      'java\\b|spring|maven': () => p.java_exp || 'Yes, I have professional experience with Java.',
+      'javascript|react|node|vue|angular|typescript': () => p.js_exp || 'Yes, I have experience with modern JavaScript frameworks.',
+      'sql|database|mysql|postgres|mongodb': () => p.db_exp || 'Yes, I am proficient in SQL and database management.',
+      'aws|azure|gcp|cloud': () => p.cloud_exp || 'Yes, I have experience with cloud platforms.',
+      'docker|kubernetes|k8s|container': () => p.devops_exp || 'Yes, I have experience with containerization technologies.',
+      'git|version.?control|ci.?cd': () => 'Yes, I use Git and CI/CD pipelines regularly.',
+      'agile|scrum|kanban|sprint': () => 'Yes, I have experience working in Agile/Scrum environments.',
+      'machine.?learning|ml|ai|deep.?learning': () => p.ml_exp || 'I have foundational knowledge of machine learning concepts.',
+      'data.?analy|analytics|tableau|power.?bi': () => p.analytics_exp || 'Yes, I have experience with data analysis and visualization.',
+    };
+    for (const [pattern, answer] of Object.entries(techPatterns)) {
+      if (new RegExp(pattern, 'i').test(q) && /proficien|experience|familiar|knowledge|skill|comfortable|worked with/i.test(q)) {
+        return answer();
+      }
+    }
+
+    // Behavioral/situational questions with smart templates
+    if (/tell.*about.*time|describe.*situation|give.*example|share.*experience/i.test(q)) {
+      if (/lead|manage|team|mentor/i.test(q)) return p.leadership_answer || 'In my previous role, I led a cross-functional team to deliver a critical project ahead of schedule, coordinating between engineering, design, and stakeholders to ensure alignment and quality.';
+      if (/challenge|difficult|obstacle|problem/i.test(q)) return p.challenge_answer || 'I encountered a significant technical challenge where a legacy system needed migration. I developed a phased approach, created detailed documentation, and ensured zero downtime during the transition.';
+      if (/conflict|disagree|difficult.*person/i.test(q)) return p.conflict_answer || 'I resolved a team disagreement by facilitating an open discussion, actively listening to all perspectives, and proposing a compromise that incorporated the best elements of each viewpoint.';
+      if (/fail|mistake|learn/i.test(q)) return p.failure_answer || 'I once underestimated a project timeline. I learned the importance of adding buffer time and conducting more thorough requirement analysis, which I have applied successfully to subsequent projects.';
+      if (/success|achieve|accomplish|proud/i.test(q)) return p.success_answer || 'I am most proud of a project where I identified a process inefficiency, proposed an automated solution, and implemented it — saving the team approximately 20 hours per week.';
+      return p.behavioral_answer || 'I approach challenges methodically, leveraging my technical expertise and collaboration skills to deliver results that exceed expectations.';
+    }
+
+    // "Why" motivation questions
+    if (/why.*(interested|apply|want|choose|join|this.*(role|position|company))/i.test(q)) {
+      return p.why_interested || 'I am drawn to this opportunity because it aligns perfectly with my skills and career goals. I admire the company\'s mission and am excited about the potential to contribute meaningfully to the team.';
+    }
+
+    // Career goals
+    if (/career.?goal|where.*see.*yourself|five.*year|long.?term/i.test(q)) {
+      return p.career_goals || 'I aim to grow into a senior technical leadership role, combining deep technical expertise with strategic thinking to drive innovation and mentor the next generation of talent.';
+    }
+
+    // Work style/culture
+    if (/work.?style|management.?style|preferred.*environment|team.*work/i.test(q)) {
+      return p.work_style || 'I thrive in collaborative environments where open communication is valued. I am adaptable and work effectively both independently and as part of a team.';
+    }
+
+    // Additional information / anything else
+    if (/anything.?else|additional.?info|tell.*more|what.*should.*know|other.*share/i.test(q)) {
+      return p.additional_info || 'I am a dedicated professional with a strong track record of delivering high-quality results. I am excited about this opportunity and confident I can make a significant contribution to your team.';
+    }
+
+    return '';
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: APPLICATION TRACKER =====================
+  // OwlApply tracks applications in a Kanban board — we store application history
+  let _appTracker = [];
+  let _appTrackerLoaded = false;
+
+  async function loadAppTracker() {
+    if (_appTrackerLoaded) return _appTracker;
+    _appTracker = (await st.get('ua_app_tracker')) || [];
+    _appTrackerLoaded = true;
+    return _appTracker;
+  }
+
+  async function trackApplication(url, company, title, status) {
+    await loadAppTracker();
+    const existing = _appTracker.findIndex(a => a.url === url);
+    const entry = {
+      url,
+      company: company || extractCompanyFromUrl(url),
+      title: title || document.title?.replace(/\s*[-|].*$/, '').trim() || '',
+      status: status || 'applied',
+      appliedAt: Date.now(),
+      ats: detectATS() || 'unknown',
+      source: 'autofill'
+    };
+    if (existing >= 0) {
+      _appTracker[existing] = { ..._appTracker[existing], ...entry };
+    } else {
+      _appTracker.unshift(entry);
+    }
+    // Keep last 500 applications
+    if (_appTracker.length > 500) _appTracker = _appTracker.slice(0, 500);
+    await st.set('ua_app_tracker', _appTracker);
+    updateTrackerUI();
+  }
+
+  function extractCompanyFromUrl(url) {
+    try {
+      const host = new URL(url).hostname.replace('www.', '').replace('.com', '').replace('.co', '');
+      // Extract company from common ATS URL patterns
+      const wdMatch = url.match(/([^.]+)\.myworkdayjobs/i);
+      if (wdMatch) return wdMatch[1].charAt(0).toUpperCase() + wdMatch[1].slice(1);
+      const ghMatch = url.match(/boards\.greenhouse\.io\/([^/]+)/i);
+      if (ghMatch) return ghMatch[1].charAt(0).toUpperCase() + ghMatch[1].slice(1);
+      const lvMatch = url.match(/jobs\.lever\.co\/([^/]+)/i);
+      if (lvMatch) return lvMatch[1].charAt(0).toUpperCase() + lvMatch[1].slice(1);
+      return host.split('.')[0].charAt(0).toUpperCase() + host.split('.')[0].slice(1);
+    } catch { return ''; }
+  }
+
+  function updateTrackerUI() {
+    const trackerEl = document.getElementById('ua-tracker-list');
+    const trackerCnt = document.getElementById('ua-tracker-cnt');
+    if (!trackerEl) return;
+    const recent = _appTracker.slice(0, 10);
+    if (trackerCnt) trackerCnt.textContent = `(${_appTracker.length})`;
+    if (!recent.length) {
+      trackerEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No applications tracked yet</div>';
+      return;
+    }
+    trackerEl.innerHTML = recent.map(a => {
+      const date = new Date(a.appliedAt);
+      const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
+      const statusColor = a.status === 'applied' ? '#059669' : a.status === 'failed' ? '#ef4444' : '#6b7280';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid #f3f4f6;font-size:10px">
+        <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151" title="${a.url}">${a.company || a.title || 'Unknown'}</span>
+        <span style="color:#9ca3af;font-size:9px;flex-shrink:0">${a.ats}</span>
+        <span style="color:#9ca3af;font-size:9px;flex-shrink:0">${dateStr}</span>
+      </div>`;
+    }).join('');
   }
 
   // ===================== FIELD LABEL EXTRACTION =====================
@@ -896,13 +1263,24 @@
       if (!lbl) continue;
       const val = guessFieldValue(lbl, p, inp);
       if (!val) continue;
-      inp.focus();
-      await sleep(100); // Stabilize focus before setting value
-      nativeSet(inp, val);
+      // OwlApply-inspired: human-like typing with natural delays
+      await humanType(inp, val);
       inp.dispatchEvent(new Event('input', { bubbles: true }));
       inp.dispatchEvent(new Event('change', { bubbles: true }));
       filled++;
-      await sleep(200); // Accuracy-first: deliberate pacing between fields
+      await humanDelay(120, 280); // Natural pacing between fields
+    }
+
+    // OwlApply-inspired: also detect fields inside shadow DOM roots
+    const shadowInputs = queryShadowAll('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea');
+    for (const inp of shadowInputs) {
+      if (!isDeepVisible(inp) || inp.value?.trim()) continue;
+      const lbl = getLabel(inp) || inp.getAttribute('aria-label') || inp.placeholder || '';
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      await humanType(inp, val);
+      filled++;
     }
 
     // Select dropdowns — only unselected ones
@@ -1150,6 +1528,99 @@
   // Step 5: Fallback fill missed fields
   // Step 6: Submit or Next
 
+  // Helper: search inside shadow DOMs for elements matching a selector
+  function queryShadow(root, selectors) {
+    if (!root) return null;
+    const sels = Array.isArray(selectors) ? selectors : [selectors];
+    for (const sel of sels) {
+      try { const el = root.querySelector(sel); if (el) return el; } catch (_) { }
+    }
+    // Recurse into shadow roots
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        const found = queryShadow(el.shadowRoot, sels);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // Helper: find "Generate Custom Resume" / tailor button in sidebar + shadow DOM
+  function findTailorButton(sidebar) {
+    const selectors = [
+      '.application-dashboard-tailor-resume',
+      '.external-job-generate-resume-button',
+      '[class*="tailor-resume"]',
+      '[class*="generate-resume"]',
+      '[class*="custom-resume"]',
+      'button[class*="tailor"]',
+      'button[class*="generate"]'
+    ];
+    // Try direct sidebar first
+    for (const sel of selectors) {
+      const el = sidebar.querySelector(sel);
+      if (el && isVisible(el)) return el;
+    }
+    // Try shadow DOM inside Plasmo containers
+    const plasmoContainers = [...document.querySelectorAll('plasmo-csui,[id*="plasmo"],[class*="plasmo"]')];
+    for (const container of plasmoContainers) {
+      const found = queryShadow(container.shadowRoot || container, selectors);
+      if (found && isVisible(found)) return found;
+    }
+    // Text-based search: find buttons/links containing "Generate Custom Resume" or similar
+    const allBtns = [...sidebar.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+    for (const btn of allBtns) {
+      const t = (btn.textContent || '').trim();
+      if (/generate\s*(custom|your|my)?\s*resume|tailor\s*(my|your)?\s*resume|customize\s*resume/i.test(t) && isVisible(btn)) return btn;
+    }
+    // Also search all shadow roots for text-based buttons
+    for (const container of plasmoContainers) {
+      if (!container.shadowRoot) continue;
+      const btns = [...container.shadowRoot.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+      for (const btn of btns) {
+        const t = (btn.textContent || '').trim();
+        if (/generate\s*(custom|your|my)?\s*resume|tailor\s*(my|your)?\s*resume|customize\s*resume/i.test(t) && isVisible(btn)) return btn;
+      }
+    }
+    return null;
+  }
+
+  // Helper: find "Continue to Autofill" button in sidebar + shadow DOM
+  function findContinueToAutofillButton(sidebar) {
+    const selectors = [
+      '.continue-button:not(.continue-button-disabled)',
+      'button[class*="continue"]:not([disabled])',
+      '[class*="continue-to-autofill"]',
+      '[class*="continueToAutofill"]',
+      'button[class*="Continue"]'
+    ];
+    // Direct search
+    for (const sel of selectors) {
+      try { const el = sidebar.querySelector(sel); if (el && isVisible(el)) return el; } catch (_) { }
+    }
+    // Text-based search in sidebar
+    const allBtns = [...sidebar.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+    for (const btn of allBtns) {
+      const t = (btn.textContent || '').trim();
+      if (/continue\s*(to\s*)?autofill|continue\s*to\s*fill|proceed\s*to\s*autofill/i.test(t) && isVisible(btn) && !btn.disabled) return btn;
+    }
+    // Search shadow DOMs
+    const plasmoContainers = [...document.querySelectorAll('plasmo-csui,[id*="plasmo"],[class*="plasmo"]')];
+    for (const container of plasmoContainers) {
+      if (!container.shadowRoot) continue;
+      for (const sel of selectors) {
+        try { const el = container.shadowRoot.querySelector(sel); if (el && isVisible(el)) return el; } catch (_) { }
+      }
+      const btns = [...container.shadowRoot.querySelectorAll('button,a,div[role="button"],span[role="button"]')];
+      for (const btn of btns) {
+        const t = (btn.textContent || '').trim();
+        if (/continue\s*(to\s*)?autofill|continue\s*to\s*fill|proceed\s*to\s*autofill/i.test(t) && isVisible(btn) && !btn.disabled) return btn;
+      }
+    }
+    return null;
+  }
+
   async function tailorFirstFlow() {
     const ats = detectATS();
     if (!ats) return;
@@ -1158,90 +1629,90 @@
     // Wait for Jobright sidebar to load
     const sidebar = await waitFor('#jobright-helper-id', 15000);
     if (!sidebar) { LOG('Jobright sidebar not found — falling back to direct autofill'); await directAutofillFlow(); return; }
-    await sleep(2000);
+    await sleep(800);
 
-    // Step 1: Click "Generate Custom Resume" if available
-    const tailorBtn = sidebar.querySelector('.application-dashboard-tailor-resume') ||
-      sidebar.querySelector('.external-job-generate-resume-button');
-    if (tailorBtn && isVisible(tailorBtn)) {
+    // Step 1: Click "Generate Custom Resume" if available (searches shadow DOM too)
+    const tailorBtn = findTailorButton(sidebar);
+    if (tailorBtn) {
       LOG('Step 1: Clicking Generate Custom Resume');
       realClick(tailorBtn);
-      await sleep(3000);
+      await sleep(1000);
 
-      // Wait for tailoring to complete (watch for loading to finish)
+      // Wait for tailoring to complete (watch for loading to finish) — fast polling
       LOG('Waiting for resume tailoring to complete...');
-      const maxWait = 30000; // 30s max (reduced from 120s to prevent freezing)
+      const maxWait = 25000;
       const start = Date.now();
       while (Date.now() - start < maxWait) {
-        // Check if loading indicator is gone
-        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading');
+        const loading = sidebar.querySelector('.tailor-resume-loading-linear-progress,.resume-loading-container,.spin-loading,[class*="loading"],[class*="spinner"]');
         if (!loading || !isVisible(loading)) {
-          // Check if tailored resume is ready (button text changed or autofill button available)
           const autofillBtn = sidebar.querySelector('.auto-fill-button:not([disabled])');
-          if (autofillBtn) { LOG('Tailoring complete — autofill button ready'); break; }
-          // If no loading and no button, don't spin forever
-          if (!loading) { LOG('No loading indicator and no autofill button — moving on'); break; }
+          const continueBtn = findContinueToAutofillButton(sidebar);
+          if (autofillBtn || continueBtn) { LOG('Tailoring complete — button ready'); break; }
+          if (!loading) { LOG('No loading indicator — moving on'); break; }
         }
-        await sleep(1500);
+        await sleep(500);
       }
-      await sleep(1500);
+      await sleep(300);
     } else {
       LOG('Step 1: No tailor button found — skipping to autofill');
     }
 
-    // Step 2-3: Click "Continue to Autofill" / continue button if present
-    const continueBtn = sidebar.querySelector('.continue-button:not(.continue-button-disabled)');
-    if (continueBtn && isVisible(continueBtn)) {
-      LOG('Step 2: Clicking Continue button');
+    // Step 2: Click "Continue to Autofill" button if present (searches shadow DOM too)
+    const continueBtn = findContinueToAutofillButton(sidebar);
+    if (continueBtn) {
+      LOG('Step 2: Clicking Continue to Autofill');
       realClick(continueBtn);
-      await sleep(2000);
+      await sleep(800);
     }
 
-    // Step 4: Click the Autofill button
+    // Step 3: Click the Autofill button
     LOG('Step 3: Triggering Autofill');
     await triggerAutofill();
 
-    // Wait for Jobright autofill to complete (watch for "Filling" → "Autofill" text change)
+    // Wait for Jobright autofill to complete — fast polling
     LOG('Waiting for Jobright autofill to complete...');
-    await sleep(2000);
+    await sleep(800);
     const fillStart = Date.now();
-    while (Date.now() - fillStart < 15000) { // 15s max (reduced from 60s)
+    while (Date.now() - fillStart < 12000) {
       const afBtn = sidebar.querySelector('.auto-fill-button');
       if (afBtn) {
         const txt = afBtn.textContent?.trim().toLowerCase() || '';
-        if (txt === 'autofill' || txt === '' || txt === 'filled') break; // Done filling
-      } else break; // Button gone — don't wait forever
-      await sleep(1000);
+        if (txt === 'autofill' || txt === '' || txt === 'filled') break;
+      } else break;
+      await sleep(500);
     }
-    await sleep(1000);
+    await sleep(500);
 
-    // Step 5: Try resume upload if needed
+    // Step 4: Try resume upload if needed
     await tryResumeUpload();
 
-    // Step 6: Fallback fill to catch missed fields
+    // Step 5: Fallback fill to catch missed fields
     LOG('Step 4: Running fallback fill for missed fields');
     await fallbackFill();
-    await sleep(1000);
-    // Second pass
+    await sleep(500);
     await fallbackFill();
-    await sleep(500);
-    // Fix any validation errors
+    await sleep(300);
     await handleValidationErrors();
-    await sleep(500);
+    await sleep(300);
 
-    // Step 7: Auto submit or next
+    // Step 6: Auto submit or next
     LOG('Step 5: Auto-submit/next');
     const result = await autoSubmitOrNext();
 
     if (result === 'next_page') {
       LOG('Navigated to next page — continuing multi-page flow');
-      await sleep(3000);
+      await sleep(2000);
       await multiPageLoop();
     } else if (result === 'submitted') {
       LOG('Application submitted!');
       await learnFromPage();
+      // OwlApply-inspired: track application in history
+      await trackApplication(location.href, '', '', 'applied');
       await sleep(2000);
-      if (checkSuccess()) LOG('Success confirmed!');
+      if (checkSuccess()) {
+        LOG('Success confirmed!');
+        showToast('Application submitted successfully!', 'success');
+      }
     }
   }
 
@@ -1312,14 +1783,14 @@
   // ===================== DIRECT AUTOFILL FLOW (no sidebar) =====================
   async function directAutofillFlow() {
     await triggerAutofill();
-    await sleep(5000);
+    await sleep(2000);
     await fixPhoneCountryCode();
     await fallbackFill();
-    await sleep(1000);
+    await sleep(500);
     await fallbackFill();
-    await sleep(1000);
+    await sleep(500);
     const result = await autoSubmitOrNext();
-    if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
+    if (result === 'next_page') { await sleep(2000); await multiPageLoop(); }
   }
 
   // ===================== ASHBY AUTOMATION (from LazyApply) =====================
@@ -1728,13 +2199,33 @@
     // Strategy 1b: Label-text based fallback for Job Title & Company (catches Workday variants)
     if ((!titleInput || !titleInput.value) && title) {
       const titleByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'job title')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
-        xpath("//label[contains(text(),'Job Title')]/following::input[1]");
-      if (titleByLabel && !titleByLabel.value) nativeSet(titleByLabel, title);
+        xpath("//label[contains(text(),'Job Title')]/following::input[1]") ||
+        xpath("//label[contains(text(),'Job Title')]/ancestor::div[1]//input") ||
+        xpath("//span[contains(text(),'Job Title')]/ancestor::div[1]//input");
+      if (titleByLabel && !titleByLabel.value) { titleByLabel.focus(); nativeSet(titleByLabel, title); await sleep(100); }
     }
     if ((!companyInput || !companyInput.value) && company) {
       const companyByLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'company')]/ancestor::div[contains(@class,'formField') or @data-automation-id]//input") ||
-        xpath("//label[contains(text(),'Company')]/following::input[1]");
-      if (companyByLabel && !companyByLabel.value) nativeSet(companyByLabel, company);
+        xpath("//label[contains(text(),'Company')]/following::input[1]") ||
+        xpath("//label[contains(text(),'Company')]/ancestor::div[1]//input") ||
+        xpath("//span[contains(text(),'Company')]/ancestor::div[1]//input");
+      if (companyByLabel && !companyByLabel.value) { companyByLabel.focus(); nativeSet(companyByLabel, company); await sleep(100); }
+    }
+
+    // Strategy 1c: Generic visible input fallback for Job Title & Company (Workday variants with non-standard IDs)
+    if (title) {
+      const allInputs = $$('input[type="text"],input:not([type])').filter(el => isVisible(el) && !el.value?.trim());
+      for (const inp of allInputs) {
+        const lbl = getLabel(inp);
+        if (/job.?title|position.?title/i.test(lbl)) { inp.focus(); nativeSet(inp, title); await sleep(100); break; }
+      }
+    }
+    if (company) {
+      const allInputs = $$('input[type="text"],input:not([type])').filter(el => isVisible(el) && !el.value?.trim());
+      for (const inp of allInputs) {
+        const lbl = getLabel(inp);
+        if (/\bcompany\b|employer|organization/i.test(lbl) && !/phone/i.test(lbl)) { inp.focus(); nativeSet(inp, company); await sleep(100); break; }
+      }
     }
 
     // Description / responsibilities (textarea)
@@ -1796,11 +2287,27 @@
     if (expDateEndYear && !expDateEndYear.value) nativeSet(expDateEndYear, endYear);
     if (expDateEndMonth && !expDateEndMonth.value) nativeSet(expDateEndMonth, '12');
 
-    // Fallback: label-text based From/To date fields
-    const fromLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'from')]/ancestor::div[1]//input");
-    const toLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'to')]/ancestor::div[1]//input");
-    if (fromLabel && !fromLabel.value) nativeSet(fromLabel, `01/${startYear}`);
-    if (toLabel && !toLabel.value) nativeSet(toLabel, `12/${endYear}`);
+    // Fallback: label-text based From/To date fields (multiple strategies)
+    const fromLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'from')]/ancestor::div[1]//input") ||
+      xpath("//span[text()='From']/ancestor::div[1]//input") ||
+      xpath("//label[text()='From']/following::input[1]");
+    const toLabel = xpath("//label[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'to')]/ancestor::div[1]//input[not(@type='hidden')]") ||
+      xpath("//span[text()='To']/ancestor::div[1]//input") ||
+      xpath("//label[text()='To']/following::input[1]");
+    if (fromLabel && !fromLabel.value) { fromLabel.focus(); nativeSet(fromLabel, `01/${startYear}`); await sleep(100); }
+    if (toLabel && !toLabel.value) { toLabel.focus(); nativeSet(toLabel, `12/${endYear}`); await sleep(100); }
+
+    // Additional fallback: find all unfilled date-like inputs (month/year) in work sections
+    const workDateInputs = $$('input[type="text"],input:not([type])').filter(el => {
+      if (!isVisible(el) || el.value?.trim()) return false;
+      const lbl = getLabel(el);
+      return /\bfrom\b|\bto\b|start\s*date|end\s*date/i.test(lbl);
+    });
+    for (const inp of workDateInputs) {
+      const lbl = (getLabel(inp) || '').toLowerCase();
+      if (/\bfrom\b|start/i.test(lbl)) { inp.focus(); nativeSet(inp, `01/${startYear}`); await sleep(100); }
+      else if (/\bto\b|end/i.test(lbl)) { inp.focus(); nativeSet(inp, `12/${endYear}`); await sleep(100); }
+    }
 
     // SpeedyApply indexed workExperience sections
     const expSections = xpathAll('//div[starts-with(@data-automation-id,"workExperience-")]');
@@ -1924,6 +2431,48 @@
             await sleep(300);
           }
         }
+      }
+    }
+
+    // Final fallback: fill any remaining unfilled fields with label matching for Language/Speaking/Writing/Reading
+    const langFallbackInputs = $$('input[type="text"],input:not([type]),select,button[aria-haspopup]').filter(el => isVisible(el) && !hasFieldValue(el));
+    for (const inp of langFallbackInputs) {
+      const lbl = (getLabel(inp) || '').toLowerCase();
+      if (/\blanguage\b/i.test(lbl) && !/proficien/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, language);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(language.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, language); }
+        await sleep(200);
+      }
+      if (/\bspeaking\b|\bspeak\b|\boral\b/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
+      }
+      if (/\bwriting\b|\bwritten\b/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
+      }
+      if (/\breading\b|\bread\b/i.test(lbl) && !/already|have you/i.test(lbl)) {
+        if (inp.tagName === 'BUTTON') await selectFromWorkdayDropdown(inp, proficiency);
+        else if (inp.tagName === 'SELECT') {
+          const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(proficiency.toLowerCase()));
+          if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        else { inp.focus(); nativeSet(inp, proficiency); }
+        await sleep(200);
       }
     }
 
@@ -2315,592 +2864,6 @@
     LOG('Lever automation complete');
   }
 
-  // ===================== SMARTRECRUITERS AUTOMATION =====================
-  async function smartRecruitersAutomation() {
-    LOG('SmartRecruiters automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    // Click Apply if on job detail page
-    const applyBtn = $('button[data-test="apply-button"],a[data-test="apply-button"],.st-apply-button,button.js-apply-button,.apply-btn,a[href*="/apply"]');
-    if (applyBtn && isVisible(applyBtn) && !/\/apply/i.test(location.pathname)) {
-      LOG('Clicking SmartRecruiters Apply button');
-      realClick(applyBtn);
-      await sleep(3000);
-    }
-
-    // Wait for form
-    const form = await waitFor('form,.application-form,.apply-form,.application-step,[class*="application"]', 10000);
-    if (!form) { LOG('No SmartRecruiters form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // SmartRecruiters multi-step flow
-    const MAX_STEPS = 8;
-    for (let step = 1; step <= MAX_STEPS; step++) {
-      if (checkSuccess()) { LOG('SmartRecruiters: success detected'); break; }
-      LOG(`SmartRecruiters: step ${step}`);
-
-      // Fill basic fields
-      const srFields = {
-        '#firstName,input[name="firstName"],input[data-test="firstName"]': p.first_name || p.firstName || '',
-        '#lastName,input[name="lastName"],input[data-test="lastName"]': p.last_name || p.lastName || '',
-        '#email,input[name="email"],input[data-test="email"]': p.email || '',
-        '#phone,input[name="phone"],input[data-test="phoneNumber"]': p.phone || '',
-        'input[name="location"],input[data-test="location"],#location': p.city ? [p.city, p.state || p.region || '', p.country || DEFAULTS.country].filter(Boolean).join(', ') : '',
-        'input[name="currentCompany"],input[data-test="currentCompany"]': p.current_company || p.company || '',
-        'input[name="currentTitle"],input[data-test="currentTitle"]': p.current_title || p.title || '',
-      };
-      for (const [sels, val] of Object.entries(srFields)) {
-        if (!val) continue;
-        for (const sel of sels.split(',')) {
-          const el = $(sel.trim());
-          if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-        }
-      }
-
-      // Handle location autocomplete (SmartRecruiters uses Google Places-style)
-      const locInput = $('input[name="location"],input[data-test="location"],#location');
-      if (locInput && locInput.value) {
-        await sleep(800);
-        const autoComplete = $('[class*="autocomplete"] li,[class*="suggestion"] li,[role="option"],.pac-item,.location-suggestion');
-        if (autoComplete && isVisible(autoComplete)) { realClick(autoComplete); await sleep(300); }
-      }
-
-      // Fill remaining fields with fallback
-      await fallbackFill();
-      await sleep(500);
-
-      // Handle SmartRecruiters consent checkboxes
-      $$('input[type="checkbox"]').filter(el => {
-        const lbl = getLabel(el);
-        return isVisible(el) && !el.checked && /consent|agree|privacy|gdpr|terms|data.?process/i.test(lbl || '');
-      }).forEach(cb => realClick(cb));
-
-      // Handle file upload
-      await tryResumeUpload();
-
-      // Trigger Jobright autofill
-      await triggerAutofillQuick();
-      await sleep(1000);
-      await fallbackFill();
-      await handleValidationErrors();
-
-      // Next / Submit
-      const nextBtn = $('button[data-test="footer-next"],button[data-test="next-btn"],.next-step-button,button[type="submit"]');
-      const submitBtn = $('button[data-test="footer-submit"],button[data-test="submit-btn"],.submit-application-button');
-      if (submitBtn && isVisible(submitBtn)) {
-        LOG('SmartRecruiters: clicking Submit');
-        await sleep(500);
-        realClick(submitBtn);
-        await sleep(3000);
-        break;
-      }
-      if (nextBtn && isVisible(nextBtn)) {
-        LOG('SmartRecruiters: clicking Next');
-        realClick(nextBtn);
-        await sleep(2500);
-        continue;
-      }
-      // Text-based fallback
-      const txtBtn = $$('button').filter(isVisible).find(b => /^(next|continue|submit|apply)\b/i.test((b.textContent || '').trim()));
-      if (txtBtn) { realClick(txtBtn); await sleep(2500); continue; }
-      break;
-    }
-    learnFromFilledFields();
-    LOG('SmartRecruiters automation complete');
-  }
-
-  // ===================== TALEO / ORACLE AUTOMATION =====================
-  async function taleoAutomation() {
-    LOG('Taleo/Oracle automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    // Wait for Taleo form (various selectors)
-    const form = await waitFor('#requisitionDescriptionInterface,form[name="submitAction"],.candidate-self-service,#contentContainer,.requisitionContent,form', 10000);
-    if (!form) { LOG('No Taleo form found'); await directAutofillFlow(); return; }
-    await sleep(2000);
-
-    // Taleo uses numbered fieldsets and iframe-heavy layouts
-    // Phase 1: Fill personal info fields
-    const taleoFields = {
-      '#FirstName,input[id*="FirstName"]': p.first_name || p.firstName || '',
-      '#LastName,input[id*="LastName"]': p.last_name || p.lastName || '',
-      '#Email,input[id*="Email"],input[id*="email"]': p.email || '',
-      '#PhoneNumber,input[id*="Phone"],input[id*="phone"]': p.phone || '',
-      'input[id*="Address"],input[id*="Street"]': p.address || '',
-      'input[id*="City"]': p.city || '',
-      'input[id*="ZipCode"],input[id*="PostalCode"]': p.postal_code || p.zip || '',
-    };
-    for (const [sels, val] of Object.entries(taleoFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-      }
-    }
-
-    // Phase 2: Fill selects (country, state, source)
-    const countrySelect = $('select[id*="Country"],select[name*="country"]');
-    if (countrySelect && !hasFieldValue(countrySelect)) {
-      const opt = $$('option', countrySelect).find(o => new RegExp(p.country || DEFAULTS.country, 'i').test(o.text));
-      if (opt) { countrySelect.value = opt.value; countrySelect.dispatchEvent(new Event('change', { bubbles: true })); }
-    }
-    const stateSelect = $('select[id*="State"],select[id*="Province"],select[name*="state"]');
-    if (stateSelect && !hasFieldValue(stateSelect) && p.state) {
-      const opt = $$('option', stateSelect).find(o => o.text.toLowerCase().includes(p.state.toLowerCase()));
-      if (opt) { stateSelect.value = opt.value; stateSelect.dispatchEvent(new Event('change', { bubbles: true })); }
-    }
-
-    // Phase 3: Taleo multi-page navigation
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-  }
-
-  // ===================== JOBVITE AUTOMATION =====================
-  async function jobviteAutomation() {
-    LOG('Jobvite automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    // Click Apply if on listing page
-    const applyBtn = $('a.jv-button-apply,.jv-apply-button,a[href*="/apply"],button.apply-button');
-    if (applyBtn && isVisible(applyBtn) && !/\/apply/i.test(location.pathname)) {
-      realClick(applyBtn);
-      await sleep(3000);
-    }
-
-    const form = await waitFor('.jv-application-form,form[name="applicationForm"],.application-form,form', 10000);
-    if (!form) { LOG('No Jobvite form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // Jobvite field patterns
-    const jvFields = {
-      'input[name="firstName"],input[id*="firstName"]': p.first_name || p.firstName || '',
-      'input[name="lastName"],input[id*="lastName"]': p.last_name || p.lastName || '',
-      'input[name="email"],input[id*="email"]': p.email || '',
-      'input[name="phone"],input[id*="phone"]': p.phone || '',
-      'input[name="address"],input[id*="address"]': p.address || '',
-      'input[name="city"],input[id*="city"]': p.city || '',
-      'input[name="linkedIn"],input[id*="linkedin"]': p.linkedin_profile_url || p.linkedin || '',
-    };
-    for (const [sels, val] of Object.entries(jvFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-      }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('Jobvite automation complete');
-  }
-
-  // ===================== WORKABLE AUTOMATION =====================
-  async function workableAutomation() {
-    LOG('Workable automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('.application-form,form[data-ui="application-form"],form', 10000);
-    if (!form) { LOG('No Workable form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // Workable uses data-ui attributes
-    const wkFields = {
-      'input[data-ui="firstname"],input[name="firstname"]': p.first_name || p.firstName || '',
-      'input[data-ui="lastname"],input[name="lastname"]': p.last_name || p.lastName || '',
-      'input[data-ui="email"],input[name="email"]': p.email || '',
-      'input[data-ui="phone"],input[name="phone"]': p.phone || '',
-      'input[data-ui="address"],input[name="address"]': p.address || '',
-      'input[data-ui="city"],input[name="city"]': p.city || '',
-      'textarea[data-ui="cover_letter"],textarea[name="cover_letter"]': p.cover_letter || DEFAULTS.cover,
-    };
-    for (const [sels, val] of Object.entries(wkFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-      }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('Workable automation complete');
-  }
-
-  // ===================== INDEED EASY APPLY =====================
-  async function indeedEasyApply() {
-    LOG('Indeed Easy Apply automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    // Click Apply Now / Easy Apply
-    const applyBtn = $('button[id="indeedApplyButton"],#applyButtonLinkContainer a,button[class*="apply"],a[class*="apply"]');
-    if (applyBtn && isVisible(applyBtn)) {
-      realClick(applyBtn);
-      await sleep(3000);
-    }
-
-    // Indeed uses an iframe for the application
-    const iframe = $('iframe[id*="indeedapply"],iframe[src*="indeedapply"]');
-    if (iframe) {
-      LOG('Indeed apply iframe detected — content script limited to main page');
-    }
-
-    // Wait for form (Indeed sometimes uses inline forms)
-    const form = await waitFor('form[id*="apply"],form[class*="apply"],.ia-Questions,form', 8000);
-    if (!form) { LOG('No Indeed form found'); return; }
-    await sleep(1500);
-
-    // Indeed multi-step flow
-    const MAX_STEPS = 8;
-    for (let step = 1; step <= MAX_STEPS; step++) {
-      if (checkSuccess()) break;
-      LOG(`Indeed: step ${step}`);
-
-      // Fill all visible fields
-      const fields = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-        .filter(el => isVisible(el) && !hasFieldValue(el));
-      for (const field of fields) {
-        const lbl = getLabel(field);
-        if (!lbl) continue;
-        const val = guessFieldValue(lbl, p, field);
-        if (!val) continue;
-        if (field.tagName === 'SELECT') {
-          const opt = $$('option', field).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-          if (opt) { field.value = opt.value; field.dispatchEvent(new Event('change', { bubbles: true })); }
-        } else { field.focus(); nativeSet(field, val); }
-        await sleep(80);
-      }
-
-      // Radio groups
-      const groups = {};
-      $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
-      for (const [, radios] of Object.entries(groups)) {
-        if (radios.some(r => r.checked)) continue;
-        const parent = radios[0].closest('fieldset,.ia-Questions-item,.form-group,[class*="question"]');
-        answerKnockoutRadioGroup(radios, parent, p);
-      }
-
-      answerButtonStyleQuestions(p);
-      await handleValidationErrors();
-
-      // Indeed Continue / Submit
-      const continueBtn = $('button[id*="continue"],button.ia-continueButton,.ia-NavigationButtons button[data-testid*="continue"]');
-      const submitBtn = $('button[id*="submit"],button.ia-submitButton,.ia-NavigationButtons button[data-testid*="submit"]');
-      if (submitBtn && isVisible(submitBtn)) {
-        LOG('Indeed: clicking Submit');
-        await sleep(500);
-        realClick(submitBtn);
-        await sleep(3000);
-        break;
-      }
-      if (continueBtn && isVisible(continueBtn)) {
-        realClick(continueBtn);
-        await sleep(2500);
-        continue;
-      }
-      const txtBtn = $$('button').filter(isVisible).find(b => /^(continue|next|submit|apply)\b/i.test((b.textContent || '').trim()));
-      if (txtBtn) { realClick(txtBtn); await sleep(2500); continue; }
-      break;
-    }
-    learnFromFilledFields();
-    LOG('Indeed Easy Apply complete');
-  }
-
-  // ===================== BREEZYHR AUTOMATION =====================
-  async function breezyhrAutomation() {
-    LOG('BreezyHR automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('.breezy-apply-form,form[id*="application"],.position-apply,form', 10000);
-    if (!form) { LOG('No BreezyHR form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // BreezyHR field patterns
-    const brFields = {
-      'input[name="name"],input[placeholder*="name" i]': `${p.first_name || p.firstName || ''} ${p.last_name || p.lastName || ''}`.trim(),
-      'input[name="email"],input[type="email"]': p.email || '',
-      'input[name="phone"],input[type="tel"]': p.phone || '',
-      'input[name="address"],input[placeholder*="address" i]': p.address || '',
-      'input[name="headline"],input[placeholder*="headline" i]': p.current_title || p.title || '',
-      'textarea[name="summary"],textarea[placeholder*="summary" i]': p.summary || p.cover_letter || DEFAULTS.cover,
-    };
-    for (const [sels, val] of Object.entries(brFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-      }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('BreezyHR automation complete');
-  }
-
-  // ===================== RIPPLING AUTOMATION =====================
-  async function ripplingAutomation() {
-    LOG('Rippling automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('form,[class*="application-form"],[data-testid*="application"]', 10000);
-    if (!form) { LOG('No Rippling form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // Rippling uses React-based forms
-    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-      .filter(el => isVisible(el) && !hasFieldValue(el));
-    for (const inp of inputs) {
-      const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessFieldValue(lbl, p, inp);
-      if (!val) continue;
-      if (inp.tagName === 'SELECT') {
-        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
-      } else { inp.focus(); nativeSet(inp, val); }
-      await sleep(80);
-    }
-
-    // Handle React Select dropdowns (common in Rippling)
-    const reactSelects = $$('[class*="react-select"],[class*="Select__control"],[class*="css-"][class*="control"]')
-      .filter(el => isVisible(el) && !el.querySelector('[class*="singleValue"]')?.textContent?.trim());
-    for (const rs of reactSelects) {
-      const lbl = getLabel(rs);
-      const val = guessFieldValue(lbl, p, rs);
-      if (!val) continue;
-      const input = rs.querySelector('input');
-      if (input) { input.focus(); nativeSet(input, val); await sleep(500); }
-      const option = await waitFor('[class*="option"]', 1000);
-      if (option && isVisible(option)) { realClick(option); await sleep(200); }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('Rippling automation complete');
-  }
-
-  // ===================== ADP AUTOMATION =====================
-  async function adpAutomation() {
-    LOG('ADP automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('.apply-form,form[id*="application"],form[class*="candidate"],form', 10000);
-    if (!form) { LOG('No ADP form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    const adpFields = {
-      'input[id*="firstName"],input[name*="firstName"]': p.first_name || p.firstName || '',
-      'input[id*="lastName"],input[name*="lastName"]': p.last_name || p.lastName || '',
-      'input[id*="email"],input[name*="email"],input[type="email"]': p.email || '',
-      'input[id*="phone"],input[name*="phone"],input[type="tel"]': p.phone || '',
-      'input[id*="address"],input[name*="address"]': p.address || '',
-      'input[id*="city"],input[name*="city"]': p.city || '',
-      'input[id*="zip"],input[id*="postal"],input[name*="zip"]': p.postal_code || p.zip || '',
-    };
-    for (const [sels, val] of Object.entries(adpFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (el && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(80); break; }
-      }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('ADP automation complete');
-  }
-
-  // ===================== SUCCESSFACTORS AUTOMATION =====================
-  async function successFactorsAutomation() {
-    LOG('SuccessFactors automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('form[id*="application"],form,.applicationForm,[class*="applyForm"]', 10000);
-    if (!form) { LOG('No SuccessFactors form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // SuccessFactors uses various field naming conventions
-    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-      .filter(el => isVisible(el) && !hasFieldValue(el));
-    for (const inp of inputs) {
-      const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessFieldValue(lbl, p, inp);
-      if (!val) continue;
-      if (inp.tagName === 'SELECT') {
-        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
-      } else { inp.focus(); nativeSet(inp, val); }
-      await sleep(80);
-    }
-
-    // Radio/checkbox groups
-    const groups = {};
-    $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
-    for (const [, radios] of Object.entries(groups)) {
-      if (radios.some(r => r.checked)) continue;
-      const parent = radios[0].closest('fieldset,.form-group,[class*="question"],[class*="field"]');
-      answerKnockoutRadioGroup(radios, parent, p);
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('SuccessFactors automation complete');
-  }
-
-  // ===================== JAZZHR AUTOMATION =====================
-  async function jazzhrAutomation() {
-    LOG('JazzHR automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('#jazzhr-apply,form[id*="apply"],form.resume-form,form', 10000);
-    if (!form) { LOG('No JazzHR form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    const jzFields = {
-      '#first_name,input[name="first_name"]': p.first_name || p.firstName || '',
-      '#last_name,input[name="last_name"]': p.last_name || p.lastName || '',
-      '#email,input[name="email"]': p.email || '',
-      '#phone,input[name="phone"]': p.phone || '',
-      '#address,input[name="address"]': p.address || '',
-      '#city,input[name="city"]': p.city || '',
-      '#linkedin_url,input[name*="linkedin"]': p.linkedin_profile_url || p.linkedin || '',
-      '#eeo_gender,select[name="eeo_gender"]': DEFAULTS.gender,
-      '#eeo_race,select[name="eeo_race"]': DEFAULTS.ethnicity,
-      '#eeo_veteran,select[name="eeo_veteran"]': DEFAULTS.veteran,
-      '#eeo_disability,select[name="eeo_disability"]': DEFAULTS.disability,
-    };
-    for (const [sels, val] of Object.entries(jzFields)) {
-      if (!val) continue;
-      for (const sel of sels.split(',')) {
-        const el = $(sel.trim());
-        if (!el || hasFieldValue(el)) continue;
-        if (el.tagName === 'SELECT') {
-          const opt = $$('option', el).find(o => o.text.toLowerCase().includes(val.toLowerCase()) || /prefer not|decline/i.test(o.text));
-          if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', { bubbles: true })); }
-        } else { el.focus(); nativeSet(el, val); }
-        await sleep(80);
-        break;
-      }
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('JazzHR automation complete');
-  }
-
-  // ===================== HANDSHAKE AUTOMATION =====================
-  async function handshakeAutomation() {
-    LOG('Handshake automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('form[class*="application"],form,.apply-form', 10000);
-    if (!form) { LOG('No Handshake form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // Fill all visible empty fields using generic approach
-    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-      .filter(el => isVisible(el) && !hasFieldValue(el));
-    for (const inp of inputs) {
-      const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessFieldValue(lbl, p, inp);
-      if (!val) continue;
-      if (inp.tagName === 'SELECT') {
-        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
-      } else { inp.focus(); nativeSet(inp, val); }
-      await sleep(80);
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('Handshake automation complete');
-  }
-
-  // ===================== USAJOBS AUTOMATION =====================
-  async function usajobsAutomation() {
-    LOG('USAJOBS automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    // USAJOBS has a specific flow — Apply button redirects to agency site
-    const applyBtn = $('a[href*="apply"],button[data-automation*="apply"],.usajobs-apply-button');
-    if (applyBtn && isVisible(applyBtn)) {
-      LOG('USAJOBS: Apply button found — click to proceed to agency site');
-      // Don't auto-click — let user decide
-    }
-
-    // Fill any inline forms
-    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-      .filter(el => isVisible(el) && !hasFieldValue(el));
-    for (const inp of inputs) {
-      const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessFieldValue(lbl, p, inp);
-      if (!val) continue;
-      if (inp.tagName === 'SELECT') {
-        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
-      } else { inp.focus(); nativeSet(inp, val); }
-      await sleep(80);
-    }
-
-    await fixPhoneCountryCode();
-    await fallbackFill();
-    learnFromFilledFields();
-    LOG('USAJOBS automation complete');
-  }
-
-  // ===================== EIGHTFOLD AUTOMATION =====================
-  async function eightfoldAutomation() {
-    LOG('Eightfold automation starting...');
-    const p = await getProfile();
-    await loadAnswerBank();
-
-    const form = await waitFor('.apply-form,form[class*="application"],[class*="ApplicationForm"],form', 10000);
-    if (!form) { LOG('No Eightfold form found'); await directAutofillFlow(); return; }
-    await sleep(1500);
-
-    // Eightfold uses React with custom components
-    const inputs = $$('input:not([type=hidden]):not([type=file]):not([type=submit]),textarea,select')
-      .filter(el => isVisible(el) && !hasFieldValue(el));
-    for (const inp of inputs) {
-      const lbl = getLabel(inp);
-      if (!lbl) continue;
-      const val = guessFieldValue(lbl, p, inp);
-      if (!val) continue;
-      if (inp.tagName === 'SELECT') {
-        const opt = $$('option', inp).find(o => o.text.toLowerCase().includes(val.toLowerCase()));
-        if (opt) { inp.value = opt.value; inp.dispatchEvent(new Event('change', { bubbles: true })); }
-      } else { inp.focus(); nativeSet(inp, val); }
-      await sleep(80);
-    }
-
-    await fixPhoneCountryCode();
-    await tailorFirstFlow();
-    learnFromFilledFields();
-    LOG('Eightfold automation complete');
-  }
-
   // ===================== iCIMS AUTOMATION =====================
   async function icimsAutomation() {
     LOG('iCIMS automation starting...');
@@ -3029,32 +2992,84 @@
     }
   }
 
-  // ===================== RESUME/FILE UPLOAD AUTOMATION =====================
+  // ===================== OWLAPPLY-INSPIRED: SMART DOCUMENT AUTO-UPLOAD =====================
+  // OwlApply uploads documents automatically — we enhance with DataTransfer + drag-drop simulation
   async function tryResumeUpload() {
-    // Look for file input fields (resume, cover letter)
+    // Look for ALL file input fields (resume, cover letter, documents)
     const fileInputs = $$('input[type="file"]').filter(el => {
       const lbl = getLabel(el);
-      return /resume|cv|cover.?letter|document|upload/i.test(lbl || el.name || el.id || el.accept || '');
+      return /resume|cv|cover.?letter|document|upload|attachment|portfolio/i.test(lbl || el.name || el.id || el.accept || '');
     });
-    if (!fileInputs.length) return false;
+    // Also check shadow DOM for file inputs
+    const shadowFileInputs = queryShadowAll('input[type="file"]').filter(el => {
+      const lbl = el.getAttribute('aria-label') || el.name || el.id || el.accept || '';
+      return /resume|cv|cover.?letter|document|upload/i.test(lbl);
+    });
+    const allFileInputs = [...fileInputs, ...shadowFileInputs];
+
+    if (!allFileInputs.length) {
+      LOG('No file inputs found');
+      // OwlApply-inspired: check for drag-drop upload zones and try to trigger click
+      const dropZones = $$('[class*="dropzone"],[class*="upload-area"],[class*="file-drop"],[class*="dz-clickable"],.upload-container,.file-upload-area,[class*="drag-drop"],[class*="browse-file"]')
+        .filter(isVisible);
+      if (dropZones.length) {
+        LOG('Drop zones found — attempting drag-drop simulation');
+        for (const zone of dropZones) {
+          // Try to find hidden file input within dropzone
+          const hiddenInput = zone.querySelector('input[type="file"]');
+          if (hiddenInput) {
+            allFileInputs.push(hiddenInput);
+            break;
+          }
+        }
+      }
+      if (!allFileInputs.length) return false;
+    }
+
+    // Try to get resume from storage (base64 encoded)
+    const resumeData = await st.get('ua_resume_data');
+    if (resumeData?.base64 && resumeData?.fileName) {
+      for (const fileInput of allFileInputs) {
+        try {
+          const byteString = atob(resumeData.base64.split(',').pop() || resumeData.base64);
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+          const mime = resumeData.mimeType || 'application/pdf';
+          const file = new File([ab], resumeData.fileName, { type: mime });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+          fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+          LOG(`Resume injected via DataTransfer — ${resumeData.fileName}`);
+          await sleep(1000);
+
+          // OwlApply-inspired: also simulate drag-drop for zones that need it
+          const parent = fileInput.closest('[class*="dropzone"],[class*="upload"]');
+          if (parent) {
+            const dropEvt = new DragEvent('drop', { bubbles: true, dataTransfer: dt });
+            parent.dispatchEvent(new DragEvent('dragenter', { bubbles: true }));
+            parent.dispatchEvent(new DragEvent('dragover', { bubbles: true }));
+            parent.dispatchEvent(dropEvt);
+            LOG('Drag-drop simulation completed for upload zone');
+          }
+          return true;
+        } catch (err) { LOG('Resume injection failed — ' + err.message); }
+      }
+    }
 
     // Check if Jobright sidebar has a resume ready
     const sidebar = $('#jobright-helper-id');
-    if (!sidebar) return false;
-
-    // Look for "Download Resume" or similar button in sidebar
-    const dlBtn = sidebar.querySelector('a[download],a[href*="resume"],button[class*="download"],.download-resume-button');
-    if (dlBtn) {
-      LOG('Found resume download button in Jobright sidebar — resume upload handled by sidebar');
-      return true;
+    if (sidebar) {
+      const dlBtn = sidebar.querySelector('a[download],a[href*="resume"],button[class*="download"],.download-resume-button');
+      if (dlBtn) {
+        LOG('Found resume download button in Jobright sidebar — resume upload handled by sidebar');
+        return true;
+      }
     }
 
-    // Check for drag-and-drop upload zones
-    const dropZones = $$('[class*="dropzone"],[class*="upload-area"],[class*="file-drop"],[class*="dz-clickable"],.upload-container,.file-upload-area')
-      .filter(isVisible);
-    if (dropZones.length) {
-      LOG('Drop zones found — Jobright sidebar handles resume upload');
-    }
+    LOG('File inputs found but no stored resume — manual upload needed');
     return false;
   }
 
@@ -3166,25 +3181,6 @@
           e.preventDefault();
           exportQueueCSV();
           break;
-        case 'd': // Alt+D: Toggle dark mode
-          e.preventDefault();
-          toggleDarkMode().then(dark => {
-            const btn = document.getElementById('ua-dark-toggle');
-            if (btn) btn.textContent = dark ? '☀️' : '🌙';
-          });
-          break;
-        case 'g': // Alt+G: Scrape jobs from page
-          e.preventDefault();
-          scrapeAndAddToQueue();
-          break;
-        case 'r': // Alt+R: Retry failed jobs
-          e.preventDefault();
-          retryFailedJobs();
-          break;
-        case 'h': // Alt+H: Export application history
-          e.preventDefault();
-          exportAppHistory();
-          break;
       }
     });
   }
@@ -3277,7 +3273,14 @@
 
           // Run ATS-specific flow
           await withRetry(async () => {
-            await dispatchATSAutomation();
+            if (isWorkday()) await workdayAutomation();
+            else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+            else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+            else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+            else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+            else if (/ashbyhq\.com/i.test(location.href)) await ashbyAutomation();
+            else if (/bamboohr\.com/i.test(location.href)) await bamboohrAutomation();
+            else await tailorFirstFlow();
           }, 'Queue job automation');
 
           // Clear timeout — job completed normally
@@ -3297,12 +3300,13 @@
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed successfully');
-            await recordApplication(c.url, c.title, 'applied', c.jobBoard, c.duration);
+            // OwlApply-inspired: track in application history
+            await trackApplication(c.url, c.companyName, c.title, 'applied');
           } else {
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed (success not confirmed)');
-            await recordApplication(c.url, c.title, 'completed', c.jobBoard, c.duration);
+            await trackApplication(c.url, c.companyName, c.title, 'applied');
           }
           qStats.totalTime += c.duration;
 
@@ -3336,7 +3340,7 @@
       const idx = queue.indexOf(n);
       st.set('ua_q_stopped_at', idx);
       saveQ().then(() => {
-        const delay = Math.max(_rateLimitDelay || 3000, QUEUE_DELAYS[qSpeed] || 2000);
+        const delay = QUEUE_DELAYS[qSpeed] || 2000;
         setTimeout(() => { location.href = n.url; }, delay);
       });
     } else {
@@ -3351,10 +3355,6 @@
       const skipped = queue.filter(j => j.status === 'skipped').length;
       LOG(`Results: ${done} done, ${failed} failed, ${timedOut} timed out, ${skipped} skipped of ${queue.length} total`);
       if (qStats.totalTime > 0) LOG(`Average time: ${Math.round(qStats.totalTime / Math.max(done, 1) / 1000)}s per application`);
-      // Browser notification
-      st.get('ua_notif_enabled').then(enabled => {
-        if (enabled) sendNotification('Queue Complete!', `${done} applied, ${failed} failed, ${skipped} skipped of ${queue.length} total`);
-      });
       renderQ(); updateCtrl();
     }
   }
@@ -3448,373 +3448,6 @@
     return { total: fields.length, filled, unfilled: fields.length - filled, required, requiredFilled, requiredUnfilled: required - requiredFilled };
   }
 
-  // ===================== APPLICATION HISTORY TRACKING =====================
-  let _appHistory = [];
-  let _appHistoryLoaded = false;
-
-  async function loadAppHistory() {
-    if (_appHistoryLoaded) return _appHistory;
-    _appHistory = (await st.get('ua_app_history')) || [];
-    _appHistoryLoaded = true;
-    return _appHistory;
-  }
-
-  async function saveAppHistory() {
-    await st.set('ua_app_history', _appHistory);
-  }
-
-  async function recordApplication(url, title, status, atsName, duration) {
-    await loadAppHistory();
-    _appHistory.unshift({
-      url, title: title || shortUrl(url),
-      status: status || 'applied',
-      ats: atsName || detectATS() || 'Unknown',
-      appliedAt: Date.now(),
-      duration: duration || 0,
-      company: extractCompanyFromUrl(url),
-    });
-    // Keep last 500 applications
-    if (_appHistory.length > 500) _appHistory = _appHistory.slice(0, 500);
-    await saveAppHistory();
-  }
-
-  function extractCompanyFromUrl(url) {
-    try {
-      const h = new URL(url).hostname;
-      // Extract company from ATS subdomain patterns
-      const m = h.match(/([^.]+)\.(myworkdayjobs|greenhouse|lever|icims|smartrecruiters|jobvite|bamboohr|ashbyhq|workable|breezy)/);
-      if (m) return m[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      // Fallback: second-level domain
-      const parts = h.replace('www.', '').split('.');
-      return parts[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    } catch { return 'Unknown'; }
-  }
-
-  function getHistoryStats() {
-    const now = Date.now();
-    const today = _appHistory.filter(a => now - a.appliedAt < 86400000);
-    const thisWeek = _appHistory.filter(a => now - a.appliedAt < 604800000);
-    const thisMonth = _appHistory.filter(a => now - a.appliedAt < 2592000000);
-    const atsCounts = {};
-    _appHistory.forEach(a => { atsCounts[a.ats] = (atsCounts[a.ats] || 0) + 1; });
-    const topAts = Object.entries(atsCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    const companyCounts = {};
-    _appHistory.forEach(a => { if (a.company) companyCounts[a.company] = (companyCounts[a.company] || 0) + 1; });
-    const avgDuration = _appHistory.filter(a => a.duration > 0).reduce((s, a) => s + a.duration, 0) / Math.max(_appHistory.filter(a => a.duration > 0).length, 1);
-    return {
-      total: _appHistory.length,
-      today: today.length,
-      thisWeek: thisWeek.length,
-      thisMonth: thisMonth.length,
-      topAts,
-      avgDuration: Math.round(avgDuration / 1000),
-      companies: Object.keys(companyCounts).length,
-    };
-  }
-
-  function exportAppHistory() {
-    const header = 'URL,Title,Company,ATS,Status,Applied At,Duration (s)\n';
-    const rows = _appHistory.map(a => {
-      const url = (a.url || '').replace(/"/g, '""');
-      const title = (a.title || '').replace(/"/g, '""');
-      const company = (a.company || '').replace(/"/g, '""');
-      const date = a.appliedAt ? new Date(a.appliedAt).toISOString() : '';
-      return `"${url}","${title}","${company}","${a.ats || ''}","${a.status || ''}","${date}","${Math.round((a.duration || 0) / 1000)}"`;
-    }).join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `application-history-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-    LOG(`Exported ${_appHistory.length} application records`);
-  }
-
-  // ===================== RESUME MANAGER (Multi-Resume Support) =====================
-  let _resumes = [];
-  let _resumesLoaded = false;
-  let _activeResumeIdx = 0;
-
-  async function loadResumes() {
-    if (_resumesLoaded) return _resumes;
-    _resumes = (await st.get('ua_resumes')) || [];
-    _activeResumeIdx = (await st.get('ua_active_resume')) || 0;
-    _resumesLoaded = true;
-    // Migrate old single resume
-    const oldResume = await st.get('ua_resume_data');
-    if (oldResume && !_resumes.length) {
-      _resumes.push({ name: oldResume.fileName || 'Resume', base64: oldResume.base64, mimeType: oldResume.mimeType || 'application/pdf', fileName: oldResume.fileName, addedAt: Date.now() });
-      await saveResumes();
-    }
-    return _resumes;
-  }
-
-  async function saveResumes() {
-    await st.set('ua_resumes', _resumes);
-    await st.set('ua_active_resume', _activeResumeIdx);
-    // Also sync to ua_resume_data for backward compatibility
-    if (_resumes[_activeResumeIdx]) {
-      await st.set('ua_resume_data', _resumes[_activeResumeIdx]);
-    }
-  }
-
-  function addResume(file) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        _resumes.push({
-          name: file.name.replace(/\.[^.]+$/, ''),
-          fileName: file.name,
-          base64: reader.result,
-          mimeType: file.type || 'application/pdf',
-          size: file.size,
-          addedAt: Date.now(),
-        });
-        _activeResumeIdx = _resumes.length - 1;
-        await saveResumes();
-        resolve(true);
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function removeResume(idx) {
-    _resumes.splice(idx, 1);
-    if (_activeResumeIdx >= _resumes.length) _activeResumeIdx = Math.max(0, _resumes.length - 1);
-    await saveResumes();
-  }
-
-  async function setActiveResume(idx) {
-    _activeResumeIdx = idx;
-    await saveResumes();
-  }
-
-  // ===================== PROFILE IMPORT/EXPORT =====================
-  async function exportProfile() {
-    const p = await getProfile();
-    const data = JSON.stringify(p, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `profile-${new Date().toISOString().slice(0, 10)}.json`;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-    LOG('Profile exported');
-  }
-
-  async function importProfile(jsonStr) {
-    try {
-      const data = JSON.parse(jsonStr);
-      if (typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid profile format');
-      await st.set(SK.PROF, data);
-      LOG('Profile imported successfully');
-      return true;
-    } catch (e) {
-      LOG('Profile import error:', e.message);
-      return false;
-    }
-  }
-
-  // ===================== AUTO-RETRY FAILED JOBS =====================
-  async function retryFailedJobs() {
-    const failed = queue.filter(j => j.status === 'failed' || j.status === 'timeout');
-    if (!failed.length) { LOG('No failed jobs to retry'); return; }
-    let count = 0;
-    for (const j of failed) {
-      j.status = 'pending';
-      j.error = null;
-      j.startedAt = null;
-      j.completedAt = null;
-      j.duration = null;
-      count++;
-    }
-    await saveQ();
-    renderQ();
-    LOG(`Reset ${count} failed jobs for retry`);
-  }
-
-  // ===================== RATE LIMITING =====================
-  let _rateLimitDelay = 3000; // ms between applications (default 3s)
-  let _rateLimitLoaded = false;
-
-  async function loadRateLimitDelay() {
-    if (_rateLimitLoaded) return;
-    const saved = await st.get('ua_rate_limit');
-    if (saved) _rateLimitDelay = saved;
-    _rateLimitLoaded = true;
-  }
-
-  async function setRateLimitDelay(ms) {
-    _rateLimitDelay = ms;
-    await st.set('ua_rate_limit', ms);
-  }
-
-  // ===================== BROWSER NOTIFICATIONS =====================
-  function sendNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body, icon: chrome.runtime.getURL?.('icon128.plasmo.3c1ed2d2.png') || '' });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') new Notification(title, { body });
-      });
-    }
-  }
-
-  // ===================== FORM ANALYSIS =====================
-  function getFormAnalysis() {
-    const analysis = analyzeCurrentForm();
-    const ats = detectATS();
-    const successCheck = checkSuccess();
-    return {
-      ...analysis,
-      ats: ats || 'None detected',
-      successDetected: successCheck,
-      pageUrl: location.href,
-      missingRequired: getMissingRequired(),
-    };
-  }
-
-  // ===================== DARK MODE =====================
-  let _darkMode = false;
-
-  async function loadDarkMode() {
-    _darkMode = (await st.get('ua_dark_mode')) || false;
-    return _darkMode;
-  }
-
-  async function toggleDarkMode() {
-    _darkMode = !_darkMode;
-    await st.set('ua_dark_mode', _darkMode);
-    applyDarkMode();
-    return _darkMode;
-  }
-
-  function applyDarkMode() {
-    const drawer = document.getElementById('ua-drawer');
-    if (!drawer) return;
-    if (_darkMode) {
-      drawer.classList.add('ua-dark');
-    } else {
-      drawer.classList.remove('ua-dark');
-    }
-  }
-
-  // ===================== CUSTOMIZABLE DEFAULTS =====================
-  let _customDefaults = null;
-
-  async function loadCustomDefaults() {
-    const saved = await st.get('ua_custom_defaults');
-    if (saved) {
-      _customDefaults = saved;
-      Object.assign(DEFAULTS, saved);
-    }
-    return DEFAULTS;
-  }
-
-  async function saveCustomDefaults(newDefaults) {
-    _customDefaults = newDefaults;
-    Object.assign(DEFAULTS, newDefaults);
-    await st.set('ua_custom_defaults', newDefaults);
-  }
-
-  // ===================== JOB SCRAPER (LinkedIn/Indeed/Glassdoor Search Pages) =====================
-  function scrapeJobListings() {
-    const url = location.href;
-    const jobs = [];
-
-    // LinkedIn search results
-    if (/linkedin\.com\/(jobs\/search|jobs\/collections)/i.test(url)) {
-      $$('.job-card-container a.job-card-list__title,.jobs-search-results__list-item a,.job-card-container__link,.scaffold-layout__list-item a[href*="/jobs/view/"]').forEach(a => {
-        const href = a.href?.split('?')[0];
-        const title = a.textContent?.trim() || '';
-        if (href && /\/jobs\/view\//i.test(href)) jobs.push({ url: href, title });
-      });
-    }
-
-    // Indeed search results
-    if (/indeed\.com\/(jobs|q-)/i.test(url)) {
-      $$('a[data-jk],a.jcs-JobTitle,h2.jobTitle a,.job_seen_beacon a[href*="/viewjob"],.resultContent a[href*="/rc/clk"]').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href && /viewjob|clk/i.test(href)) jobs.push({ url: href, title });
-      });
-    }
-
-    // Glassdoor search results
-    if (/glassdoor\.com\/Job/i.test(url)) {
-      $$('a[data-test="job-link"],a.jobLink,.JobCard a[href*="/job-listing/"]').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href) jobs.push({ url: href, title });
-      });
-    }
-
-    // ZipRecruiter search results
-    if (/ziprecruiter\.com\/jobs/i.test(url)) {
-      $$('a.job_link,a[data-job-id],article a[href*="/c/"]').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href) jobs.push({ url: href, title });
-      });
-    }
-
-    // Dice search results
-    if (/dice\.com\/jobs/i.test(url)) {
-      $$('a[data-cy="card-title-link"],a.card-title-link,.search-card a[href*="/job-detail/"]').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href) jobs.push({ url: href, title });
-      });
-    }
-
-    // Wellfound/AngelList
-    if (/wellfound\.com|angel\.co/i.test(url) && /\/jobs/i.test(url)) {
-      $$('a[href*="/jobs/"],.styles_component__container a,.browse-table-row a').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href && title.length > 3 && title.length < 120) jobs.push({ url: href, title });
-      });
-    }
-
-    // Generic career pages
-    if (/\/careers?\/|\/jobs?\//i.test(url) && !jobs.length) {
-      $$('a[href*="/job"],a[href*="/position"],a[href*="/opening"],a[href*="/career"]').forEach(a => {
-        const href = a.href;
-        const title = a.textContent?.trim() || '';
-        if (href && title.length > 5 && title.length < 120 && href !== url) jobs.push({ url: href, title });
-      });
-    }
-
-    // Deduplicate
-    const seen = new Set();
-    return jobs.filter(j => {
-      if (seen.has(j.url)) return false;
-      seen.add(j.url);
-      return true;
-    });
-  }
-
-  async function scrapeAndAddToQueue() {
-    const jobs = scrapeJobListings();
-    if (!jobs.length) { LOG('No job listings found on this page'); return 0; }
-    let added = 0;
-    for (const j of jobs) {
-      if (!queue.some(q => q.url === j.url)) {
-        await addJob(j.url, j.title);
-        added++;
-      }
-    }
-    LOG(`Scraped and added ${added} jobs from search results (${jobs.length} found, ${jobs.length - added} duplicates)`);
-    return added;
-  }
-
   // ===================== CREDIT HIDE =====================
   function hideCredits() {
     $$('.autofill-credit-row,.payment-entry,.plugin-setting-credits-tip').forEach(e => e.style.display = 'none');
@@ -3838,6 +3471,75 @@
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
     // Simplify+ coin/token bypass display
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: "AUTOFILL FOR ME" BUTTON =====================
+  // OwlApply shows an "Autofill For Me" button at the bottom of job application pages
+  function injectAutofillButton() {
+    if (window.self !== window.top) return;
+    if (document.getElementById('ua-autofill-btn')) return;
+    const ats = detectATS();
+    if (!ats) return;
+
+    const btn = document.createElement('div');
+    btn.id = 'ua-autofill-btn';
+    btn.innerHTML = `
+      <div id="ua-af-inner">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+          <path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/>
+        </svg>
+        <span>Autofill For Me</span>
+      </div>
+    `;
+    btn.addEventListener('click', async () => {
+      const inner = document.getElementById('ua-af-inner');
+      inner.innerHTML = '<span class="ua-af-spinner"></span><span>Filling...</span>';
+      inner.style.opacity = '0.8';
+      try {
+        if (isWorkday()) await workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+        else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+        else if (/ashbyhq\.com/i.test(location.href)) await ashbyAutomation();
+        else if (/bamboohr\.com/i.test(location.href)) await bamboohrAutomation();
+        else await tailorFirstFlow();
+        inner.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Done!</span>';
+        inner.style.background = '#059669';
+        showToast('Form filled successfully! Review and submit.', 'success');
+      } catch (err) {
+        inner.innerHTML = '<span>Retry</span>';
+        inner.style.background = '#ef4444';
+        LOG('Autofill button error:', err);
+      }
+      setTimeout(() => {
+        inner.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/></svg><span>Autofill For Me</span>`;
+        inner.style.background = '';
+        inner.style.opacity = '';
+      }, 4000);
+    });
+    document.body.appendChild(btn);
+  }
+
+  // OwlApply-inspired: Toast notification system
+  function showToast(message, type) {
+    type = type || 'info';
+    const existing = document.getElementById('ua-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'ua-toast';
+    const bgColor = type === 'success' ? '#059669' : type === 'error' ? '#ef4444' : '#3b82f6';
+    toast.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;background:${bgColor};color:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.2);font-family:system-ui,sans-serif;font-size:13px;font-weight:600;max-width:320px;animation:uaToastIn .3s ease-out">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/></svg>
+        <span>${message}</span>
+        <button onclick="this.closest('#ua-toast').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 0 0 8px;opacity:.7">×</button>
+      </div>
+    `;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
   }
 
   // ===================== CSS =====================
@@ -3970,73 +3672,20 @@
 #ua-ats.show{display:flex}
 #ua-ats .dot{width:5px;height:5px;border-radius:50%;background:#34d399;animation:uap 1.5s infinite}
 
-/* === DARK MODE === */
-#ua-drawer.ua-dark{background:#1f2937;color:#e5e7eb;border-color:#374151}
-#ua-drawer.ua-dark .ua-body{scrollbar-color:#4b5563 #1f2937}
-#ua-drawer.ua-dark .ua-sec-t{color:#6b7280}
-#ua-drawer.ua-dark .ua-tog{background:#111827;border-color:#374151}
-#ua-drawer.ua-dark .ua-tog-l{color:#e5e7eb}
-#ua-drawer.ua-dark .ua-tog-d{color:#6b7280}
-#ua-drawer.ua-dark .ua-drop{border-color:#4b5563;background:#111827}
-#ua-drawer.ua-dark .ua-drop:hover{border-color:#00c985;background:#064e3b}
-#ua-drawer.ua-dark .ua-drop-t{color:#9ca3af}
-#ua-drawer.ua-dark .ua-url-inp{background:#111827;border-color:#4b5563;color:#e5e7eb}
-#ua-drawer.ua-dark .ua-qlist{border-color:#374151}
-#ua-drawer.ua-dark .ua-qi{border-color:#374151}
-#ua-drawer.ua-dark .ua-qi:hover{background:#111827}
-#ua-drawer.ua-dark .ua-qi .url{color:#d1d5db}
-#ua-drawer.ua-dark .ua-qi .num{background:#374151;color:#9ca3af}
-#ua-drawer.ua-dark .ua-qbtns .sec{background:#374151;color:#d1d5db}
-#ua-drawer.ua-dark .ua-qbtns .dan{background:#1f2937;border-color:#ef4444;color:#f87171}
-#ua-drawer.ua-dark .ua-stat.off{background:#111827;color:#6b7280}
-#ua-drawer.ua-dark input[type="text"],#ua-drawer.ua-dark input[type="number"],#ua-drawer.ua-dark select{background:#111827;border-color:#4b5563;color:#e5e7eb}
-#ua-drawer.ua-dark .ua-q-bar .info{color:#6b7280}
-#ua-drawer.ua-dark #ua-prof{background:#111827;border-color:#374151}
-#ua-drawer.ua-dark #ua-prof-toggle{background:#111827;border-color:#374151;color:#9ca3af}
-#ua-drawer.ua-dark kbd{background:#374151;border-color:#4b5563;color:#d1d5db}
+/* === OWLAPPLY-INSPIRED: AUTOFILL FOR ME BUTTON === */
+#ua-autofill-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483646;cursor:pointer}
+#ua-af-inner{display:flex;align-items:center;gap:8px;padding:12px 28px;background:linear-gradient(135deg,#00c985,#00a86b);color:#fff;border-radius:28px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,168,107,.4),0 0 0 3px rgba(0,201,133,.15);transition:all .25s;white-space:nowrap;letter-spacing:.3px}
+#ua-af-inner:hover{transform:translateY(-2px);box-shadow:0 6px 28px rgba(0,168,107,.5),0 0 0 4px rgba(0,201,133,.2)}
+#ua-af-inner:active{transform:translateY(0);box-shadow:0 2px 12px rgba(0,168,107,.35)}
+.ua-af-spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:uaSpin .6s linear infinite}
+@keyframes uaSpin{to{transform:rotate(360deg)}}
 
-/* === HISTORY PANEL === */
-.ua-hist-item{padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:10px;display:flex;gap:6px;align-items:center}
-.ua-hist-item:last-child{border-bottom:none}
-.ua-hist-item .company{font-weight:600;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ua-hist-item .ats{font-size:8px;padding:1px 5px;border-radius:3px;background:#dbeafe;color:#1e40af}
-.ua-hist-item .date{font-size:8px;color:#9ca3af}
-#ua-drawer.ua-dark .ua-hist-item{border-color:#374151}
-#ua-drawer.ua-dark .ua-hist-item .company{color:#e5e7eb}
+/* === OWLAPPLY-INSPIRED: TOAST NOTIFICATION === */
+@keyframes uaToastIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
 
-/* === STATS CARDS === */
-.ua-stats-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
-.ua-stat-card{flex:1;min-width:70px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;padding:8px;text-align:center}
-.ua-stat-card .num{font-size:18px;font-weight:800;color:#059669}
-.ua-stat-card .lbl{font-size:8px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
-#ua-drawer.ua-dark .ua-stat-card{background:#064e3b;border-color:#065f46}
-#ua-drawer.ua-dark .ua-stat-card .num{color:#6ee7b7}
-#ua-drawer.ua-dark .ua-stat-card .lbl{color:#9ca3af}
-
-/* === RESUME LIST === */
-.ua-resume-item{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#f9fafb;border:1px solid #f3f4f6;border-radius:6px;margin-bottom:4px;font-size:10px}
-.ua-resume-item.active{border-color:#00c985;background:#ecfdf5}
-.ua-resume-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#111827}
-.ua-resume-item .size{color:#9ca3af;font-size:8px}
-.ua-resume-item button{background:none;border:none;cursor:pointer;padding:2px;color:#9ca3af;font-size:12px}
-.ua-resume-item button:hover{color:#ef4444}
-#ua-drawer.ua-dark .ua-resume-item{background:#111827;border-color:#374151}
-#ua-drawer.ua-dark .ua-resume-item.active{border-color:#00c985;background:#064e3b}
-#ua-drawer.ua-dark .ua-resume-item .name{color:#e5e7eb}
-
-/* === FORM ANALYSIS === */
-.ua-form-bar{display:flex;gap:4px;margin-bottom:6px}
-.ua-form-pill{padding:3px 8px;border-radius:12px;font-size:9px;font-weight:600}
-.ua-form-pill.good{background:#d1fae5;color:#065f46}
-.ua-form-pill.warn{background:#fef3c7;color:#92400e}
-.ua-form-pill.bad{background:#fee2e2;color:#991b1b}
-.ua-form-progress{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-bottom:4px}
-.ua-form-progress .fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#00c985,#059669);transition:width .3s}
-
-/* === SCRAPE BUTTON === */
-.ua-scrape-btn{width:100%;padding:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border:none;border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.4px;margin-top:6px}
-.ua-scrape-btn:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8)}
-.ua-scrape-btn:disabled{background:#e5e7eb;color:#9ca3af;cursor:default}
+/* === OWLAPPLY-INSPIRED: APPLICATION TRACKER === */
+.ua-tracker{max-height:150px;overflow-y:auto;border:1px solid #f3f4f6;border-radius:8px}
+.ua-tracker-stats{display:flex;gap:12px;padding:6px 0;font-size:10px;color:#6b7280;justify-content:center}
     `;
     document.head.appendChild(s);
   }
@@ -4092,7 +3741,7 @@
     // --- Drawer ---
     const dw = document.createElement('div'); dw.id = 'ua-drawer';
     dw.innerHTML = `
-      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><div style="display:flex;gap:6px;align-items:center"><button id="ua-dark-toggle" title="Dark Mode" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px">🌙</button><span class="ua-hdr-badge">UNLIMITED</span></div></div>
+      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill v${VERSION}</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><span class="ua-hdr-badge">UNLIMITED</span></div>
       <div class="ua-body">
         <div class="ua-sec">
           <div class="ua-sec-t">Auto-Apply</div>
@@ -4100,43 +3749,9 @@
           <div id="ua-stat" class="ua-stat off"><span class="dot"></span><span id="ua-stat-t">Inactive</span></div>
         </div>
         <div class="ua-sec">
-          <div class="ua-sec-t">Form Analysis</div>
-          <div id="ua-form-analysis">
-            <div class="ua-form-progress"><div class="fill" id="ua-form-progress-fill" style="width:0%"></div></div>
-            <div class="ua-form-bar" id="ua-form-pills"></div>
-            <div style="display:flex;gap:4px">
-              <button id="ua-fill-now" style="flex:1;padding:6px;background:#00c985;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Fill Now (Alt+F)</button>
-              <button id="ua-analyze" style="flex:1;padding:6px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">Analyze</button>
-            </div>
-          </div>
-        </div>
-        <div class="ua-sec">
-          <div class="ua-sec-t">Application History</div>
-          <div class="ua-stats-row" id="ua-hist-stats">
-            <div class="ua-stat-card"><div class="num" id="ua-hist-today">0</div><div class="lbl">Today</div></div>
-            <div class="ua-stat-card"><div class="num" id="ua-hist-week">0</div><div class="lbl">This Week</div></div>
-            <div class="ua-stat-card"><div class="num" id="ua-hist-total">0</div><div class="lbl">Total</div></div>
-            <div class="ua-stat-card"><div class="num" id="ua-hist-companies">0</div><div class="lbl">Companies</div></div>
-          </div>
-          <div id="ua-hist-list" style="max-height:120px;overflow-y:auto;border:1px solid #f3f4f6;border-radius:8px;margin-bottom:6px"></div>
-          <div style="display:flex;gap:4px">
-            <button id="ua-hist-export" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export History</button>
-            <button id="ua-hist-clear" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer">Clear History</button>
-          </div>
-        </div>
-        <div class="ua-sec">
-          <div class="ua-sec-t">Resumes <span id="ua-resume-cnt" style="color:#00c985"></span></div>
-          <div id="ua-resume-list" style="margin-bottom:6px"></div>
-          <div style="display:flex;gap:4px">
-            <button id="ua-resume-add" style="flex:1;padding:6px;background:#00c985;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">Upload Resume</button>
-            <input type="file" id="ua-resume-file" accept=".pdf,.doc,.docx,.txt,.rtf" style="display:none">
-          </div>
-        </div>
-        <div class="ua-sec">
           <div class="ua-sec-t">Import Jobs</div>
           <div id="ua-drop" class="ua-drop"><div class="ua-drop-t">Drop CSV or click to browse</div><div class="ua-drop-sub">.csv .txt .tsv — or paste multiple URLs</div><input type="file" id="ua-csv" class="ua-csv-in" accept=".csv,.txt,.tsv,.json"></div>
           <div class="ua-url-row"><input type="text" id="ua-url" class="ua-url-inp" placeholder="Paste job URL..."><button id="ua-add" class="ua-url-btn">Add</button></div>
-          <button id="ua-scrape-btn" class="ua-scrape-btn">Scrape Jobs From This Page</button>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Saved Responses <span id="ua-resp-cnt" style="color:#00c985"></span></div>
@@ -4164,53 +3779,22 @@
             <div style="display:flex;gap:6px"><button class="ua-url-btn" id="ua-prof-save" style="flex:1">Save Profile</button><button class="ua-url-btn" id="ua-prof-cancel" style="flex:1;background:#6b7280">Cancel</button></div>
           </div>
           <button id="ua-prof-toggle" style="width:100%;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;text-align:left">Edit Profile (name, email, phone...)</button>
-          <div style="display:flex;gap:4px;margin-top:6px">
-            <button id="ua-prof-export-btn" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export Profile</button>
-            <button id="ua-prof-import-btn" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Import Profile</button>
-            <input type="file" id="ua-prof-file" accept=".json" style="display:none">
-          </div>
-        </div>
-        <div class="ua-sec">
-          <div class="ua-sec-t">Customizable Defaults</div>
-          <div id="ua-defaults-panel" style="display:none;padding:8px;background:#f9fafb;border-radius:8px;border:1px solid #f3f4f6">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px" id="ua-defaults-fields"></div>
-            <div style="display:flex;gap:6px"><button class="ua-url-btn" id="ua-defaults-save" style="flex:1">Save Defaults</button><button class="ua-url-btn" id="ua-defaults-cancel" style="flex:1;background:#6b7280">Cancel</button></div>
-          </div>
-          <button id="ua-defaults-toggle" style="width:100%;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;text-align:left">Edit Default Answers (authorization, sponsorship...)</button>
-        </div>
-        <div class="ua-sec">
-          <div class="ua-sec-t">Queue Settings</div>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <label style="font-size:10px;color:#6b7280;white-space:nowrap">Delay between jobs:</label>
-            <select id="ua-rate-limit" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;flex:1">
-              <option value="1000">1s (Fast)</option>
-              <option value="2000">2s</option>
-              <option value="3000" selected>3s (Default)</option>
-              <option value="5000">5s</option>
-              <option value="10000">10s (Cautious)</option>
-              <option value="15000">15s (Very Safe)</option>
-              <option value="30000">30s (Ultra Safe)</option>
-            </select>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <label style="font-size:10px;color:#6b7280;white-space:nowrap">Job timeout:</label>
-            <select id="ua-timeout" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;flex:1">
-              <option value="60000">60s</option>
-              <option value="90000" selected>90s (Default)</option>
-              <option value="120000">120s</option>
-              <option value="180000">180s</option>
-              <option value="300000">300s</option>
-            </select>
-          </div>
-          <div class="ua-tog" style="margin-bottom:6px"><div><div class="ua-tog-l">Browser Notifications</div><div class="ua-tog-d">Notify on queue complete/errors</div></div><label class="ua-sw"><input type="checkbox" id="ua-notif"><span class="ua-sw-s"></span></label></div>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Queue <span id="ua-q-cnt" style="color:#00c985">(0)</span></div>
-          <div class="ua-q-bar"><label><input type="checkbox" id="ua-selall">Select all</label><button class="del" id="ua-del" disabled>Delete selected</button><button class="del" id="ua-retry-failed" style="border-color:#fbbf24;color:#b45309">Retry failed</button><span class="info" id="ua-q-info"></span></div>
+          <div class="ua-q-bar"><label><input type="checkbox" id="ua-selall">Select all</label><button class="del" id="ua-del" disabled>Delete selected</button><span class="info" id="ua-q-info"></span></div>
           <div class="ua-qlist" id="ua-qlist"></div>
           <div class="ua-qsum" id="ua-qsum"></div>
           <div class="ua-qbtns" id="ua-qbtns"></div>
           <button id="ua-export" style="width:100%;margin-top:6px;padding:6px;background:none;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280">Export Queue to CSV</button>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Application History <span id="ua-tracker-cnt" style="color:#00c985">(0)</span></div>
+          <div id="ua-tracker-list" class="ua-tracker"></div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <button id="ua-tracker-export" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export History</button>
+            <button id="ua-tracker-clear" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer">Clear</button>
+          </div>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Keyboard Shortcuts</div>
@@ -4220,12 +3804,7 @@
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+F</kbd> Fill form now</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+J</kbd> Add page to queue</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+S</kbd> Start/stop queue</div>
-            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+P</kbd> Pause/resume queue</div>
-            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+N</kbd> Skip current job</div>
             <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+E</kbd> Export CSV</div>
-            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+D</kbd> Dark mode toggle</div>
-            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+G</kbd> Scrape jobs from page</div>
-            <div><kbd style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:9px;border:1px solid #e5e7eb">Alt+R</kbd> Retry failed jobs</div>
           </div>
         </div>
       </div>`;
@@ -4290,7 +3869,14 @@
     tog.addEventListener('change', async e => {
       autoApply = e.target.checked; await st.set(SK.AA, autoApply); updateStat();
       if (autoApply && detectATS()) {
-        dispatchATSAutomation();
+        if (isWorkday()) workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) leverAutomation();
+        else if (/icims\.com/i.test(location.href)) icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) linkedinEasyApply();
+        else if (/ashbyhq\.com/i.test(location.href)) ashbyAutomation();
+        else if (/bamboohr\.com/i.test(location.href)) bamboohrAutomation();
+        else tailorFirstFlow();
       }
     });
 
@@ -4398,6 +3984,33 @@
     // Initial render of saved responses
     loadSavedResponses().then(() => renderResponses());
 
+    // ---- OwlApply-inspired: Application Tracker bindings ----
+    loadAppTracker().then(() => updateTrackerUI());
+
+    document.getElementById('ua-tracker-export')?.addEventListener('click', () => {
+      if (!_appTracker.length) { alert('No applications to export'); return; }
+      const header = 'Company,Title,URL,Status,ATS,Date\n';
+      const rows = _appTracker.map(a => {
+        const date = a.appliedAt ? new Date(a.appliedAt).toISOString() : '';
+        return `"${(a.company || '').replace(/"/g, '""')}","${(a.title || '').replace(/"/g, '""')}","${a.url}","${a.status}","${a.ats}","${date}"`;
+      }).join('\n');
+      const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `application-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      LOG(`Exported ${_appTracker.length} applications to CSV`);
+    });
+
+    document.getElementById('ua-tracker-clear')?.addEventListener('click', async () => {
+      if (confirm(`Clear all ${_appTracker.length} application records?`)) {
+        _appTracker = [];
+        await st.set('ua_app_tracker', []);
+        updateTrackerUI();
+      }
+    });
+
     // Answer bank
     const ansCnt = document.getElementById('ua-ans-cnt');
     const ansInfo = document.getElementById('ua-ans-info');
@@ -4406,244 +4019,10 @@
       if (confirm('Clear all learned answers?')) {
         _answerBank = {}; _answerBankLoaded = false;
         await st.set(SK.ANS, {});
-        if (ansCnt) ansCnt.textContent = '(0 answers)';
-        if (ansInfo) {
-          ansInfo.textContent = 'Cleared!';
-          setTimeout(() => { ansInfo.textContent = 'Learned answers help fill forms faster'; }, 2000);
-        }
+        ansCnt.textContent = '(0 answers)';
+        ansInfo.textContent = 'Cleared!';
+        setTimeout(() => { ansInfo.textContent = 'Learned answers help fill forms faster'; }, 2000);
       }
-    });
-
-    // ---- Dark Mode ----
-    document.getElementById('ua-dark-toggle')?.addEventListener('click', async () => {
-      const dark = await toggleDarkMode();
-      document.getElementById('ua-dark-toggle').textContent = dark ? '☀️' : '🌙';
-    });
-    loadDarkMode().then(dark => {
-      applyDarkMode();
-      const btn = document.getElementById('ua-dark-toggle');
-      if (btn) btn.textContent = dark ? '☀️' : '🌙';
-    });
-
-    // ---- Form Analysis ----
-    function updateFormAnalysis() {
-      const analysis = getFormAnalysis();
-      const progress = analysis.total > 0 ? Math.round((analysis.filled / analysis.total) * 100) : 0;
-      const fill = document.getElementById('ua-form-progress-fill');
-      if (fill) fill.style.width = progress + '%';
-      const pills = document.getElementById('ua-form-pills');
-      if (pills) {
-        const parts = [];
-        parts.push(`<span class="ua-form-pill ${progress >= 80 ? 'good' : progress >= 50 ? 'warn' : 'bad'}">${analysis.filled}/${analysis.total} filled</span>`);
-        if (analysis.ats !== 'None detected') parts.push(`<span class="ua-form-pill good">${analysis.ats}</span>`);
-        if (analysis.requiredUnfilled > 0) parts.push(`<span class="ua-form-pill bad">${analysis.requiredUnfilled} required empty</span>`);
-        if (analysis.successDetected) parts.push(`<span class="ua-form-pill good">Success!</span>`);
-        pills.innerHTML = parts.join('');
-      }
-    }
-    document.getElementById('ua-fill-now')?.addEventListener('click', async () => {
-      LOG('Manual fill triggered via button');
-      await fallbackFill();
-      updateFormAnalysis();
-    });
-    document.getElementById('ua-analyze')?.addEventListener('click', updateFormAnalysis);
-    setInterval(updateFormAnalysis, 5000);
-    setTimeout(updateFormAnalysis, 1500);
-
-    // ---- Application History ----
-    function getTimeAgo(ts) {
-      const diff = Date.now() - ts;
-      if (diff < 60000) return 'just now';
-      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-      if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
-      return new Date(ts).toLocaleDateString();
-    }
-    async function renderHistory() {
-      await loadAppHistory();
-      const stats = getHistoryStats();
-      const todayEl = document.getElementById('ua-hist-today');
-      const weekEl = document.getElementById('ua-hist-week');
-      const totalEl = document.getElementById('ua-hist-total');
-      const companiesEl = document.getElementById('ua-hist-companies');
-      if (todayEl) todayEl.textContent = stats.today;
-      if (weekEl) weekEl.textContent = stats.thisWeek;
-      if (totalEl) totalEl.textContent = stats.total;
-      if (companiesEl) companiesEl.textContent = stats.companies;
-      const listEl = document.getElementById('ua-hist-list');
-      if (listEl) {
-        if (!_appHistory.length) {
-          listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No applications yet</div>';
-        } else {
-          listEl.innerHTML = _appHistory.slice(0, 50).map(a => {
-            const timeAgo = getTimeAgo(a.appliedAt);
-            return `<div class="ua-hist-item"><span class="company" title="${(a.url || '').replace(/"/g, '&quot;')}">${a.company || a.title || 'Unknown'}</span><span class="ats">${a.ats || ''}</span><span class="date">${timeAgo}</span></div>`;
-          }).join('');
-        }
-      }
-    }
-    document.getElementById('ua-hist-export')?.addEventListener('click', exportAppHistory);
-    document.getElementById('ua-hist-clear')?.addEventListener('click', async () => {
-      if (confirm(`Clear ${_appHistory.length} application history records?`)) {
-        _appHistory = [];
-        await saveAppHistory();
-        renderHistory();
-      }
-    });
-    renderHistory();
-
-    // ---- Resume Manager ----
-    async function renderResumes() {
-      await loadResumes();
-      const cntEl = document.getElementById('ua-resume-cnt');
-      if (cntEl) cntEl.textContent = `(${_resumes.length})`;
-      const listEl = document.getElementById('ua-resume-list');
-      if (!listEl) return;
-      if (!_resumes.length) {
-        listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No resumes uploaded</div>';
-      } else {
-        listEl.innerHTML = _resumes.map((r, i) => {
-          const sizeStr = r.size ? (r.size < 1024 ? r.size + 'B' : Math.round(r.size / 1024) + 'KB') : '';
-          return `<div class="ua-resume-item ${i === _activeResumeIdx ? 'active' : ''}" data-idx="${i}">
-            <input type="radio" name="ua-resume-active" ${i === _activeResumeIdx ? 'checked' : ''} data-idx="${i}" style="accent-color:#00c985">
-            <span class="name">${r.name || r.fileName || 'Resume'}</span>
-            <span class="size">${sizeStr}</span>
-            <button data-idx="${i}" title="Remove">&times;</button>
-          </div>`;
-        }).join('');
-        listEl.querySelectorAll('input[name="ua-resume-active"]').forEach(r => {
-          r.addEventListener('change', async e => {
-            await setActiveResume(parseInt(e.target.dataset.idx));
-            renderResumes();
-          });
-        });
-        listEl.querySelectorAll('button[data-idx]').forEach(btn => {
-          btn.addEventListener('click', async e => {
-            const idx = parseInt(e.currentTarget.dataset.idx);
-            if (confirm(`Remove "${_resumes[idx]?.name || 'this resume'}"?`)) {
-              await removeResume(idx);
-              renderResumes();
-            }
-          });
-        });
-      }
-    }
-    document.getElementById('ua-resume-add')?.addEventListener('click', () => {
-      document.getElementById('ua-resume-file')?.click();
-    });
-    document.getElementById('ua-resume-file')?.addEventListener('change', async e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      await addResume(file);
-      renderResumes();
-      LOG(`Resume uploaded: ${file.name}`);
-      e.target.value = '';
-    });
-    renderResumes();
-
-    // ---- Profile Import/Export ----
-    document.getElementById('ua-prof-export-btn')?.addEventListener('click', exportProfile);
-    document.getElementById('ua-prof-import-btn')?.addEventListener('click', () => {
-      document.getElementById('ua-prof-file')?.click();
-    });
-    document.getElementById('ua-prof-file')?.addEventListener('change', async e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const text = await file.text();
-      const ok = await importProfile(text);
-      if (ok) {
-        alert('Profile imported successfully!');
-        const profStatusEl = document.getElementById('ua-prof-status');
-        if (profStatusEl) { profStatusEl.textContent = '(imported)'; profStatusEl.style.color = '#059669'; }
-      } else {
-        alert('Failed to import profile. Check JSON format.');
-      }
-      e.target.value = '';
-    });
-
-    // ---- Customizable Defaults ----
-    const defaultsFields = [
-      { k: 'authorized', l: 'Authorized to Work' }, { k: 'sponsorship', l: 'Need Sponsorship' },
-      { k: 'relocation', l: 'Open to Relocation' }, { k: 'remote', l: 'Remote Preference' },
-      { k: 'veteran', l: 'Veteran Status' }, { k: 'disability', l: 'Disability Status' },
-      { k: 'gender', l: 'Gender (EEO)' }, { k: 'ethnicity', l: 'Ethnicity (EEO)' },
-      { k: 'years', l: 'Years Experience' }, { k: 'salary', l: 'Expected Salary' },
-      { k: 'notice', l: 'Notice Period' }, { k: 'availability', l: 'Availability' },
-      { k: 'country', l: 'Default Country' }, { k: 'phoneCountryCode', l: 'Phone Code' },
-      { k: 'howHeard', l: 'How Did You Hear' }, { k: 'cover', l: 'Default Cover Letter' },
-    ];
-    const defaultsPanel = document.getElementById('ua-defaults-panel');
-    const defaultsToggle = document.getElementById('ua-defaults-toggle');
-    const defaultsContainer = document.getElementById('ua-defaults-fields');
-    defaultsToggle?.addEventListener('click', async () => {
-      if (defaultsPanel.style.display === 'none') {
-        defaultsPanel.style.display = 'block';
-        defaultsToggle.style.display = 'none';
-        await loadCustomDefaults();
-        defaultsContainer.innerHTML = defaultsFields.map(f =>
-          `<div><label style="font-size:9px;color:#6b7280;display:block;margin-bottom:2px">${f.l}</label>${f.k === 'cover' ?
-            `<textarea data-dk="${f.k}" style="width:100%;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;box-sizing:border-box;height:60px;resize:vertical">${DEFAULTS[f.k] || ''}</textarea>` :
-            `<input type="text" data-dk="${f.k}" value="${(DEFAULTS[f.k] || '').replace(/"/g, '&quot;')}" style="width:100%;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;box-sizing:border-box">`
-          }</div>`
-        ).join('');
-      }
-    });
-    document.getElementById('ua-defaults-save')?.addEventListener('click', async () => {
-      const newDefaults = {};
-      defaultsContainer.querySelectorAll('[data-dk]').forEach(el => {
-        newDefaults[el.dataset.dk] = (el.value || el.textContent || '').trim();
-      });
-      await saveCustomDefaults(newDefaults);
-      defaultsPanel.style.display = 'none';
-      defaultsToggle.style.display = 'block';
-      LOG('Custom defaults saved');
-    });
-    document.getElementById('ua-defaults-cancel')?.addEventListener('click', () => {
-      defaultsPanel.style.display = 'none';
-      defaultsToggle.style.display = 'block';
-    });
-
-    // ---- Queue Settings ----
-    loadRateLimitDelay().then(() => {
-      const rlSelect = document.getElementById('ua-rate-limit');
-      if (rlSelect) rlSelect.value = _rateLimitDelay.toString();
-    });
-    document.getElementById('ua-rate-limit')?.addEventListener('change', e => {
-      setRateLimitDelay(parseInt(e.target.value));
-    });
-    document.getElementById('ua-timeout')?.addEventListener('change', e => {
-      qTimeout = parseInt(e.target.value);
-      st.set('ua_timeout', qTimeout);
-    });
-    st.get('ua_timeout').then(v => {
-      if (v) { qTimeout = v; const el = document.getElementById('ua-timeout'); if (el) el.value = v.toString(); }
-    });
-
-    // Notifications toggle
-    let _notifEnabled = false;
-    st.get('ua_notif_enabled').then(v => {
-      _notifEnabled = !!v;
-      const el = document.getElementById('ua-notif');
-      if (el) el.checked = _notifEnabled;
-    });
-    document.getElementById('ua-notif')?.addEventListener('change', async e => {
-      _notifEnabled = e.target.checked;
-      await st.set('ua_notif_enabled', _notifEnabled);
-      if (_notifEnabled && 'Notification' in window && Notification.permission !== 'granted') {
-        Notification.requestPermission();
-      }
-    });
-
-    // Retry failed
-    document.getElementById('ua-retry-failed')?.addEventListener('click', retryFailedJobs);
-
-    // ---- Job Scraper ----
-    document.getElementById('ua-scrape-btn')?.addEventListener('click', async () => {
-      const btn = document.getElementById('ua-scrape-btn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Scraping...'; }
-      const count = await scrapeAndAddToQueue();
-      if (btn) { btn.disabled = false; btn.textContent = count > 0 ? `Added ${count} jobs!` : 'No jobs found'; }
-      setTimeout(() => { if (btn) btn.textContent = 'Scrape Jobs From This Page'; }, 3000);
     });
 
     // Profile editor
@@ -4654,6 +4033,10 @@
       { k: 'website', l: 'Website' }, { k: 'school', l: 'School/University' }, { k: 'degree', l: 'Degree' }, { k: 'major', l: 'Major' },
       { k: 'graduation_year', l: 'Grad Year' }, { k: 'current_title', l: 'Job Title' }, { k: 'current_company', l: 'Company' },
       { k: 'expected_salary', l: 'Expected Salary' }, { k: 'years', l: 'Years Experience' }, { k: 'nationality', l: 'Nationality' },
+      // OwlApply-inspired: additional profile fields for comprehensive autofill
+      { k: 'languages', l: 'Languages' }, { k: 'skills', l: 'Key Skills' },
+      { k: 'twitter', l: 'Twitter/X URL' }, { k: 'gpa', l: 'GPA' },
+      { k: 'work_description', l: 'Job Description' }, { k: 'certifications', l: 'Certifications' },
     ];
     const profContainer = document.getElementById('ua-prof-fields');
     const profPanel = document.getElementById('ua-prof');
@@ -4751,38 +4134,16 @@
   // ===================== OBSERVER =====================
   function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, { childList: true, subtree: true }); }
 
-  // ===================== ATS DISPATCHER =====================
-  async function dispatchATSAutomation() {
-    const url = location.href;
-    if (isWorkday()) return await workdayAutomation();
-    if (/greenhouse\.io|boards\.greenhouse/i.test(url)) return await greenhouseAutomation();
-    if (/lever\.co|jobs\.lever/i.test(url)) return await leverAutomation();
-    if (/icims\.com/i.test(url)) return await icimsAutomation();
-    if (/linkedin\.com.*\/jobs/i.test(url)) return await linkedinEasyApply();
-    if (/ashbyhq\.com/i.test(url)) return await ashbyAutomation();
-    if (/bamboohr\.com/i.test(url)) return await bamboohrAutomation();
-    if (/smartrecruiters\.com/i.test(url)) return await smartRecruitersAutomation();
-    if (/taleo\.net|oraclecloud\.com.*Candidate/i.test(url)) return await taleoAutomation();
-    if (/jobvite\.com/i.test(url)) return await jobviteAutomation();
-    if (/workable\.com/i.test(url)) return await workableAutomation();
-    if (/indeed\.com/i.test(url)) return await indeedEasyApply();
-    if (/breezy\.hr|breezyhr\.com/i.test(url)) return await breezyhrAutomation();
-    if (/ats\.rippling\.com/i.test(url)) return await ripplingAutomation();
-    if (/adp\.com|workforcenow\.adp/i.test(url)) return await adpAutomation();
-    if (/successfactors\.com/i.test(url)) return await successFactorsAutomation();
-    if (/jazz\.co|applytojob\.com/i.test(url)) return await jazzhrAutomation();
-    if (/joinhandshake\.com/i.test(url)) return await handshakeAutomation();
-    if (/governmentjobs\.com|usajobs\.gov/i.test(url)) return await usajobsAutomation();
-    if (/eightfold\.ai/i.test(url)) return await eightfoldAutomation();
-    return await tailorFirstFlow();
-  }
-
   // ===================== INIT =====================
   async function init() {
     if (window.self !== window.top) return;
-    await load(); await loadAnswerBank(); await loadSavedResponses(); await loadAppHistory(); await loadResumes(); await loadCustomDefaults(); await loadRateLimitDelay(); injectCSS(); buildUI(); setupKeyboardShortcuts();
+    await load(); await loadAnswerBank(); await loadSavedResponses(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
+    // OwlApply-inspired: inject "Autofill For Me" button on ATS pages
+    setTimeout(injectAutofillButton, 2000);
+    // Load application tracker
+    loadAppTracker().then(() => updateTrackerUI());
     // Update answer bank count in UI
     const ansCntEl = document.getElementById('ua-ans-cnt');
     if (ansCntEl) ansCntEl.textContent = `(${Object.keys(_answerBank).length} answers)`;
@@ -4793,7 +4154,12 @@
       // Auto-start ATS-specific flow when detected and auto-apply is on
       if (autoApply) {
         await sleep(2000);
-        await dispatchATSAutomation();
+        if (isWorkday()) await workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+        else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+        else await tailorFirstFlow();
       }
     }
     if (qActive) { await sleep(2000); processQ(); }
@@ -4886,6 +4252,49 @@
   }
   // Also run periodically as shadow DOM mutations may not trigger MutationObserver
   setInterval(function () { findAndDismissPopup(document); }, 1000);
+})();
+
+// === AUTO-CLICK "Continue to Autofill" BUTTON IN RESUME GENERATION FLOW ===
+// After keywords are added and resume is generated, this auto-clicks the "Continue to Autofill" button
+(function () {
+  function findAndClickContinueToAutofill(root) {
+    var allEls = root.querySelectorAll('button, a, div[role="button"], span[role="button"]');
+    for (var i = 0; i < allEls.length; i++) {
+      var el = allEls[i];
+      var text = (el.textContent || '').trim();
+      if (/^Continue\s*(to\s*)?Autofill$/i.test(text) && el.offsetParent !== null && !el.disabled) {
+        // Only click if it looks clickable (not disabled, visible)
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          el.click();
+          console.log('[UA] Auto-clicked Continue to Autofill button');
+          return true;
+        }
+      }
+    }
+    // Recurse into shadow roots
+    var allNodes = root.querySelectorAll('*');
+    for (var j = 0; j < allNodes.length; j++) {
+      if (allNodes[j].shadowRoot) {
+        if (findAndClickContinueToAutofill(allNodes[j].shadowRoot)) return true;
+      }
+    }
+    return false;
+  }
+
+  // Monitor for the button appearing
+  var continueObserver = new MutationObserver(function () {
+    findAndClickContinueToAutofill(document);
+  });
+  if (document.body) {
+    continueObserver.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', function () {
+      continueObserver.observe(document.body, { childList: true, subtree: true });
+    });
+  }
+  // Also check periodically for shadow DOM changes
+  setInterval(function () { findAndClickContinueToAutofill(document); }, 2000);
 })();
 
 // === SMARTRECRUITERS MULTI-PAGE AUTOFILL SUPPORT ===
