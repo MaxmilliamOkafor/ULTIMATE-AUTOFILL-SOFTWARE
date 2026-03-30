@@ -20,36 +20,11 @@
   });
 
   // ===================== TOGGLE SIDEBAR ON ICON CLICK =====================
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message && (message.action === 'toggleSidebar' || message.name === 'toggleSidebar')) {
-      LOG('Toggle sidebar requested');
-      // Find all Plasmo CSUI containers (sidebar shadow roots)
-      const containers = [
-        ...document.querySelectorAll('plasmo-csui'),
-        ...document.querySelectorAll('[id*="plasmo"]'),
-        ...document.querySelectorAll('[class*="plasmo"]'),
-        ...document.querySelectorAll('[id*="jobright"]'),
-        ...document.querySelectorAll('[id*="Jobright"]')
-      ];
-      // Deduplicate
-      const unique = [...new Set(containers)];
-      if (unique.length > 0) {
-        unique.forEach(el => {
-          if (el.style.display === 'none') {
-            el.style.display = '';
-            LOG('Sidebar shown');
-          } else {
-            el.style.display = 'none';
-            LOG('Sidebar hidden');
-          }
-        });
-      } else {
-        LOG('No Plasmo CSUI containers found to toggle');
-      }
-      sendResponse({ ok: true });
-      return true; // keep message channel open for async
-    }
-  });
+  // NOTE: The original Plasmo bundle (contents.04ff201a.js) already handles the
+  // "iconClicked" message via React state to show/hide the sidebar. We do NOT
+  // add a competing "toggleSidebar" handler here — doing so caused the sidebar
+  // to be toggled multiple times per click (opened by React, then immediately
+  // hidden by this handler), making the icon appear non-functional.
 
   // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
   const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999, aiApply: 99999, smartApply: 99999, quickApply: 99999, bulkApply: 99999, networkScan: 99999, referralRequest: 99999, aiResponse: 99999, essayAnswer: 99999, coins: 99999, tokens: 99999, owlCredits: 99999 };
@@ -4168,46 +4143,11 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
-// === ICON CLICK HANDLER: Toggle Plasmo CSUI Sidebar ===
-(function () {
-  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (msg.message === 'iconClicked') {
-      // Find all Plasmo CSUI containers (custom elements injected by Plasmo framework)
-      var containers = document.querySelectorAll('[id^="plasmo-"], [class*="plasmo"], plasmo-csui, [data-plasmo]');
-      // Also try to find by common Plasmo shadow host patterns
-      if (containers.length === 0) {
-        containers = document.querySelectorAll('[style*="position: fixed"]');
-        // Filter to only extension-injected elements (they often have shadow roots)
-        containers = Array.from(containers).filter(function (el) {
-          return el.shadowRoot || el.tagName.toLowerCase().includes('plasmo');
-        });
-      }
-      // If still no containers found, look for any element with a shadow root that contains Jobright UI
-      if (containers.length === 0) {
-        var allElements = document.querySelectorAll('*');
-        containers = Array.from(allElements).filter(function (el) {
-          return el.shadowRoot && (
-            el.id && el.id.toLowerCase().includes('plasmo') ||
-            el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('plasmo') ||
-            el.tagName && el.tagName.toLowerCase().includes('plasmo')
-          );
-        });
-      }
-      if (containers.length > 0) {
-        containers.forEach(function (c) {
-          if (c.style.display === 'none') {
-            c.style.display = '';
-          } else {
-            c.style.display = 'none';
-          }
-        });
-        console.log('[UA] Toggled', containers.length, 'Plasmo CSUI container(s)');
-      } else {
-        console.log('[UA] No Plasmo CSUI containers found to toggle');
-      }
-    }
-  });
-})();
+// === ICON CLICK HANDLER ===
+// REMOVED: The duplicate "iconClicked" handler here was conflicting with the
+// original Plasmo content script (contents.04ff201a.js) which already handles
+// the "iconClicked" message via React state. Having both caused the sidebar to
+// toggle open then immediately closed on each click, making the icon appear broken.
 
 // === AUTO-DISMISS "Are you sure to autofill again" CONFIRMATION POPUP ===
 // This popup from the Jobright extension interferes with autofill flow.
