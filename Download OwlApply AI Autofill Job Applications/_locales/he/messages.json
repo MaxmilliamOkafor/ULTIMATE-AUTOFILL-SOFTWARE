@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "מילוי אוטומטי של בקשות עבודה עם AI. התאמת קורות חיים, מכתבי מוטיבציה, ניקוד ATS ומעקב משרות."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI מילוי אוטומטי של מועמדויות"
+  },
+  "actionTitle": {
+    "message": "פתח חלון"
+  }
+}

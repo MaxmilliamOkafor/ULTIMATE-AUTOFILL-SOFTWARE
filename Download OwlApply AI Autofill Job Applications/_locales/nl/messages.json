@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI automatisch invullen van sollicitaties. Pas je CV aan, maak motivatiebrieven, controleer ATS-score en volg vacatures."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Automatisch Solliciteren"
+  },
+  "actionTitle": {
+    "message": "Venster openen"
+  }
+}

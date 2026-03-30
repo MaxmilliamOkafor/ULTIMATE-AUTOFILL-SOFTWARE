@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI से नौकरी आवेदन ऑटोफिल करें। रिज्यूमे अनुकूलित करें, कवर लेटर, ATS जाँचें और नौकरियां ट्रैक करें।"
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI से जॉब आवेदन ऑटोफ़िल"
+  },
+  "actionTitle": {
+    "message": "विंडो खोलें"
+  }
+}

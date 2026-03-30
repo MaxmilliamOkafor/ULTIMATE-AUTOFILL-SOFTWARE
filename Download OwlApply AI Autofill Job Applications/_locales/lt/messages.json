@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Automatinis darbo paraiškų pildymas su AI. Pritaikykite CV, kurkite laiškus, tikrinkite ATS ir sekite pasiūlymus."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Automatinis Paraiškų Pildymas"
+  },
+  "actionTitle": {
+    "message": "Atidaryti langą"
+  }
+}

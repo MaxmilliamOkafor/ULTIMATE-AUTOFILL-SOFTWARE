@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AIで求人応募を自動入力。履歴書作成、カバーレター生成、ATS スコア確認、求人追跡を一括サポート。"
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI求人応募自動入力"
+  },
+  "actionTitle": {
+    "message": "ウィンドウを開く"
+  }
+}

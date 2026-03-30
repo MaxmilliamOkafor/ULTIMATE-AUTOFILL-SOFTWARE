@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI-työnhakuautomaatio. Muokkaa ansioluetteloa, luo hakemuksia, tarkista ATS-pisteet ja seuraa työpaikkoja."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Automaattinen Työhakemus"
+  },
+  "actionTitle": {
+    "message": "Avaa ikkuna"
+  }
+}

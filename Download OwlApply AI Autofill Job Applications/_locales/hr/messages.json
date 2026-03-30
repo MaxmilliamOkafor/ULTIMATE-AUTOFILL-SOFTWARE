@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI automatsko ispunjavanje prijava za posao. Prilagodite životopis, generirajte pisma, provjerite ATS."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Automatsko Popunjavanje Prijava"
+  },
+  "actionTitle": {
+    "message": "Otvori prozor"
+  }
+}

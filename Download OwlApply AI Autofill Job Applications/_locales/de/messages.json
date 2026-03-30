@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "KI-Bewerbungsausfüllung. Lebenslauf anpassen, Anschreiben erstellen, ATS-Score prüfen und Jobs verfolgen."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: KI-Autofill für Bewerbungen"
+  },
+  "actionTitle": {
+    "message": "Fenster öffnen"
+  }
+}

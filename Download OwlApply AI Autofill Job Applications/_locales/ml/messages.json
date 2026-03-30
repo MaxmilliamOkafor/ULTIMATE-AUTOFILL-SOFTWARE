@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI ജോലി അപേക്ഷ ഓട്ടോഫിൽ. റെസ്യൂമെ, കവർ ലെറ്റർ, ATS സ്കോർ, ജോലി ട്രാക്ക് ചെയ്യുക."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI ജോബ് അപേക്ഷ ഓട്ടോഫിൽ"
+  },
+  "actionTitle": {
+    "message": "വിൻഡോ തുറക്കുക"
+  }
+}

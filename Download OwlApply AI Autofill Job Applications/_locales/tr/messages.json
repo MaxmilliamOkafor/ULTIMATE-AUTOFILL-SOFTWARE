@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI ile iş başvurularını otomatik doldurun. CV düzenleyin, ön yazı oluşturun, ATS skoru kontrol edin ve işleri takip edin."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: Yapay Zeka ile Otomatik İş Başvurusu"
+  },
+  "actionTitle": {
+    "message": "Pencereyi Aç"
+  }
+}

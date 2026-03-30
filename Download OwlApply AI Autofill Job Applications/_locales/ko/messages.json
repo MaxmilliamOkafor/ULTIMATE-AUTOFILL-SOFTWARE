@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI로 구직 지원서를 자동 입력하세요. 이력서 맞춤화, 자기소개서 생성, ATS 점수 확인 및 유사 일자리 추적."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI 입사지원 자동작성"
+  },
+  "actionTitle": {
+    "message": "창 열기"
+  }
+}
