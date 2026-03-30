@@ -24,18 +24,15 @@ self.addEventListener('unhandledrejection', function(event) {
   }
 });
 
-// === UA FIX: Icon click toggles sidebar on active tab ===
-if (chrome.action && chrome.action.onClicked) {
-  chrome.action.onClicked.addListener(function(tab) {
-    if (tab && tab.id) {
-      chrome.tabs.sendMessage(tab.id, { name: "toggleSidebar", action: "toggleSidebar" }).catch(function() {
-        // Tab has no content script — inject ua-enhancement.js and content script
-        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["ua-enhancement.js"] }).catch(function() {});
-        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["contents.04ff201a.js"] }).catch(function() {});
-      });
-    }
-  });
-}
+// === UA FIX: Icon click — rely on original bundle's onClicked handler ===
+// REMOVED: The duplicate action.onClicked listener here sent a "toggleSidebar"
+// message that competed with the original bundle's "iconClicked" message.
+// Both fired on each click, causing the sidebar to open (via React state from
+// "iconClicked") then immediately toggle closed (via DOM manipulation from
+// "toggleSidebar"), making the icon appear non-functional.
+// The original bundle already has: chrome.action.onClicked.addListener(...)
+// which sends { message: "iconClicked" } — this is handled correctly by the
+// Plasmo React content script (contents.04ff201a.js).
 
 // === UA FIX: Auto-set DONT_ASK_AGAIN_AUTOFILL to skip confirmation popup ===
 chrome.storage.local.set({ "DONT_ASK_AGAIN_AUTOFILL": true });
