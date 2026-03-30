@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI аутоматско попуњавање пријава за посао. Прилагодите биографију, генеришите писма, проверите ATS."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: АИ Аутоматско Попуњавање Пријава"
+  },
+  "actionTitle": {
+    "message": "Отвори прозор"
+  }
+}

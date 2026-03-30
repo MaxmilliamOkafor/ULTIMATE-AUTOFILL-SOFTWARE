@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Tự động điền đơn xin việc bằng AI. Tùy chỉnh hồ sơ, viết thư xin việc, kiểm tra ATS và theo dõi việc làm."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Tự Động Điền Đơn Xin Việc"
+  },
+  "actionTitle": {
+    "message": "Mở cửa sổ"
+  }
+}

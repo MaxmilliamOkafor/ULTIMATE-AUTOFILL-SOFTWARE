@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "ИИ автозаполнение заявок на работу. Адаптация резюме, сопроводительные письма, ATS рейтинг, отслеживание вакансий."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: ИИ Автозаполнение Заявок"
+  },
+  "actionTitle": {
+    "message": "Открыть окно"
+  }
+}

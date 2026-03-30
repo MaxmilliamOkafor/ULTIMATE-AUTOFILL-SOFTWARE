@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI सह नोकरी अर्ज ऑटोफिल करा. रेझ्युमे, कव्हर लेटर, ATS तपासा व नोकर्या ट्रॅक करा."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI नोकरी अर्ज ऑटोफिल"
+  },
+  "actionTitle": {
+    "message": "विंडो उघडा"
+  }
+}

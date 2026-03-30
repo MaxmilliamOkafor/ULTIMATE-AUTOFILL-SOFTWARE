@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "تکمیل خودکار درخواست شغل با هوش مصنوعی. سفارشی‌سازی رزومه، نامه پوشش، بررسی ATS و ردیابی مشاغل."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: تکمیل خودکار درخواست شغل با هوش مصنوعی"
+  },
+  "actionTitle": {
+    "message": "باز کردن پنجره"
+  }
+}

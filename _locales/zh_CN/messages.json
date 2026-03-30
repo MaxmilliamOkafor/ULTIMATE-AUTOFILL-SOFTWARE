@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI智能填写求职申请。定制简历、生成求职信、检查ATS分数、追踪职位。"
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI自动填写求职申请"
+  },
+  "actionTitle": {
+    "message": "打开窗口"
+  }
+}

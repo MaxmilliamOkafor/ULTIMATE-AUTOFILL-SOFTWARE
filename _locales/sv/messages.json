@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI-autofyllning av jobbansökningar. Anpassa ditt CV, skapa personliga brev, kontrollera ATS-poäng och spåra jobb."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Autofyll Jobbansökningar"
+  },
+  "actionTitle": {
+    "message": "Öppna fönster"
+  }
+}
