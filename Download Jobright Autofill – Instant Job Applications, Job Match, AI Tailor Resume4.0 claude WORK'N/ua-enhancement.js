@@ -1,10 +1,13 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v6.1 ===
-// Tailor-first flow, answer-learning, fallback form-fill, auto-submit, freeze-proof error handling
+// === ULTIMATE AUTOFILL ENHANCEMENT v19.0 ===
+// OwlApply-inspired: smart dropdown fuzzy matching, context-aware question answering,
+// one-click autofill button, application tracker, shadow DOM detection, human-like delays,
+// enhanced document upload, visibility-aware field detection
 // === ULTIMATE AUTOFILL ENHANCEMENT v10.1 ===
 // Accuracy-first: deliberate pacing, verification passes, robust matching, freeze-proof error handling
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
+  const VERSION = '19.0';
 
   // ===================== GLOBAL ERROR HANDLER (prevent extension freeze on unhandled rejections) =====================
   window.addEventListener('unhandledrejection', (event) => {
@@ -49,7 +52,7 @@
   });
 
   // ===================== CREDIT BYPASS (Jobright + Simplify+ Unlimited) =====================
-  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999, aiApply: 99999, smartApply: 99999, quickApply: 99999, bulkApply: 99999, networkScan: 99999, referralRequest: 99999, aiResponse: 99999, essayAnswer: 99999, coins: 99999, tokens: 99999 };
+  const _C = { autofill: 99999, tailorResume: 99999, coverLetter: 99999, resumeReview: 99999, jobMatch: 99999, agentApply: 99999, resumeTailor: 99999, customResume: 99999, aiApply: 99999, smartApply: 99999, quickApply: 99999, bulkApply: 99999, networkScan: 99999, referralRequest: 99999, aiResponse: 99999, essayAnswer: 99999, coins: 99999, tokens: 99999, owlCredits: 99999 };
   const _fetch = window.fetch;
   window.fetch = async function () {
     const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
@@ -402,14 +405,40 @@
     if (/shift|work.?schedule|flexible.?hours/.test(l)) return 'Yes';
     if (/overtime/.test(l)) return 'Yes';
     if (/clearance.?level/.test(l)) return p.clearance_level || '';
+    // OwlApply-inspired: additional field patterns for comprehensive coverage
+    if (/skills|technical.?skills|key.?skills|core.?competenc/.test(l)) return p.skills || '';
+    if (/interest|hobby|hobbies|passion/.test(l)) return p.interests || '';
+    if (/emergency.?contact.*name/.test(l)) return p.emergency_contact_name || '';
+    if (/emergency.?contact.*(phone|number)/.test(l)) return p.emergency_contact_phone || '';
+    if (/tax.?id|ein|tin/.test(l)) return ''; // Never auto-fill tax IDs
+    if (/passport.?number/.test(l)) return ''; // Never auto-fill passport numbers
+    if (/bank|routing|account.?number/.test(l)) return ''; // Never auto-fill banking info
+    if (/pronouns|preferred.?pronouns/.test(l)) return p.pronouns || 'They/Them';
+    if (/notice.?period/.test(l)) return p.notice_period || DEFAULTS.notice;
+    if (/current.?ctc|current.?compensation/.test(l)) return p.current_salary || DEFAULTS.salary;
+    if (/expected.?ctc/.test(l)) return p.expected_salary || DEFAULTS.salary;
+    if (/willing.*travel.*percent|travel.*percentage/.test(l)) return p.travel_willingness || '25%';
+    if (/type.?of.?employment|employment.?type|job.?type/.test(l)) return p.employment_type || 'Full-time';
+    if (/work.?arrangement|preferred.?work/.test(l)) return p.work_arrangement || 'Hybrid';
+    if (/earliest.?join|earliest.?start/.test(l)) return DEFAULTS.availability;
+    if (/cover.?letter/.test(l) && (el?.tagName === 'TEXTAREA' || el?.type === 'file')) return p.cover_letter || DEFAULTS.cover;
     return '';
   }
 
   function guessFieldValue(label, p, el) {
-    // Try saved responses keyword match first, then guessValue, then learned answers
+    // Try saved responses keyword match first, then guessValue, then learned answers,
+    // then OwlApply-inspired context-aware answering as final fallback
     const questionText = el ? getFullQuestionText(el) : label;
     const fromSaved = findSavedResponseMatch(questionText);
-    return fromSaved || guessValue(label, p) || getLearnedAnswer(label, el) || '';
+    if (fromSaved) return fromSaved;
+    const fromGuess = guessValue(label, p);
+    if (fromGuess) return fromGuess;
+    const fromLearned = getLearnedAnswer(label, el);
+    if (fromLearned) return fromLearned;
+    // OwlApply-inspired: context-aware AI-style question answering for custom questions
+    const fromContext = analyzeQuestionContext(questionText, p);
+    if (fromContext) return fromContext;
+    return '';
   }
 
   // ===================== SAVED RESPONSES SYSTEM (SpeedyApply-style) =====================
@@ -727,42 +756,170 @@
     return answered;
   }
 
-  // ===================== ENHANCED AUTOCOMPLETE DROPDOWN FINDER =====================
+  // ===================== OWLAPPLY-INSPIRED: SMART DROPDOWN HANDLER WITH FUZZY MATCHING =====================
+  // OwlApply precisely fills dropdowns and complex custom questions with intelligent matching
   function findAutocompleteDropdown(input) {
     const selectors = [
       '[class*="autocomplete"]', '[class*="typeahead"]', '[class*="suggestion"]',
       '[class*="dropdown"]', '[class*="listbox"]', '[role="listbox"]',
       '[class*="menu"]', 'ul[class*="option"]', '[data-automation-id*="dropdown"]',
       '.css-26l3qy-menu', '.Select-menu', '.react-select__menu',
-      '[class*="dropdown-menu"]:not([style*="display: none"])'
+      '[class*="dropdown-menu"]:not([style*="display: none"])',
+      // OwlApply-inspired: additional modern UI framework selectors
+      '[class*="Popover"]', '[class*="popover"]', '[class*="combobox"]',
+      '[role="combobox"] [role="listbox"]', '.MuiAutocomplete-popper',
+      '[class*="ant-select-dropdown"]', '.choices__list--dropdown',
+      '[class*="select2-results"]', '.vs__dropdown-menu',
+      '[data-radix-popper-content-wrapper]', // Radix UI (modern React)
+      '[class*="headlessui"]', // Headless UI
+      '.downshift-menu', // Downshift
     ];
+    // Search globally first
     for (const sel of selectors) {
       const dd = $(sel);
       if (dd && isVisible(dd)) return dd;
     }
-    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"]');
+    // Search within parent container
+    const parent = input.closest('.form-group, .field, [class*="field"], [class*="FormField"], [class*="form-control"], [class*="input-wrapper"]');
     if (parent) {
       for (const sel of selectors) { const dd = parent.querySelector(sel); if (dd && isVisible(dd)) return dd; }
     }
+    // OwlApply-inspired: check sibling containers and portal-mounted dropdowns
+    const nextSibling = input.nextElementSibling;
+    if (nextSibling) {
+      for (const sel of selectors) { const dd = nextSibling.querySelector?.(sel) || (nextSibling.matches?.(sel) ? nextSibling : null); if (dd && isVisible(dd)) return dd; }
+    }
+    // Check body-level portals (React portals, MUI, Ant Design)
+    const portals = $$('[class*="portal"],[id*="portal"],body > [role="listbox"],body > [class*="popper"],body > [class*="dropdown"]');
+    for (const portal of portals) { if (isVisible(portal)) return portal; }
     return null;
   }
 
+  // OwlApply-inspired: Levenshtein distance for fuzzy matching
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  // OwlApply-inspired: smart fuzzy dropdown matching with scoring
   function findBestDropdownMatch(dropdown, searchText) {
-    const items = $$('li, [role="option"], [class*="option"], div[class*="item"]', dropdown);
-    const search = searchText.toLowerCase();
+    const items = $$('li, [role="option"], [class*="option"], div[class*="item"], [class*="menu-item"]', dropdown)
+      .filter(i => isVisible(i) && i.textContent?.trim());
+    const search = searchText.toLowerCase().trim();
+    if (!search || !items.length) return null;
+
+    // Phase 1: Exact match
     let match = items.find(i => i.textContent?.trim().toLowerCase() === search);
     if (match) return match;
+
+    // Phase 2: Starts-with match
+    match = items.find(i => i.textContent?.trim().toLowerCase().startsWith(search));
+    if (match) return match;
+
+    // Phase 3: Contains match
     match = items.find(i => i.textContent?.trim().toLowerCase().includes(search));
     if (match) return match;
-    const words = search.split(/\s+/);
-    return items.find(i => words.some(w => w.length > 3 && i.textContent?.trim().toLowerCase().includes(w))) || null;
+
+    // Phase 4: Reverse contains (search text contains option)
+    match = items.find(i => {
+      const t = i.textContent?.trim().toLowerCase();
+      return t && t.length > 3 && search.includes(t);
+    });
+    if (match) return match;
+
+    // Phase 5: Word-level matching with scoring
+    const searchWords = search.split(/\s+/).filter(w => w.length > 2);
+    let bestScore = 0, bestItem = null;
+    for (const item of items) {
+      const text = (item.textContent?.trim() || '').toLowerCase();
+      const itemWords = text.split(/\s+/);
+      let score = 0;
+      for (const sw of searchWords) {
+        for (const iw of itemWords) {
+          if (iw === sw) score += 10;
+          else if (iw.includes(sw) || sw.includes(iw)) score += 5;
+          else if (iw.length > 3 && sw.length > 3 && levenshtein(iw, sw) <= 2) score += 3; // Fuzzy
+        }
+      }
+      if (score > bestScore) { bestScore = score; bestItem = item; }
+    }
+    if (bestItem && bestScore >= 3) return bestItem;
+
+    // Phase 6: Levenshtein distance fuzzy match on full text
+    let minDist = Infinity, fuzzyMatch = null;
+    for (const item of items) {
+      const text = (item.textContent?.trim() || '').toLowerCase();
+      const dist = levenshtein(search, text);
+      const threshold = Math.max(3, Math.floor(search.length * 0.4)); // 40% tolerance
+      if (dist < minDist && dist <= threshold) { minDist = dist; fuzzyMatch = item; }
+    }
+    if (fuzzyMatch) return fuzzyMatch;
+
+    return null;
   }
 
   function findOtherOption(dropdown) {
     const items = $$('li, [role="option"], [class*="option"], option, div[class*="item"]', dropdown);
     return items.find(i => /^others?$/i.test(i.textContent?.trim() || '')) ||
       items.find(i => /\bother\b/i.test(i.textContent?.trim() || '')) ||
-      items.find(i => /not listed|not found|unlisted|none of/i.test(i.textContent?.trim() || ''));
+      items.find(i => /not listed|not found|unlisted|none of|not applicable|n\/a/i.test(i.textContent?.trim() || ''));
+  }
+
+  // OwlApply-inspired: smart dropdown interaction with scroll-into-view and retry
+  async function smartDropdownSelect(input, value, retries) {
+    retries = retries || 3;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      // Click/focus the input to open dropdown
+      input.focus();
+      if (input.tagName !== 'SELECT') {
+        realClick(input);
+        await sleep(300 + attempt * 100);
+        // Type to filter
+        nativeSet(input, value);
+        await sleep(400);
+      }
+
+      const dropdown = findAutocompleteDropdown(input);
+      if (!dropdown) {
+        if (attempt < retries) { await sleep(500); continue; }
+        return false;
+      }
+
+      const match = findBestDropdownMatch(dropdown, value);
+      if (match) {
+        // Scroll into view before clicking (OwlApply-style precision)
+        match.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        await sleep(100);
+        realClick(match);
+        await sleep(200);
+        return true;
+      }
+
+      // Try "Other" as fallback
+      const other = findOtherOption(dropdown);
+      if (other) {
+        other.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        await sleep(100);
+        realClick(other);
+        return true;
+      }
+
+      // Close dropdown and retry with different approach
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+    }
+    return false;
   }
 
   // ===================== DOM HELPERS =====================
@@ -819,6 +976,214 @@
       await sleep(500);
     }
     return null;
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: HUMAN-LIKE DELAY SYSTEM =====================
+  // OwlApply fills forms with natural pacing to avoid bot detection
+  function humanDelay(min, max) {
+    min = min || 80;
+    max = max || 250;
+    const base = min + Math.random() * (max - min);
+    // Occasionally add a longer "thinking" pause (like a real human)
+    const thinkPause = Math.random() < 0.15 ? Math.random() * 400 : 0;
+    return sleep(Math.round(base + thinkPause));
+  }
+
+  // Simulate human-like typing with variable speed
+  async function humanType(el, text) {
+    if (!el || !text) return;
+    el.focus();
+    await sleep(50);
+    // For short values, just set directly with slight delay
+    if (text.length <= 20) {
+      nativeSet(el, text);
+      await humanDelay(100, 200);
+      return;
+    }
+    // For longer text, type in chunks to appear more natural
+    const chunkSize = 5 + Math.floor(Math.random() * 10);
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.slice(0, Math.min(i + chunkSize, text.length));
+      nativeSet(el, chunk);
+      await sleep(20 + Math.random() * 30);
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    await humanDelay(50, 150);
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: SHADOW DOM FORM DETECTION =====================
+  // OwlApply works across all major ATS — including those using shadow DOM
+  function queryShadow(selector, root) {
+    root = root || document;
+    const result = root.querySelector(selector);
+    if (result) return result;
+    // Search shadow roots recursively
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        const found = queryShadow(selector, el.shadowRoot);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  function queryShadowAll(selector, root) {
+    root = root || document;
+    const results = [...root.querySelectorAll(selector)];
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        results.push(...queryShadowAll(selector, el.shadowRoot));
+      }
+    }
+    return results;
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: VISIBILITY-AWARE FIELD DETECTION =====================
+  // JobOwl/OwlApply use intelligent content extraction that checks computed styles
+  function isDeepVisible(el) {
+    if (!el) return false;
+    // Basic rect check
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    // Check computed styles up the tree
+    let current = el;
+    while (current && current !== document.body) {
+      const style = window.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+      current = current.parentElement;
+    }
+    return el.offsetParent !== null || el.tagName === 'BODY';
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: CONTEXT-AWARE QUESTION ANSWERING =====================
+  // OwlApply's AI agent automatically answers custom company application questions
+  function analyzeQuestionContext(questionText, p) {
+    const q = (questionText || '').toLowerCase();
+
+    // Technology/tools proficiency questions
+    const techPatterns = {
+      'python|django|flask': () => p.python_exp || 'Yes, I have professional experience with Python.',
+      'java\\b|spring|maven': () => p.java_exp || 'Yes, I have professional experience with Java.',
+      'javascript|react|node|vue|angular|typescript': () => p.js_exp || 'Yes, I have experience with modern JavaScript frameworks.',
+      'sql|database|mysql|postgres|mongodb': () => p.db_exp || 'Yes, I am proficient in SQL and database management.',
+      'aws|azure|gcp|cloud': () => p.cloud_exp || 'Yes, I have experience with cloud platforms.',
+      'docker|kubernetes|k8s|container': () => p.devops_exp || 'Yes, I have experience with containerization technologies.',
+      'git|version.?control|ci.?cd': () => 'Yes, I use Git and CI/CD pipelines regularly.',
+      'agile|scrum|kanban|sprint': () => 'Yes, I have experience working in Agile/Scrum environments.',
+      'machine.?learning|ml|ai|deep.?learning': () => p.ml_exp || 'I have foundational knowledge of machine learning concepts.',
+      'data.?analy|analytics|tableau|power.?bi': () => p.analytics_exp || 'Yes, I have experience with data analysis and visualization.',
+    };
+    for (const [pattern, answer] of Object.entries(techPatterns)) {
+      if (new RegExp(pattern, 'i').test(q) && /proficien|experience|familiar|knowledge|skill|comfortable|worked with/i.test(q)) {
+        return answer();
+      }
+    }
+
+    // Behavioral/situational questions with smart templates
+    if (/tell.*about.*time|describe.*situation|give.*example|share.*experience/i.test(q)) {
+      if (/lead|manage|team|mentor/i.test(q)) return p.leadership_answer || 'In my previous role, I led a cross-functional team to deliver a critical project ahead of schedule, coordinating between engineering, design, and stakeholders to ensure alignment and quality.';
+      if (/challenge|difficult|obstacle|problem/i.test(q)) return p.challenge_answer || 'I encountered a significant technical challenge where a legacy system needed migration. I developed a phased approach, created detailed documentation, and ensured zero downtime during the transition.';
+      if (/conflict|disagree|difficult.*person/i.test(q)) return p.conflict_answer || 'I resolved a team disagreement by facilitating an open discussion, actively listening to all perspectives, and proposing a compromise that incorporated the best elements of each viewpoint.';
+      if (/fail|mistake|learn/i.test(q)) return p.failure_answer || 'I once underestimated a project timeline. I learned the importance of adding buffer time and conducting more thorough requirement analysis, which I have applied successfully to subsequent projects.';
+      if (/success|achieve|accomplish|proud/i.test(q)) return p.success_answer || 'I am most proud of a project where I identified a process inefficiency, proposed an automated solution, and implemented it — saving the team approximately 20 hours per week.';
+      return p.behavioral_answer || 'I approach challenges methodically, leveraging my technical expertise and collaboration skills to deliver results that exceed expectations.';
+    }
+
+    // "Why" motivation questions
+    if (/why.*(interested|apply|want|choose|join|this.*(role|position|company))/i.test(q)) {
+      return p.why_interested || 'I am drawn to this opportunity because it aligns perfectly with my skills and career goals. I admire the company\'s mission and am excited about the potential to contribute meaningfully to the team.';
+    }
+
+    // Career goals
+    if (/career.?goal|where.*see.*yourself|five.*year|long.?term/i.test(q)) {
+      return p.career_goals || 'I aim to grow into a senior technical leadership role, combining deep technical expertise with strategic thinking to drive innovation and mentor the next generation of talent.';
+    }
+
+    // Work style/culture
+    if (/work.?style|management.?style|preferred.*environment|team.*work/i.test(q)) {
+      return p.work_style || 'I thrive in collaborative environments where open communication is valued. I am adaptable and work effectively both independently and as part of a team.';
+    }
+
+    // Additional information / anything else
+    if (/anything.?else|additional.?info|tell.*more|what.*should.*know|other.*share/i.test(q)) {
+      return p.additional_info || 'I am a dedicated professional with a strong track record of delivering high-quality results. I am excited about this opportunity and confident I can make a significant contribution to your team.';
+    }
+
+    return '';
+  }
+
+  // ===================== OWLAPPLY-INSPIRED: APPLICATION TRACKER =====================
+  // OwlApply tracks applications in a Kanban board — we store application history
+  let _appTracker = [];
+  let _appTrackerLoaded = false;
+
+  async function loadAppTracker() {
+    if (_appTrackerLoaded) return _appTracker;
+    _appTracker = (await st.get('ua_app_tracker')) || [];
+    _appTrackerLoaded = true;
+    return _appTracker;
+  }
+
+  async function trackApplication(url, company, title, status) {
+    await loadAppTracker();
+    const existing = _appTracker.findIndex(a => a.url === url);
+    const entry = {
+      url,
+      company: company || extractCompanyFromUrl(url),
+      title: title || document.title?.replace(/\s*[-|].*$/, '').trim() || '',
+      status: status || 'applied',
+      appliedAt: Date.now(),
+      ats: detectATS() || 'unknown',
+      source: 'autofill'
+    };
+    if (existing >= 0) {
+      _appTracker[existing] = { ..._appTracker[existing], ...entry };
+    } else {
+      _appTracker.unshift(entry);
+    }
+    // Keep last 500 applications
+    if (_appTracker.length > 500) _appTracker = _appTracker.slice(0, 500);
+    await st.set('ua_app_tracker', _appTracker);
+    updateTrackerUI();
+  }
+
+  function extractCompanyFromUrl(url) {
+    try {
+      const host = new URL(url).hostname.replace('www.', '').replace('.com', '').replace('.co', '');
+      // Extract company from common ATS URL patterns
+      const wdMatch = url.match(/([^.]+)\.myworkdayjobs/i);
+      if (wdMatch) return wdMatch[1].charAt(0).toUpperCase() + wdMatch[1].slice(1);
+      const ghMatch = url.match(/boards\.greenhouse\.io\/([^/]+)/i);
+      if (ghMatch) return ghMatch[1].charAt(0).toUpperCase() + ghMatch[1].slice(1);
+      const lvMatch = url.match(/jobs\.lever\.co\/([^/]+)/i);
+      if (lvMatch) return lvMatch[1].charAt(0).toUpperCase() + lvMatch[1].slice(1);
+      return host.split('.')[0].charAt(0).toUpperCase() + host.split('.')[0].slice(1);
+    } catch { return ''; }
+  }
+
+  function updateTrackerUI() {
+    const trackerEl = document.getElementById('ua-tracker-list');
+    const trackerCnt = document.getElementById('ua-tracker-cnt');
+    if (!trackerEl) return;
+    const recent = _appTracker.slice(0, 10);
+    if (trackerCnt) trackerCnt.textContent = `(${_appTracker.length})`;
+    if (!recent.length) {
+      trackerEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:10px">No applications tracked yet</div>';
+      return;
+    }
+    trackerEl.innerHTML = recent.map(a => {
+      const date = new Date(a.appliedAt);
+      const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
+      const statusColor = a.status === 'applied' ? '#059669' : a.status === 'failed' ? '#ef4444' : '#6b7280';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid #f3f4f6;font-size:10px">
+        <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151" title="${a.url}">${a.company || a.title || 'Unknown'}</span>
+        <span style="color:#9ca3af;font-size:9px;flex-shrink:0">${a.ats}</span>
+        <span style="color:#9ca3af;font-size:9px;flex-shrink:0">${dateStr}</span>
+      </div>`;
+    }).join('');
   }
 
   // ===================== FIELD LABEL EXTRACTION =====================
@@ -898,13 +1263,24 @@
       if (!lbl) continue;
       const val = guessFieldValue(lbl, p, inp);
       if (!val) continue;
-      inp.focus();
-      await sleep(30);
-      nativeSet(inp, val);
+      // OwlApply-inspired: human-like typing with natural delays
+      await humanType(inp, val);
       inp.dispatchEvent(new Event('input', { bubbles: true }));
       inp.dispatchEvent(new Event('change', { bubbles: true }));
       filled++;
-      await sleep(50);
+      await humanDelay(120, 280); // Natural pacing between fields
+    }
+
+    // OwlApply-inspired: also detect fields inside shadow DOM roots
+    const shadowInputs = queryShadowAll('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]),textarea');
+    for (const inp of shadowInputs) {
+      if (!isDeepVisible(inp) || inp.value?.trim()) continue;
+      const lbl = getLabel(inp) || inp.getAttribute('aria-label') || inp.placeholder || '';
+      if (!lbl) continue;
+      const val = guessFieldValue(lbl, p, inp);
+      if (!val) continue;
+      await humanType(inp, val);
+      filled++;
     }
 
     // Select dropdowns — only unselected ones
@@ -1330,8 +1706,13 @@
     } else if (result === 'submitted') {
       LOG('Application submitted!');
       await learnFromPage();
-      await sleep(1000);
-      if (checkSuccess()) LOG('Success confirmed!');
+      // OwlApply-inspired: track application in history
+      await trackApplication(location.href, '', '', 'applied');
+      await sleep(2000);
+      if (checkSuccess()) {
+        LOG('Success confirmed!');
+        showToast('Application submitted successfully!', 'success');
+      }
     }
   }
 
@@ -2611,32 +2992,84 @@
     }
   }
 
-  // ===================== RESUME/FILE UPLOAD AUTOMATION =====================
+  // ===================== OWLAPPLY-INSPIRED: SMART DOCUMENT AUTO-UPLOAD =====================
+  // OwlApply uploads documents automatically — we enhance with DataTransfer + drag-drop simulation
   async function tryResumeUpload() {
-    // Look for file input fields (resume, cover letter)
+    // Look for ALL file input fields (resume, cover letter, documents)
     const fileInputs = $$('input[type="file"]').filter(el => {
       const lbl = getLabel(el);
-      return /resume|cv|cover.?letter|document|upload/i.test(lbl || el.name || el.id || el.accept || '');
+      return /resume|cv|cover.?letter|document|upload|attachment|portfolio/i.test(lbl || el.name || el.id || el.accept || '');
     });
-    if (!fileInputs.length) return false;
+    // Also check shadow DOM for file inputs
+    const shadowFileInputs = queryShadowAll('input[type="file"]').filter(el => {
+      const lbl = el.getAttribute('aria-label') || el.name || el.id || el.accept || '';
+      return /resume|cv|cover.?letter|document|upload/i.test(lbl);
+    });
+    const allFileInputs = [...fileInputs, ...shadowFileInputs];
+
+    if (!allFileInputs.length) {
+      LOG('No file inputs found');
+      // OwlApply-inspired: check for drag-drop upload zones and try to trigger click
+      const dropZones = $$('[class*="dropzone"],[class*="upload-area"],[class*="file-drop"],[class*="dz-clickable"],.upload-container,.file-upload-area,[class*="drag-drop"],[class*="browse-file"]')
+        .filter(isVisible);
+      if (dropZones.length) {
+        LOG('Drop zones found — attempting drag-drop simulation');
+        for (const zone of dropZones) {
+          // Try to find hidden file input within dropzone
+          const hiddenInput = zone.querySelector('input[type="file"]');
+          if (hiddenInput) {
+            allFileInputs.push(hiddenInput);
+            break;
+          }
+        }
+      }
+      if (!allFileInputs.length) return false;
+    }
+
+    // Try to get resume from storage (base64 encoded)
+    const resumeData = await st.get('ua_resume_data');
+    if (resumeData?.base64 && resumeData?.fileName) {
+      for (const fileInput of allFileInputs) {
+        try {
+          const byteString = atob(resumeData.base64.split(',').pop() || resumeData.base64);
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+          const mime = resumeData.mimeType || 'application/pdf';
+          const file = new File([ab], resumeData.fileName, { type: mime });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+          fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+          LOG(`Resume injected via DataTransfer — ${resumeData.fileName}`);
+          await sleep(1000);
+
+          // OwlApply-inspired: also simulate drag-drop for zones that need it
+          const parent = fileInput.closest('[class*="dropzone"],[class*="upload"]');
+          if (parent) {
+            const dropEvt = new DragEvent('drop', { bubbles: true, dataTransfer: dt });
+            parent.dispatchEvent(new DragEvent('dragenter', { bubbles: true }));
+            parent.dispatchEvent(new DragEvent('dragover', { bubbles: true }));
+            parent.dispatchEvent(dropEvt);
+            LOG('Drag-drop simulation completed for upload zone');
+          }
+          return true;
+        } catch (err) { LOG('Resume injection failed — ' + err.message); }
+      }
+    }
 
     // Check if Jobright sidebar has a resume ready
     const sidebar = $('#jobright-helper-id');
-    if (!sidebar) return false;
-
-    // Look for "Download Resume" or similar button in sidebar
-    const dlBtn = sidebar.querySelector('a[download],a[href*="resume"],button[class*="download"],.download-resume-button');
-    if (dlBtn) {
-      LOG('Found resume download button in Jobright sidebar — resume upload handled by sidebar');
-      return true;
+    if (sidebar) {
+      const dlBtn = sidebar.querySelector('a[download],a[href*="resume"],button[class*="download"],.download-resume-button');
+      if (dlBtn) {
+        LOG('Found resume download button in Jobright sidebar — resume upload handled by sidebar');
+        return true;
+      }
     }
 
-    // Check for drag-and-drop upload zones
-    const dropZones = $$('[class*="dropzone"],[class*="upload-area"],[class*="file-drop"],[class*="dz-clickable"],.upload-container,.file-upload-area')
-      .filter(isVisible);
-    if (dropZones.length) {
-      LOG('Drop zones found — Jobright sidebar handles resume upload');
-    }
+    LOG('File inputs found but no stored resume — manual upload needed');
     return false;
   }
 
@@ -2867,10 +3300,13 @@
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed successfully');
+            // OwlApply-inspired: track in application history
+            await trackApplication(c.url, c.companyName, c.title, 'applied');
           } else {
             c.status = 'done';
             qStats.completed++;
             LOG('Queue job completed (success not confirmed)');
+            await trackApplication(c.url, c.companyName, c.title, 'applied');
           }
           qStats.totalTime += c.duration;
 
@@ -3037,6 +3473,75 @@
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
   }
 
+  // ===================== OWLAPPLY-INSPIRED: "AUTOFILL FOR ME" BUTTON =====================
+  // OwlApply shows an "Autofill For Me" button at the bottom of job application pages
+  function injectAutofillButton() {
+    if (window.self !== window.top) return;
+    if (document.getElementById('ua-autofill-btn')) return;
+    const ats = detectATS();
+    if (!ats) return;
+
+    const btn = document.createElement('div');
+    btn.id = 'ua-autofill-btn';
+    btn.innerHTML = `
+      <div id="ua-af-inner">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+          <path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/>
+        </svg>
+        <span>Autofill For Me</span>
+      </div>
+    `;
+    btn.addEventListener('click', async () => {
+      const inner = document.getElementById('ua-af-inner');
+      inner.innerHTML = '<span class="ua-af-spinner"></span><span>Filling...</span>';
+      inner.style.opacity = '0.8';
+      try {
+        if (isWorkday()) await workdayAutomation();
+        else if (/greenhouse\.io|boards\.greenhouse/i.test(location.href)) await greenhouseAutomation();
+        else if (/lever\.co|jobs\.lever/i.test(location.href)) await leverAutomation();
+        else if (/icims\.com/i.test(location.href)) await icimsAutomation();
+        else if (/linkedin\.com.*\/jobs/i.test(location.href)) await linkedinEasyApply();
+        else if (/ashbyhq\.com/i.test(location.href)) await ashbyAutomation();
+        else if (/bamboohr\.com/i.test(location.href)) await bamboohrAutomation();
+        else await tailorFirstFlow();
+        inner.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Done!</span>';
+        inner.style.background = '#059669';
+        showToast('Form filled successfully! Review and submit.', 'success');
+      } catch (err) {
+        inner.innerHTML = '<span>Retry</span>';
+        inner.style.background = '#ef4444';
+        LOG('Autofill button error:', err);
+      }
+      setTimeout(() => {
+        inner.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/></svg><span>Autofill For Me</span>`;
+        inner.style.background = '';
+        inner.style.opacity = '';
+      }, 4000);
+    });
+    document.body.appendChild(btn);
+  }
+
+  // OwlApply-inspired: Toast notification system
+  function showToast(message, type) {
+    type = type || 'info';
+    const existing = document.getElementById('ua-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'ua-toast';
+    const bgColor = type === 'success' ? '#059669' : type === 'error' ? '#ef4444' : '#3b82f6';
+    toast.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;background:${bgColor};color:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.2);font-family:system-ui,sans-serif;font-size:13px;font-weight:600;max-width:320px;animation:uaToastIn .3s ease-out">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z" fill="#fff"/></svg>
+        <span>${message}</span>
+        <button onclick="this.closest('#ua-toast').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 0 0 8px;opacity:.7">×</button>
+      </div>
+    `;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+  }
+
   // ===================== CSS =====================
   function injectCSS() {
     if (document.getElementById('ua-css')) return;
@@ -3166,6 +3671,21 @@
 #ua-ats{position:fixed;top:12px;right:12px;z-index:2147483646;background:#064e3b;color:#6ee7b7;padding:5px 12px;border-radius:10px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;box-shadow:0 2px 12px rgba(0,0,0,.15);display:none;align-items:center;gap:5px}
 #ua-ats.show{display:flex}
 #ua-ats .dot{width:5px;height:5px;border-radius:50%;background:#34d399;animation:uap 1.5s infinite}
+
+/* === OWLAPPLY-INSPIRED: AUTOFILL FOR ME BUTTON === */
+#ua-autofill-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483646;cursor:pointer}
+#ua-af-inner{display:flex;align-items:center;gap:8px;padding:12px 28px;background:linear-gradient(135deg,#00c985,#00a86b);color:#fff;border-radius:28px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,168,107,.4),0 0 0 3px rgba(0,201,133,.15);transition:all .25s;white-space:nowrap;letter-spacing:.3px}
+#ua-af-inner:hover{transform:translateY(-2px);box-shadow:0 6px 28px rgba(0,168,107,.5),0 0 0 4px rgba(0,201,133,.2)}
+#ua-af-inner:active{transform:translateY(0);box-shadow:0 2px 12px rgba(0,168,107,.35)}
+.ua-af-spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:uaSpin .6s linear infinite}
+@keyframes uaSpin{to{transform:rotate(360deg)}}
+
+/* === OWLAPPLY-INSPIRED: TOAST NOTIFICATION === */
+@keyframes uaToastIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* === OWLAPPLY-INSPIRED: APPLICATION TRACKER === */
+.ua-tracker{max-height:150px;overflow-y:auto;border:1px solid #f3f4f6;border-radius:8px}
+.ua-tracker-stats{display:flex;gap:12px;padding:6px 0;font-size:10px;color:#6b7280;justify-content:center}
     `;
     document.head.appendChild(s);
   }
@@ -3221,7 +3741,7 @@
     // --- Drawer ---
     const dw = document.createElement('div'); dw.id = 'ua-drawer';
     dw.innerHTML = `
-      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><span class="ua-hdr-badge">UNLIMITED</span></div>
+      <div class="ua-hdr"><div><div class="ua-hdr-t">Ultimate Autofill v${VERSION}</div><div class="ua-hdr-sub">AI-Powered Job Applications</div></div><span class="ua-hdr-badge">UNLIMITED</span></div>
       <div class="ua-body">
         <div class="ua-sec">
           <div class="ua-sec-t">Auto-Apply</div>
@@ -3267,6 +3787,14 @@
           <div class="ua-qsum" id="ua-qsum"></div>
           <div class="ua-qbtns" id="ua-qbtns"></div>
           <button id="ua-export" style="width:100%;margin-top:6px;padding:6px;background:none;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280">Export Queue to CSV</button>
+        </div>
+        <div class="ua-sec">
+          <div class="ua-sec-t">Application History <span id="ua-tracker-cnt" style="color:#00c985">(0)</span></div>
+          <div id="ua-tracker-list" class="ua-tracker"></div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <button id="ua-tracker-export" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #60a5fa;border-radius:6px;background:none;color:#3b82f6;cursor:pointer">Export History</button>
+            <button id="ua-tracker-clear" style="flex:1;font-size:9px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:none;color:#ef4444;cursor:pointer">Clear</button>
+          </div>
         </div>
         <div class="ua-sec">
           <div class="ua-sec-t">Keyboard Shortcuts</div>
@@ -3456,6 +3984,33 @@
     // Initial render of saved responses
     loadSavedResponses().then(() => renderResponses());
 
+    // ---- OwlApply-inspired: Application Tracker bindings ----
+    loadAppTracker().then(() => updateTrackerUI());
+
+    document.getElementById('ua-tracker-export')?.addEventListener('click', () => {
+      if (!_appTracker.length) { alert('No applications to export'); return; }
+      const header = 'Company,Title,URL,Status,ATS,Date\n';
+      const rows = _appTracker.map(a => {
+        const date = a.appliedAt ? new Date(a.appliedAt).toISOString() : '';
+        return `"${(a.company || '').replace(/"/g, '""')}","${(a.title || '').replace(/"/g, '""')}","${a.url}","${a.status}","${a.ats}","${date}"`;
+      }).join('\n');
+      const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `application-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      LOG(`Exported ${_appTracker.length} applications to CSV`);
+    });
+
+    document.getElementById('ua-tracker-clear')?.addEventListener('click', async () => {
+      if (confirm(`Clear all ${_appTracker.length} application records?`)) {
+        _appTracker = [];
+        await st.set('ua_app_tracker', []);
+        updateTrackerUI();
+      }
+    });
+
     // Answer bank
     const ansCnt = document.getElementById('ua-ans-cnt');
     const ansInfo = document.getElementById('ua-ans-info');
@@ -3478,6 +4033,10 @@
       { k: 'website', l: 'Website' }, { k: 'school', l: 'School/University' }, { k: 'degree', l: 'Degree' }, { k: 'major', l: 'Major' },
       { k: 'graduation_year', l: 'Grad Year' }, { k: 'current_title', l: 'Job Title' }, { k: 'current_company', l: 'Company' },
       { k: 'expected_salary', l: 'Expected Salary' }, { k: 'years', l: 'Years Experience' }, { k: 'nationality', l: 'Nationality' },
+      // OwlApply-inspired: additional profile fields for comprehensive autofill
+      { k: 'languages', l: 'Languages' }, { k: 'skills', l: 'Key Skills' },
+      { k: 'twitter', l: 'Twitter/X URL' }, { k: 'gpa', l: 'GPA' },
+      { k: 'work_description', l: 'Job Description' }, { k: 'certifications', l: 'Certifications' },
     ];
     const profContainer = document.getElementById('ua-prof-fields');
     const profPanel = document.getElementById('ua-prof');
@@ -3581,6 +4140,10 @@
     await load(); await loadAnswerBank(); await loadSavedResponses(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
+    // OwlApply-inspired: inject "Autofill For Me" button on ATS pages
+    setTimeout(injectAutofillButton, 2000);
+    // Load application tracker
+    loadAppTracker().then(() => updateTrackerUI());
     // Update answer bank count in UI
     const ansCntEl = document.getElementById('ua-ans-cnt');
     if (ansCntEl) ansCntEl.textContent = `(${Object.keys(_answerBank).length} answers)`;
