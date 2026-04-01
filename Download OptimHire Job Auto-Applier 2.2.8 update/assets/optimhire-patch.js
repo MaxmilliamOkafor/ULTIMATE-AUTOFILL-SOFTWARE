@@ -139,7 +139,7 @@
    * The autofill script (autofill.73df3a6d.js) exposes its config as a
    * module-internal object. We intercept chrome.runtime.sendMessage here
    * so any AUTO_APPLY_STATE_UPDATE with autoSkipSeconds > 5 is clamped.   */
-  const AUTO_SKIP_MAX_SECONDS = 5;
+  const AUTO_SKIP_MAX_SECONDS = 15;
   (function capAutoSkipOnSend() {
     const _orig = chrome.runtime.sendMessage.bind(chrome.runtime);
     chrome.runtime.sendMessage = function (msg, ...args) {

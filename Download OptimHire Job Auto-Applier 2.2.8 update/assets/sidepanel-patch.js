@@ -193,7 +193,7 @@
    * job, we cap the display AND start our own 5-second timer that actually
    * sends { action: 'skipCurrent' } to force the background to advance.
    * ─────────────────────────────────────────────────────────────────────── */
-  const AUTO_SKIP_MAX = 5;
+  const AUTO_SKIP_MAX = 15;
   let _forceSkipTimer = null;
   let _forceSkipJobKey = ''; // de-dup so we only schedule once per job/state
 
