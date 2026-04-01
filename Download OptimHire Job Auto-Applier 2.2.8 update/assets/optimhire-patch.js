@@ -1113,43 +1113,52 @@
    */
   const WD_FIELDS = {
     /* Personal info */
-    legalNameSection_firstName:  'first_name',
-    legalNameSection_lastName:   'last_name',
-    legalNameSection_middleName: 'middle_name',
-    infoFirstName:               'first_name',
-    infoLastName:                'last_name',
-    infoEmail:                   'email',
-    infoCellPhone:               'phone',
-    infoLinkedIn:                'linkedin_profile_url',
-    email:                       'email',
-    phone:                       'phone',
+    legalNameSection_firstName:       'first_name',
+    legalNameSection_lastName:        'last_name',
+    legalNameSection_middleName:      'middle_name',
+    infoFirstName:                    'first_name',
+    infoLastName:                     'last_name',
+    infoEmail:                        'email',
+    infoCellPhone:                    'phone',
+    infoLinkedIn:                     'linkedin_profile_url',
+    email:                            'email',
+    phone:                            'phone',
     /* Address */
-    addressSection_addressLine1: 'address',
-    addressSection_addressLine2: 'address2',
-    addressSection_city:         'city',
-    addressSection_postalCode:   'postal_code',
+    addressSection_addressLine1:      'address',
+    addressSection_addressLine2:      'address2',
+    addressSection_city:              'city',
+    addressSection_postalCode:        'postal_code',
+    addressSection_countryRegion:     'country',    // country combobox
+    addressSection_stateProvince:     'state',      // state combobox
     /* Work history */
-    workHistoryCompanyName:      'current_company',
-    workHistoryPosition:         'current_title',
+    workHistoryCompanyName:           'current_company',
+    workHistoryPosition:              'current_title',
+    workHistoryTitle:                 'current_title',
+    workHistoryLocation:              'city',
     /* Education */
-    educationHistoryName:        'school',
-    degree:                      'degree',
+    educationHistoryName:             'school',
+    educationHistorySchoolName:       'school',
+    degree:                           'degree',
+    educationHistoryDegree:           'degree',
+    educationHistoryFieldOfStudy:     'major',
     /* Other */
-    linkedIn:                    'linkedin_profile_url',
-    website:                     'website_url',
-    github:                      'github_url',
-    jobTitle:                    'current_title',
-    company:                     'current_company',
-    school:                      'school',
-    major:                       'major',
-    postalCode:                  'postal_code',
-    city:                        'city',
-    state:                       'state',
-    country:                     'country',
-    yearsOfExperience:           'years_of_experience',
-    salary:                      'expected_salary',
-    coverLetter:                 'cover_letter',
-    howDidYouHear:               'how_did_you_hear',
+    linkedIn:                         'linkedin_profile_url',
+    website:                          'website_url',
+    github:                           'github_url',
+    jobTitle:                         'current_title',
+    company:                          'current_company',
+    school:                           'school',
+    major:                            'major',
+    postalCode:                       'postal_code',
+    city:                             'city',
+    state:                            'state',
+    country:                          'country',
+    yearsOfExperience:                'years_of_experience',
+    salary:                           'expected_salary',
+    coverLetter:                      'cover_letter',
+    howDidYouHear:                    'how_did_you_hear',
+    sourceQuestion:                   'how_did_you_hear',
+    referralSource:                   'how_did_you_hear',
   };
 
   /* Workday textarea/description fields */
@@ -1158,9 +1167,12 @@
     'formField-summary',
     'formField-coverLetter',
     'formField-additionalInfo',
+    'formField-coverLetterText',
+    'coverLetterText',
+    'additionalInformation',
   ]);
 
-  /* Workday navigation button IDs (in priority order) */
+  /* Workday navigation button automation IDs (in priority order) */
   const WD_NEXT_AIDS = [
     'pageFooterNextButton',
     'bottom-navigation-next-button',
@@ -1174,6 +1186,26 @@
     'pageFooterSubmitButton',
   ];
 
+  /** Fill one Workday combobox by typing the value and picking the best match */
+  async function fillWorkdayCombo(combo, val) {
+    if (!val) return;
+    realClick(combo);
+    await sleep(400);
+    const si = $('input', combo) || (combo.tagName === 'INPUT' ? combo : null);
+    if (si) {
+      nativeSet(si, val);
+      await sleep(800); // wait for dropdown to render
+    }
+    // Pick the best matching option
+    const opts = $$('[role=option],[data-automation-id*="option"]').filter(isVisible);
+    if (!opts.length) return;
+    const vl = val.toLowerCase();
+    const best = opts.find(o => o.textContent.toLowerCase().includes(vl))
+      || opts.find(o => vl.includes(o.textContent.toLowerCase().trim()))
+      || opts[0];
+    if (best) { realClick(best); await sleep(300); }
+  }
+
   async function workdayAutofill() {
     const isWD = HOST.includes('myworkdayjobs.com') || HOST.includes('workday.com') ||
       !!$('[data-automation-id]') || !!$('div[data-uxi-widget-type]');
@@ -1185,8 +1217,55 @@
     /* Step 1: Account creation / sign-in flow */
     await workdayAccountFlow(p, acct);
 
-    /* Step 2: Fill all data-automation-id fields */
-    const containers = $$('[data-automation-id]:not([data-automation-id=""])');
+    /* Steps 2–N: Workday is a multi-step wizard — fill each page then advance */
+    let maxPages = 10;
+    while (maxPages-- > 0) {
+      await waitForFormStable(1500);
+      await workdayFillCurrentPage(p);
+      await workdayEeoFields(p);
+      await workdayResumeUpload(p);
+
+      /* Tick agreement checkboxes on this page */
+      $$('[data-automation-id="agreementCheckbox"] input[type=checkbox],' +
+         'input[type=checkbox][data-automation-id*="agree"],' +
+         'input[type=checkbox][data-automation-id*="consent"]')
+        .filter(cb => !cb.checked && isVisible(cb)).forEach(cb => realClick(cb));
+
+      await sleep(400);
+
+      /* Try Submit first (final page) */
+      let advanced = false;
+      for (const aid of WD_SUBMIT_AIDS) {
+        const btn = $(`[data-automation-id="${aid}"]`);
+        if (btn && isVisible(btn)) {
+          LOG(`Workday: clicking submit (${aid})`);
+          realClick(btn);
+          advanced = true;
+          break;
+        }
+      }
+      if (advanced) break;
+
+      /* Try Next (intermediate page) */
+      for (const aid of WD_NEXT_AIDS) {
+        const btn = $(`[data-automation-id="${aid}"]`);
+        if (btn && isVisible(btn)) {
+          LOG(`Workday: clicking next (${aid})`);
+          realClick(btn);
+          advanced = true;
+          await sleep(1500);
+          break;
+        }
+      }
+      if (!advanced) break; // no navigation button found — stop
+    }
+
+    LOG('Workday autofill done');
+  }
+
+  /** Fill all visible data-automation-id fields on the current Workday page */
+  async function workdayFillCurrentPage(p) {
+    const containers = $$('[data-automation-id]:not([data-automation-id=""])').filter(isVisible);
     for (const el of containers) {
       const aid = el.getAttribute('data-automation-id');
 
@@ -1195,56 +1274,64 @@
         const ta = $('textarea', el) || (el.tagName === 'TEXTAREA' ? el : null);
         if (ta && !ta.value?.trim()) {
           const val = p.cover_letter || DEFAULTS.cover;
-          ta.focus();
-          nativeSet(ta, val);
+          ta.focus(); nativeSet(ta, val);
         }
         continue;
       }
 
       const profileKey = WD_FIELDS[aid];
       if (!profileKey) continue;
-      // Use DEFAULTS fallback for known default-able fields
+
       const val = p[profileKey]
         || (profileKey === 'years_of_experience' ? DEFAULTS.years : null)
-        || (profileKey === 'expected_salary' ? DEFAULTS.salary : null);
+        || (profileKey === 'expected_salary'      ? DEFAULTS.salary : null)
+        || (profileKey === 'how_did_you_hear'     ? DEFAULTS.howHeard : null)
+        || (profileKey === 'country'              ? (p.country || 'Ireland') : null);
       if (!val) continue;
 
+      /* Plain text / number input */
       const input = $('input:not([type=hidden]):not([type=file]),textarea', el);
       if (input && !input.value?.trim()) {
-        input.focus();
-        nativeSet(input, val);
-        await sleep(80);
+        input.focus(); nativeSet(input, val); await sleep(80);
         continue;
       }
 
-      const combo = $('[role=combobox],[data-automation-id*="combobox"]', el);
-      if (combo) {
-        realClick(combo);
-        await sleep(400);
-        const si = $('input', combo);
-        if (si) { nativeSet(si, val); await sleep(700); }
-        const opt = $('[role=option]');
-        if (opt) realClick(opt);
+      /* Combobox (country, state, degree, etc.) */
+      const combo = $('[role=combobox]', el) ||
+                    $('[data-automation-id*="combobox"]', el) ||
+                    (el.getAttribute('role') === 'combobox' ? el : null);
+      if (combo && isVisible(combo)) {
+        await fillWorkdayCombo(combo, val);
         continue;
       }
 
+      /* Radio buttons */
       $$('input[type=radio]', el).forEach(r => {
-        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || '').toLowerCase();
+        const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
         if (t.includes(val.toLowerCase())) realClick(r);
       });
     }
 
-    /* Step 3: EEO / demographic fields */
-    await workdayEeoFields(p);
+    /* Generic questions section (free-text questionnaire fields Workday adds) */
+    $$('[data-automation-id="questionAnswer"] input,' +
+       '[data-automation-id*="questionnaire"] input,' +
+       '[data-automation-id*="multipleChoice"] input,' +
+       'fieldset[data-automation-id*="Question"] input').filter(isVisible).forEach(inp => {
+      if (inp.value?.trim()) return;
+      const lbl = getLabel(inp);
+      const val = guessValue(lbl, p, inp.type || '');
+      if (val) { inp.focus(); nativeSet(inp, val); }
+    });
 
-    /* Step 4: Resume upload */
-    await workdayResumeUpload(p);
-
-    /* Step 5: Agreement checkboxes */
-    $$('[data-automation-id="agreementCheckbox"] input[type=checkbox]')
-      .filter(cb => !cb.checked).forEach(cb => realClick(cb));
-
-    LOG('Workday autofill done');
+    /* Generic select dropdowns not covered by automation-id */
+    $$('select').filter(isVisible).forEach(sel => {
+      if (sel.value) return;
+      const lbl = getLabel(sel);
+      const val = guessValue(lbl, p);
+      if (!val) return;
+      const opt = bestSelectOption(sel, val);
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
   }
 
   async function workdayAccountFlow(p, acct) {
