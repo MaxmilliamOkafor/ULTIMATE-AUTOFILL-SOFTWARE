@@ -1,5 +1,5 @@
 /**
- * OptimHire Comprehensive Patch v4.4
+ * OptimHire Comprehensive Patch v4.5
  * Covers ALL 19 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
@@ -21,7 +21,20 @@
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
  *
- * v4.4 fixes:
+ * v4.5 fixes (2026-04-01):
+ *   - ROOT CAUSE FIX: background autoSkipDuration changed to 180s in v2.4.2.
+ *     Our sidepanel cap only changed the displayed countdown, not the real one.
+ *     sidepanel-patch.js now calls skipCurrent() after AUTO_SKIP_MAX+1 seconds
+ *     so the background is ACTUALLY forced to skip, not just shown "5s" in UI.
+ *   - New: watchOptimHireMissingDetailsIframe() — detects all 4 OptimHire
+ *     blocking iframes (missing-details, cover-letter, resume-score, confinity),
+ *     force-skips after 5s if not dismissed
+ *   - New: installStuckWatchdog() — content-script side watchdog; force-skips
+ *     if same URL is active for >100s in automation mode
+ *   - New: Workable ATS detection (jobs.workable.com + workable.com added)
+ *     + workableAutofill() function covering all standard fields
+ *   - Added BreezyHR subdomains (app.breezy.hr, jobs.breezy.hr)
+ *   - Added job.ziprecruiter.com to ATS_DOMAINS
  *   - autoSkipSeconds capped at 5s via sendMessage intercept (update-proof)
  *   - getProfile() reads ALL storage keys: candidateDetails, cachedSeekerInfo,
  *     seekerDetails, userDetails — merges nested .seeker sub-objects and
@@ -88,9 +101,12 @@
     'bamboohr.com':        'BambooHR',
     'jobvite.com':         'Jobvite',
     'apply.workable.com':  'Workable',
+    'jobs.workable.com':   'Workable',   // v2.4.2: Workable also uses jobs.workable.com
+    'workable.com':        'Workable',
     'paylocity.com':       'Paylocity',
     'jazzhr.com':          'JazzHR',
     'ziprecruiter.com':    'ZipRecruiter',
+    'job.ziprecruiter.com':'ZipRecruiter',
     'manatal.com':         'Manatal',
     'teamtailor.com':      'Teamtailor',
     'bullhorn.com':        'Bullhorn',
@@ -104,6 +120,9 @@
     'recruiting.ultipro.com': 'UKG',
     'jobs.smartrecruiters.com': 'SmartRecruiters',
     'careers.icims.com':   'iCIMS',
+    'breezy.hr':           'BreezyHR',   // ensure breezy.hr itself is caught
+    'app.breezy.hr':       'BreezyHR',
+    'jobs.breezy.hr':      'BreezyHR',
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
@@ -912,6 +931,147 @@
   }
   watchMissingDetailsDialog();
 
+  /* ── T17-B: OptimHire "optimhire-missing-details" iframe stall prevention ──
+   *
+   * When OptimHire encounters custom job questions it doesn't have saved
+   * answers for, it injects a FULLSCREEN IFRAME (id="optimhire-missing-details")
+   * over the page and starts a 180-second (3 min) background timer.
+   * Our sidepanel cap only changes the *displayed* countdown — the background
+   * timer still runs for 3 minutes before actually calling skipCurrent.
+   *
+   * This function watches for that iframe and:
+   *  1. Immediately sends the answers to the iframe via postMessage
+   *  2. If the iframe is still present after 5 seconds, force-skips
+   *
+   * Result: no stall ever exceeds ~5 seconds.
+   * ─────────────────────────────────────────────────────────────────────── */
+  (function watchOptimHireMissingDetailsIframe() {
+    // All OptimHire blocking iframes (confirmed from v2.4.2 source)
+    const BLOCKING_IFRAME_IDS = [
+      'optimhire-missing-details',         // missing preferences dialog
+      'optimhire-queastion-cover-letter',  // cover letter question modal (new v2.4.2)
+      'optimhire-resume-score-record',     // resume score modal (new v2.4.2)
+      'confinity-welcome-screen',          // Confinity onboarding (new v2.4.2)
+    ];
+    const IFRAME_ID = 'optimhire-missing-details'; // primary stall iframe
+    let _skipScheduled = false;
+
+    async function handleMissingDetailsIframe(iframe) {
+      if (_skipScheduled) return;
+      _skipScheduled = true;
+      LOG('Missing-details iframe detected — scheduling force-skip in 5s');
+
+      try {
+        // Attempt to answer questions via postMessage to the iframe.
+        // OptimHire's missingDetails page receives MISSING_QUESTION_DETAILS_API
+        // and then renders YES/NO radio questions.  After the user (or us) submits,
+        // the iframe removes itself.
+        // We can't access contentDocument (cross-origin extension page), but we
+        // CAN postMessage to contentWindow.
+        const p = await getProfile();
+        iframe.contentWindow?.postMessage({ type: 'OH_PATCH_AUTO_SUBMIT' }, '*');
+        await sleep(800);
+
+        // Also look for the submit button in the iframe's accessible shadow DOM
+        // (may be accessible in some configurations)
+        try {
+          const doc = iframe.contentDocument;
+          if (doc) {
+            const submitBtn = $$('button[type="submit"],button', doc)
+              .find(el => isVisible(el) && /submit|save|done|continue/i.test(el.textContent));
+            if (submitBtn) { realClick(submitBtn); LOG('Missing-details: clicked submit inside iframe'); }
+          }
+        } catch (_) { /* cross-origin — expected */ }
+      } catch (_) {}
+
+      // After 5 seconds, if iframe is still present, force-skip the job
+      await sleep(5000);
+      const still = document.getElementById(IFRAME_ID);
+      if (still) {
+        LOG('Missing-details iframe still present after 5s — force-skipping');
+        chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
+        // Also remove the iframe so the page is unblocked
+        try {
+          still.remove();
+          document.body.style.overflow = '';
+        } catch (_) {}
+      }
+      // Reset so next occurrence can be handled
+      _skipScheduled = false;
+    }
+
+    // Observe for any blocking iframe being added to the DOM
+    new MutationObserver(mutations => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          // Primary stall iframe
+          if (node.id === IFRAME_ID) {
+            handleMissingDetailsIframe(node);
+            return;
+          }
+          // Non-primary blocking iframes — just remove them after a short delay
+          // so they don't prevent the page from being used
+          if (node.id && BLOCKING_IFRAME_IDS.includes(node.id) && node.id !== IFRAME_ID) {
+            const iid = node.id;
+            setTimeout(() => {
+              const el = document.getElementById(iid);
+              if (el) {
+                LOG(`Removing blocking iframe: ${iid}`);
+                el.remove();
+                document.body.style.overflow = '';
+              }
+            }, 4000);
+            return;
+          }
+          // Check children
+          if (node.querySelector) {
+            const inner = node.querySelector(`#${IFRAME_ID}`);
+            if (inner) { handleMissingDetailsIframe(inner); return; }
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // Check if the iframe is already present on load
+    const existing = document.getElementById(IFRAME_ID);
+    if (existing) handleMissingDetailsIframe(existing);
+  })();
+
+  /* ── General stuck-job watchdog (content script) ────────────────────────────
+   * If the automation is running but the same URL has been "active" for more
+   * than 100 seconds, something is stuck — send skipCurrent.
+   * Guards against any future stall source, not just missing-details iframe.
+   * ─────────────────────────────────────────────────────────────────────── */
+  (function installStuckWatchdog() {
+    let _watchdogUrl = '';
+    let _watchdogTimer = null;
+    const STUCK_TIMEOUT_MS = 100_000; // 100 seconds
+
+    async function checkStuck() {
+      const { csvActiveJobId, isAutoProcessStartJob } = await ST.get([
+        'csvActiveJobId', 'isAutoProcessStartJob',
+      ]);
+      if (!csvActiveJobId && !isAutoProcessStartJob) {
+        _watchdogUrl = '';
+        return;
+      }
+      const cur = normalizeUrl(location.href);
+      if (cur !== _watchdogUrl) {
+        _watchdogUrl = cur;
+        clearTimeout(_watchdogTimer);
+        _watchdogTimer = setTimeout(() => {
+          LOG(`Stuck watchdog: still on ${cur} after ${STUCK_TIMEOUT_MS/1000}s — force-skipping`);
+          chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
+          _watchdogUrl = '';
+        }, STUCK_TIMEOUT_MS);
+      }
+    }
+
+    // Poll every 15 seconds for URL / active status changes
+    setInterval(checkStuck, 15_000);
+    checkStuck();
+  })();
+
   /* ── T12: Auto-solve captchas ────────────────────────────── */
   async function solveCaptcha() {
     /* reCAPTCHA checkbox inside iframe */
@@ -1470,6 +1630,65 @@
     }
   }
 
+  /* ── Workable autofill ───────────────────────────────────── */
+  async function workableAutofill() {
+    if (CURRENT_ATS !== 'Workable') return;
+    const p = await getProfile();
+    LOG('Workable: filling');
+
+    // Workable uses name/id attributes and aria-labels
+    const WBL_MAP = [
+      // Personal info fields
+      ['input[name="firstname"],input[id*="firstname"],input[name*="first_name"],input[placeholder*="First name"]',
+        p.first_name],
+      ['input[name="lastname"],input[id*="lastname"],input[name*="last_name"],input[placeholder*="Last name"]',
+        p.last_name],
+      ['input[type="email"],input[name="email"],input[id*="email"]',
+        p.email],
+      ['input[type="tel"],input[name="phone"],input[id*="phone"]',
+        p.phone],
+      // Location
+      ['input[name="city"],input[id*="city"],input[placeholder*="City"]',
+        p.city],
+      ['input[name="country"],input[id*="country"]',
+        p.country || 'Ireland'],
+      // Professional
+      ['input[name="headline"],input[id*="headline"],input[placeholder*="Headline"],input[placeholder*="headline"]',
+        p.current_title || ''],
+      ['input[name="summary"],textarea[name="summary"],input[id*="summary"]',
+        p.summary || ''],
+      // Social URLs
+      ['input[name="linkedin"],input[id*="linkedin"],input[placeholder*="LinkedIn"]',
+        p.linkedin_profile_url || ''],
+      ['input[name="github"],input[id*="github"],input[placeholder*="GitHub"]',
+        p.github_url || ''],
+      ['input[name="website"],input[id*="website"],input[placeholder*="Website"],input[placeholder*="portfolio"]',
+        p.website_url || ''],
+      // Cover letter / summary textarea
+      ['textarea[name="cover_letter"],textarea[id*="cover"],textarea[placeholder*="cover"]',
+        p.cover_letter || DEFAULTS.cover],
+      ['textarea[name="summary"],textarea[id*="summary"],textarea[placeholder*="summary"],textarea[placeholder*="Summary"]',
+        p.summary || DEFAULTS.cover],
+    ];
+
+    for (const [sel, val] of WBL_MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+
+    // Handle Workable custom question dropdowns and radio buttons
+    await autoFillPage();
+
+    // Workable uses a "Submit application" button
+    const submitBtn = $$('button').find(el =>
+      isVisible(el) && /submit.*application|submit.*form|apply/i.test(el.textContent)
+    );
+    if (submitBtn) { await sleep(400); realClick(submitBtn); }
+
+    LOG('Workable autofill done');
+  }
+
   /* ── Lever autofill (targeted field IDs) ────────────────── */
   async function leverAutofill() {
     if (CURRENT_ATS !== 'Lever') return;
@@ -1601,18 +1820,19 @@
   async function runAtsAutofill() {
     await waitForFormStable(2000);
     switch (CURRENT_ATS) {
-      case 'Workday':          await workdayAutofill();  break;
-      case 'OracleCloud':      await oracleAutofill();   break;
-      case 'SmartRecruiters':  await srAutofill();       break;
+      case 'Workday':          await workdayAutofill();    break;
+      case 'OracleCloud':      await oracleAutofill();     break;
+      case 'SmartRecruiters':  await srAutofill();         break;
       case 'Greenhouse':       await greenhouseAutofill(); break;
-      case 'Ashby':            await ashbyAutofill();    break;
-      case 'BambooHR':         await bambooAutofill();   break;
-      case 'Jobvite':          await jobviteAutofill();  break;
-      case 'Lever':            await leverAutofill();    break;
-      default:                 await autoFillPage();     break;
+      case 'Ashby':            await ashbyAutofill();      break;
+      case 'BambooHR':         await bambooAutofill();     break;
+      case 'Jobvite':          await jobviteAutofill();    break;
+      case 'Lever':            await leverAutofill();      break;
+      case 'Workable':         await workableAutofill();   break;
+      default:                 await autoFillPage();       break;
     }
     // Generic pass after platform-specific (catches missed fields)
-    if (!['Ashby','BambooHR','Jobvite','Lever'].includes(CURRENT_ATS)) {
+    if (!['Ashby','BambooHR','Jobvite','Lever','Workable'].includes(CURRENT_ATS)) {
       await autoFillPage();
     }
   }

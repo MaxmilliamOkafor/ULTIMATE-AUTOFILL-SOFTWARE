@@ -183,11 +183,30 @@
     });
   }
 
-  /* ── Auto-skip timer cap: intercept incoming AUTO_APPLY_STATE_UPDATE ────
-   * Cap autoSkipSeconds at 5 so the "Auto skip in X Sec." countdown never
-   * exceeds 5 seconds, regardless of what the background sends.
-   * This survives OptimHire updates because we override the message listener. */
+  /* ── Auto-skip timer cap + FORCE-SKIP fix ─────────────────────────────────
+   * The background sends AUTO_APPLY_STATE_UPDATE with autoSkipSeconds: 180
+   * every 1 second via setInterval. The background ALSO waits the full 180s
+   * before calling its own skip callback.  Simply capping the display value
+   * to 5 only changes what the UI shows — the background still waits 3 min.
+   *
+   * FIX: when we see autoSkipSeconds > AUTO_SKIP_MAX for the first time on a
+   * job, we cap the display AND start our own 5-second timer that actually
+   * sends { action: 'skipCurrent' } to force the background to advance.
+   * ─────────────────────────────────────────────────────────────────────── */
   const AUTO_SKIP_MAX = 5;
+  let _forceSkipTimer = null;
+  let _forceSkipJobKey = ''; // de-dup so we only schedule once per job/state
+
+  function scheduleForceSkip(jobKey) {
+    if (_forceSkipJobKey === jobKey) return; // already scheduled for this job
+    _forceSkipJobKey = jobKey;
+    clearTimeout(_forceSkipTimer);
+    _forceSkipTimer = setTimeout(function () {
+      chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(function () {});
+      _forceSkipJobKey = ''; // allow next job to schedule
+    }, (AUTO_SKIP_MAX + 1) * 1000); // +1 so sidepanel countdown reaches 0 first
+  }
+
   (function patchOnMessage() {
     const _origAddListener = chrome.runtime.onMessage.addListener.bind(chrome.runtime.onMessage);
     chrome.runtime.onMessage.addListener = function (listener) {
@@ -195,12 +214,50 @@
         if (msg && msg.type === 'AUTO_APPLY_STATE_UPDATE' &&
             typeof msg.autoSkipSeconds === 'number' &&
             msg.autoSkipSeconds > AUTO_SKIP_MAX) {
+          // Build a stable key from the job URL + original skip duration
+          var jobKey = (msg.url || msg.jobUrl || '') + '_' + msg.autoSkipSeconds;
+          scheduleForceSkip(jobKey);
           msg = Object.assign({}, msg, { autoSkipSeconds: AUTO_SKIP_MAX });
         }
         return listener(msg, sender, sendResponse);
       });
     };
   })();
+
+  /* ── Stuck-job watchdog ────────────────────────────────────────────────────
+   * If the same job has been "active" (running state) for more than 90 seconds
+   * without completing, something is genuinely stuck — force-skip it.
+   * This catches cases where AUTO_APPLY_STATE_UPDATE is never sent at all
+   * (e.g. OptimHire's pipeline hangs silently).                              */
+  var _watchdogJobKey = '';
+  var _watchdogTimer  = null;
+
+  function resetWatchdog(key) {
+    if (_watchdogJobKey === key) return;
+    _watchdogJobKey = key;
+    clearTimeout(_watchdogTimer);
+    _watchdogTimer = setTimeout(function () {
+      // Still on same job after 90s → force skip
+      chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(function () {});
+      _watchdogJobKey = '';
+    }, 90_000);
+  }
+
+  chrome.runtime.onMessage.addListener(function (msg) {
+    if (!msg) return;
+    // New job started → reset watchdog
+    if (msg.type === 'CSV_JOB_STARTED' || msg.type === 'CSV_JOB_OPENING') {
+      resetWatchdog(String(Date.now()));
+    }
+    if (msg.type === 'SIDEBAR_STATUS' && msg.url) {
+      resetWatchdog(msg.url);
+    }
+    // Job completed → cancel watchdog
+    if (msg.type === 'CSV_JOB_COMPLETE' || msg.type === 'CSV_QUEUE_DONE') {
+      clearTimeout(_watchdogTimer);
+      _watchdogJobKey = '';
+    }
+  });
 
   /* ── Message listener — receives status from background / content scripts ── */
   chrome.runtime.onMessage.addListener(function (msg) {
