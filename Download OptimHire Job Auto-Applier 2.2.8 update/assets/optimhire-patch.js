@@ -1039,13 +1039,13 @@
 
   /* ── General stuck-job watchdog (content script) ────────────────────────────
    * If the automation is running but the same URL has been "active" for more
-   * than 100 seconds, something is stuck — send skipCurrent.
+   * than 25 seconds, something is stuck — send skipCurrent.
    * Guards against any future stall source, not just missing-details iframe.
    * ─────────────────────────────────────────────────────────────────────── */
   (function installStuckWatchdog() {
     let _watchdogUrl = '';
     let _watchdogTimer = null;
-    const STUCK_TIMEOUT_MS = 100_000; // 100 seconds
+    const STUCK_TIMEOUT_MS = 25_000; // 25 seconds
 
     async function checkStuck() {
       const { csvActiveJobId, isAutoProcessStartJob } = await ST.get([

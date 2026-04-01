@@ -225,7 +225,7 @@
   })();
 
   /* ── Stuck-job watchdog ────────────────────────────────────────────────────
-   * If the same job has been "active" (running state) for more than 90 seconds
+   * If the same job has been "active" (running state) for more than 25 seconds
    * without completing, something is genuinely stuck — force-skip it.
    * This catches cases where AUTO_APPLY_STATE_UPDATE is never sent at all
    * (e.g. OptimHire's pipeline hangs silently).                              */
@@ -237,10 +237,10 @@
     _watchdogJobKey = key;
     clearTimeout(_watchdogTimer);
     _watchdogTimer = setTimeout(function () {
-      // Still on same job after 90s → force skip
+      // Still on same job after 25s → force skip
       chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(function () {});
       _watchdogJobKey = '';
-    }, 90_000);
+    }, 25_000);
   }
 
   chrome.runtime.onMessage.addListener(function (msg) {
