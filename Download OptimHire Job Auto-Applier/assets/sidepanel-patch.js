@@ -184,27 +184,45 @@
   }
 
   /* ── Auto-skip timer cap + FORCE-SKIP fix ─────────────────────────────────
-   * The background sends AUTO_APPLY_STATE_UPDATE with autoSkipSeconds: 180
-   * every 1 second via setInterval. The background ALSO waits the full 180s
-   * before calling its own skip callback.  Simply capping the display value
-   * to 5 only changes what the UI shows — the background still waits 3 min.
+   * The background sends AUTO_APPLY_STATE_UPDATE with autoSkipSeconds: 180.
+   * We cap the display AND fire a real skipCurrent after AUTO_SKIP_MAX+1s.
    *
-   * FIX: when we see autoSkipSeconds > AUTO_SKIP_MAX for the first time on a
-   * job, we cap the display AND start our own 5-second timer that actually
-   * sends { action: 'skipCurrent' } to force the background to advance.
+   * IMPORTANT: Skip is SUPPRESSED for 30s if:
+   *   - SUBMIT_ATTEMPTED was received (content script just clicked submit)
+   *   - The current status is "submitting" (from SIDEBAR_STATUS event)
    * ─────────────────────────────────────────────────────────────────────── */
   const AUTO_SKIP_MAX = 15;
-  let _forceSkipTimer = null;
-  let _forceSkipJobKey = ''; // de-dup so we only schedule once per job/state
+  let _forceSkipTimer  = null;
+  let _forceSkipJobKey = '';
+  let _submitAttemptedTs = 0; // timestamp of last SUBMIT_ATTEMPTED message
+  const SUBMIT_SUPPRESS_MS = 30_000; // suppress skips for 30s after submit attempted
+
+  function isSubmitSuppressed() {
+    return Date.now() - _submitAttemptedTs < SUBMIT_SUPPRESS_MS;
+  }
+
+  function clearAllSkipTimers() {
+    clearTimeout(_forceSkipTimer);
+    _forceSkipTimer  = null;
+    _forceSkipJobKey = '';
+    clearTimeout(_watchdogTimer);
+    _watchdogTimer   = null;
+    _watchdogJobKey  = '';
+  }
 
   function scheduleForceSkip(jobKey) {
-    if (_forceSkipJobKey === jobKey) return; // already scheduled for this job
+    if (_forceSkipJobKey === jobKey) return;
     _forceSkipJobKey = jobKey;
     clearTimeout(_forceSkipTimer);
     _forceSkipTimer = setTimeout(function () {
+      if (isSubmitSuppressed()) {
+        // Submit was attempted — don't skip, let the page confirm
+        _forceSkipJobKey = '';
+        return;
+      }
       chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(function () {});
-      _forceSkipJobKey = ''; // allow next job to schedule
-    }, (AUTO_SKIP_MAX + 1) * 1000); // +1 so sidepanel countdown reaches 0 first
+      _forceSkipJobKey = '';
+    }, (AUTO_SKIP_MAX + 1) * 1000);
   }
 
   (function patchOnMessage() {
@@ -214,9 +232,10 @@
         if (msg && msg.type === 'AUTO_APPLY_STATE_UPDATE' &&
             typeof msg.autoSkipSeconds === 'number' &&
             msg.autoSkipSeconds > AUTO_SKIP_MAX) {
-          // Build a stable key from the job URL + original skip duration
-          var jobKey = (msg.url || msg.jobUrl || '') + '_' + msg.autoSkipSeconds;
-          scheduleForceSkip(jobKey);
+          if (!isSubmitSuppressed()) {
+            var jobKey = (msg.url || msg.jobUrl || '') + '_' + msg.autoSkipSeconds;
+            scheduleForceSkip(jobKey);
+          }
           msg = Object.assign({}, msg, { autoSkipSeconds: AUTO_SKIP_MAX });
         }
         return listener(msg, sender, sendResponse);
@@ -225,10 +244,8 @@
   })();
 
   /* ── Stuck-job watchdog ────────────────────────────────────────────────────
-   * If the same job has been "active" (running state) for more than 25 seconds
-   * without completing, something is genuinely stuck — force-skip it.
-   * This catches cases where AUTO_APPLY_STATE_UPDATE is never sent at all
-   * (e.g. OptimHire's pipeline hangs silently).                              */
+   * If the same job has been "active" for more than 25 seconds without
+   * completing, force-skip — UNLESS a submit was recently attempted.         */
   var _watchdogJobKey = '';
   var _watchdogTimer  = null;
 
@@ -237,7 +254,12 @@
     _watchdogJobKey = key;
     clearTimeout(_watchdogTimer);
     _watchdogTimer = setTimeout(function () {
-      // Still on same job after 25s → force skip
+      if (isSubmitSuppressed()) {
+        // Submit was attempted — give it more time (re-arm for another 25s)
+        _watchdogJobKey = '';
+        resetWatchdog(key + '_retry');
+        return;
+      }
       chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(function () {});
       _watchdogJobKey = '';
     }, 25_000);
@@ -245,17 +267,33 @@
 
   chrome.runtime.onMessage.addListener(function (msg) {
     if (!msg) return;
+
+    // Submit was attempted from content script — suppress all skip timers
+    if (msg.type === 'SUBMIT_ATTEMPTED') {
+      _submitAttemptedTs = msg.ts || Date.now();
+      clearAllSkipTimers();
+      addLog('Submit attempted — skip timers paused for 30s', '');
+      return;
+    }
+
     // New job started → reset watchdog
     if (msg.type === 'CSV_JOB_STARTED' || msg.type === 'CSV_JOB_OPENING') {
+      _submitAttemptedTs = 0; // new job — allow skipping again
       resetWatchdog(String(Date.now()));
     }
     if (msg.type === 'SIDEBAR_STATUS' && msg.url) {
-      resetWatchdog(msg.url);
+      if (msg.event !== 'submitting') resetWatchdog(msg.url);
+      // submitting state → suppress watchdog
+      if (msg.event === 'submitting') {
+        _submitAttemptedTs = Date.now();
+        clearAllSkipTimers();
+      }
     }
     // Job completed → cancel watchdog
     if (msg.type === 'CSV_JOB_COMPLETE' || msg.type === 'CSV_QUEUE_DONE') {
       clearTimeout(_watchdogTimer);
-      _watchdogJobKey = '';
+      _watchdogJobKey  = '';
+      _submitAttemptedTs = 0;
     }
   });
 
