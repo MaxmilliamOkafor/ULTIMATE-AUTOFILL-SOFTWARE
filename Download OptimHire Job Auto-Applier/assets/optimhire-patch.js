@@ -1,17 +1,17 @@
 /**
- * OptimHire Comprehensive Patch v4.5
- * Covers ALL 19 tasks — runs as a content script on every page
+ * OptimHire Comprehensive Patch v5.0
+ * Covers ALL 23 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
  * T2  – Credits locked at 9999 forever
  * T4  – Skip fires only AFTER confirmed submission
  * T5  – Indeed "Apply on company site" auto-navigation
- * T6  – LinkedIn Easy Apply + non-Easy Apply
+ * T6  – LinkedIn Easy Apply + non-Easy Apply (multi-step)
  * T7  – Freshness badges (🔥 <30m · ✨ <24h · 📅 <3d)
  * T8  – Workday / OracleCloud / SmartRecruiters autofill (comprehensive)
  * T9  – Deduplication: never apply to same URL twice
  * T10 – HiringCafe "Apply Directly" + company-size filter
- * T11 – OracleCloud + SmartRecruiters ATS detection
+ * T11 – OracleCloud + SmartRecruiters + iCIMS + Paylocity + JazzHR + Teamtailor
  * T12 – Auto-solve reCAPTCHA checkbox + math captchas
  * T13 – Auto-fill ALL missing required fields from profile
  * T14 – Wake Lock (prevent PC sleep during automation) — NO AudioContext
@@ -20,6 +20,10 @@
  * T17 – "Please fill missing details" stall prevention
  * T18 – "Add Missing Details" dialog auto-fill + auto-submit
  * T19 – CSV Auto-Apply bridge: signals completion to queue
+ * T20 – CSV Auto-Apply Floating Overlay
+ * T21 – Validation error detection + auto-fix before submit
+ * T22 – Skip suppression: no skip fired while form is actively filling
+ * T23 – React-Select / Select2 / custom combobox support
  *
  * v4.5 fixes (2026-04-01):
  *   - ROOT CAUSE FIX: background autoSkipDuration changed to 180s in v2.4.2.
@@ -93,6 +97,7 @@
     'myworkdayjobs.com':   'Workday',
     'workday.com':         'Workday',
     'icims.com':           'iCIMS',
+    'careers.icims.com':   'iCIMS',
     'taleo.net':           'Taleo',
     'oraclecloud.com':     'OracleCloud',
     'fa.oraclecloud.com':  'OracleCloud',
@@ -104,7 +109,10 @@
     'jobs.workable.com':   'Workable',   // v2.4.2: Workable also uses jobs.workable.com
     'workable.com':        'Workable',
     'paylocity.com':       'Paylocity',
+    'recruiting.paylocity.com': 'Paylocity',
     'jazzhr.com':          'JazzHR',
+    'resumatorapi.com':    'JazzHR',
+    'teamtailor.com':      'Teamtailor',
     'ziprecruiter.com':    'ZipRecruiter',
     'job.ziprecruiter.com':'ZipRecruiter',
     'manatal.com':         'Manatal',
@@ -140,6 +148,27 @@
    * module-internal object. We intercept chrome.runtime.sendMessage here
    * so any AUTO_APPLY_STATE_UPDATE with autoSkipSeconds > 5 is clamped.   */
   const AUTO_SKIP_MAX_SECONDS = 15;
+
+  /* ── T22: Global fill-active + submit-attempted guards ─────────────────
+   * _fillActive  = true while any autofill pass is running.
+   *               Watchdogs check this before firing skipCurrent.
+   * _submitAttempted = true for 30s after we click a submit button.
+   *               Sidepanel watchdog honours this to avoid double-skip.
+   * ─────────────────────────────────────────────────────────────────── */
+  let _fillActive       = false;
+  let _submitAttempted  = false;
+  let _submitAttemptTs  = 0;
+
+  function markSubmitAttempted() {
+    _submitAttempted = true;
+    _submitAttemptTs = Date.now();
+    try {
+      chrome.runtime.sendMessage({ type: 'SUBMIT_ATTEMPTED', ts: _submitAttemptTs }).catch(() => {});
+    } catch (_) {}
+    // Auto-clear after 30s
+    setTimeout(() => { _submitAttempted = false; }, 30_000);
+  }
+
   (function capAutoSkipOnSend() {
     const _orig = chrome.runtime.sendMessage.bind(chrome.runtime);
     chrome.runtime.sendMessage = function (msg, ...args) {
@@ -552,6 +581,105 @@
     }
   }
 
+  /* ── T21: Validation error detection + auto-fix ───────────────────────
+   * After every fill pass, scan for fields that have an error state
+   * (red border, aria-invalid, [class*="error"]) and re-fill them.
+   * Returns the number of errors fixed.
+   * ─────────────────────────────────────────────────────────────────── */
+  async function detectAndFixValidationErrors() {
+    const p = await getProfile();
+    let fixed = 0;
+
+    // Selectors that indicate a field has a validation error
+    const ERROR_SELECTORS = [
+      'input[aria-invalid="true"]',
+      'textarea[aria-invalid="true"]',
+      'select[aria-invalid="true"]',
+      'input.error,input.is-invalid,input[class*="error"],input[class*="invalid"]',
+      'textarea.error,textarea.is-invalid',
+      'select.error,select.is-invalid',
+      '.field--error input,.field--error textarea,.field--error select',
+      '.form-group.has-error input,.form-group.has-error select',
+      '[data-error] input,[data-error] textarea,[data-error] select',
+      '[class*="fieldError"] input,[class*="fieldError"] textarea',
+      '[class*="field-error"] input,[class*="field-error"] select',
+    ];
+
+    const errorFields = $$(ERROR_SELECTORS.join(','))
+      .filter(el => isVisible(el) && el.tagName !== 'BUTTON');
+
+    for (const el of errorFields) {
+      const lbl = getLabel(el) || el.name || el.id || '';
+      const inputType = (el.type || '').toLowerCase();
+
+      if (el.tagName === 'SELECT') {
+        const opts = $$('option', el).filter(o => o.value && o.value !== '' && !/^select/i.test(o.text));
+        if (!opts.length) continue;
+        const val = guessValue(lbl, p);
+        const best = val ? bestSelectOption(el, val) : null;
+        const chosen = best || opts[0];
+        if (chosen) {
+          el.value = chosen.value;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          fixed++;
+        }
+      } else {
+        const val = guessValue(lbl, p, inputType) || (inputType === 'email' ? p.email : '') || (inputType === 'tel' ? p.phone : '');
+        if (val) {
+          el.focus();
+          nativeSet(el, val);
+          await sleep(60);
+          fixed++;
+        }
+      }
+    }
+
+    // Also scan for error MESSAGE elements and look for their associated field above
+    const errorMsgEls = $$(
+      '[class*="error-message"],[class*="errorMessage"],[class*="field-error"],[class*="fieldError"],' +
+      '[role="alert"]:not([class*="banner"])'
+    ).filter(isVisible);
+
+    for (const msg of errorMsgEls) {
+      const container = msg.closest(
+        '.form-group,.field,[class*="Field"],[class*="Question"],[class*="form-row"],fieldset'
+      );
+      if (!container) continue;
+      const inp = container.querySelector(
+        'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select'
+      );
+      if (!inp || !isVisible(inp)) continue;
+      if (inp.tagName === 'SELECT') continue; // handled above
+      const lbl = getLabel(inp) || inp.name || '';
+      const inputType = (inp.type || '').toLowerCase();
+      const val = guessValue(lbl, p, inputType);
+      if (val && inp.value?.trim() !== val) {
+        inp.focus(); nativeSet(inp, val); await sleep(60); fixed++;
+      }
+    }
+
+    if (fixed > 0) LOG(`detectAndFixValidationErrors: fixed ${fixed} error fields`);
+    return fixed;
+  }
+
+  /* ── Wait for a submit button to become enabled ────────────────────────
+   * Some ATS frameworks disable the submit button until all fields pass
+   * validation.  Poll for up to `ms` milliseconds.                       */
+  async function waitForSubmitReady(btn, ms = 6000) {
+    if (!btn) return false;
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (!btn.disabled && !btn.getAttribute('aria-disabled') &&
+          btn.getAttribute('aria-disabled') !== 'true' &&
+          !btn.classList.contains('disabled') &&
+          isVisible(btn)) {
+        return true;
+      }
+      await sleep(300);
+    }
+    return false;
+  }
+
   /* ── Continuous sanitizer: re-runs after OptimHire fills post ours ──────
    * OptimHire's FILL_COMPLEX_FORM pipeline fills fields AFTER our pass.
    * We watch for input-value mutations and debounce a re-sanitize.        */
@@ -775,6 +903,56 @@
       }
     }
 
+    /* ── T23: React-Select / Select2 / custom combobox ─────────────
+     * Many modern ATS use custom dropdown widgets that don't use <select>.
+     * Detect them by role=combobox or common class names, then type the
+     * target value and pick the first matching option from the listbox.   */
+    const customCombos = $$(
+      '[role="combobox"]:not([data-automation-id]),' +
+      '[class*="react-select__control"],[class*="select2-selection"],' +
+      '[class*="Select__control"],[class*="dropdown-trigger"]'
+    ).filter(isVisible);
+
+    for (const combo of customCombos) {
+      // Only process if it looks unfilled
+      const valueEl = combo.querySelector(
+        '[class*="singleValue"],[class*="single-value"],[class*="placeholder"],[class*="Select__placeholder"]'
+      );
+      const isPlaceholder = !valueEl || /select|choose|pick/i.test(valueEl.textContent || '');
+      if (!isPlaceholder) continue;
+
+      const lbl = getLabel(combo) || getLabel(combo.closest('[class*="field"],[class*="Field"],[class*="form-group"]') || combo) || '';
+      const val = guessValue(lbl, p);
+      if (!val) continue;
+
+      // Open the dropdown
+      realClick(combo);
+      await sleep(400);
+
+      // Try typing in the search input
+      const searchInput = combo.querySelector('input') || (combo.tagName === 'INPUT' ? combo : null);
+      if (searchInput) { nativeSet(searchInput, val); await sleep(600); }
+
+      // Pick matching option from listbox
+      const listbox = document.querySelector(
+        '[role="listbox"],[class*="react-select__menu"],[class*="Select__menu"],[class*="select2-results"]'
+      );
+      if (listbox) {
+        const opts = $$('[role="option"],[class*="react-select__option"],[class*="Select__option"],[class*="select2-results__option"]', listbox)
+          .filter(isVisible);
+        const vl = val.toLowerCase();
+        const best = opts.find(o => o.textContent.toLowerCase().includes(vl))
+          || opts.find(o => vl.includes(o.textContent.toLowerCase().trim()))
+          || opts[0];
+        if (best) { realClick(best); await sleep(300); filledCount++; if (lbl) reportFieldFilled(lbl, 'filled'); }
+        else {
+          // Close dropdown if no match
+          document.body.click();
+          await sleep(200);
+        }
+      }
+    }
+
     /* Radio buttons */
     const groups = {};
     $$('input[type=radio]').filter(isVisible).forEach(r => {
@@ -984,11 +1162,16 @@
         } catch (_) { /* cross-origin — expected */ }
       } catch (_) {}
 
-      // After 5 seconds, if iframe is still present, force-skip the job
-      await sleep(5000);
+      // After 8 seconds, if iframe is still present and we're not actively filling, force-skip
+      await sleep(8000);
       const still = document.getElementById(IFRAME_ID);
       if (still) {
-        LOG('Missing-details iframe still present after 5s — force-skipping');
+        if (_fillActive || (_submitAttempted && Date.now() - _submitAttemptTs < 30_000)) {
+          LOG('Missing-details iframe: skip suppressed (fill active or submit attempted)');
+          _skipScheduled = false;
+          return;
+        }
+        LOG('Missing-details iframe still present after 8s — force-skipping');
         chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
         // Also remove the iframe so the page is unblocked
         try {
@@ -1060,6 +1243,17 @@
         _watchdogUrl = cur;
         clearTimeout(_watchdogTimer);
         _watchdogTimer = setTimeout(() => {
+          // Do NOT skip if fill is actively running or a submit was just attempted
+          if (_fillActive) {
+            LOG('Stuck watchdog: skipping because _fillActive is true');
+            _watchdogUrl = ''; // reset so next poll re-arms the timer
+            return;
+          }
+          if (_submitAttempted && Date.now() - _submitAttemptTs < 30_000) {
+            LOG('Stuck watchdog: skipping because submit was recently attempted');
+            _watchdogUrl = '';
+            return;
+          }
           LOG(`Stuck watchdog: still on ${cur} after ${STUCK_TIMEOUT_MS/1000}s — force-skipping`);
           chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
           _watchdogUrl = '';
@@ -1810,6 +2004,121 @@
     await autoFillPage();
   }
 
+  /* ── iCIMS autofill ─────────────────────────────────────────── */
+  async function icimsAutofill() {
+    const isICIMS = HOST.includes('icims.com') || !!$('[class*="icims"],[id*="icims"],form[action*="icims"]');
+    if (!isICIMS) return;
+    const p = await getProfile();
+    LOG('iCIMS: filling');
+
+    const ICIMS_MAP = [
+      ['input[id*="firstname"],input[name*="firstname"],input[id*="first_name"],input[name*="first_name"]', p.first_name],
+      ['input[id*="lastname"],input[name*="lastname"],input[id*="last_name"],input[name*="last_name"]',     p.last_name],
+      ['input[type="email"],input[id*="email"],input[name*="email"]',                                      p.email],
+      ['input[type="tel"],input[id*="phone"],input[name*="phone"],input[id*="cellphone"]',                 p.phone],
+      ['input[id*="address1"],input[name*="address1"],input[id*="street"]',                               p.street || ''],
+      ['input[id*="city"],input[name*="city"]',                                                            p.city],
+      ['input[id*="zip"],input[id*="postal"],input[name*="zip"]',                                         p.postal_code || ''],
+      ['input[id*="linkedin"],input[name*="linkedin"]',                                                    p.linkedin_profile_url || ''],
+      ['textarea[id*="cover"],textarea[name*="cover"],textarea[id*="summary"]',                            p.cover_letter || DEFAULTS.cover],
+    ];
+    for (const [sel, val] of ICIMS_MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+
+    // iCIMS dropdowns
+    $$('select').filter(isVisible).forEach(sel => {
+      if (sel.value) return;
+      const lbl = getLabel(sel);
+      const val = guessValue(lbl, p);
+      const opt = val ? bestSelectOption(sel, val) : null;
+      if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+
+    await autoFillPage();
+    LOG('iCIMS autofill done');
+  }
+
+  /* ── Paylocity autofill ──────────────────────────────────────── */
+  async function paylocityAutofill() {
+    const isPaylocity = HOST.includes('paylocity.com') || !!$('[class*="paylocity"],form[action*="paylocity"]');
+    if (!isPaylocity) return;
+    const p = await getProfile();
+    LOG('Paylocity: filling');
+
+    const PAY_MAP = [
+      ['input[id*="FirstName"],input[name*="FirstName"],input[placeholder*="First Name"]', p.first_name],
+      ['input[id*="LastName"],input[name*="LastName"],input[placeholder*="Last Name"]',     p.last_name],
+      ['input[type="email"],input[id*="Email"],input[name*="Email"]',                       p.email],
+      ['input[type="tel"],input[id*="Phone"],input[name*="Phone"]',                         p.phone],
+      ['input[id*="City"],input[name*="City"]',                                             p.city],
+      ['input[id*="Zip"],input[id*="PostalCode"],input[name*="Zip"]',                      p.postal_code || ''],
+      ['input[id*="LinkedIn"],input[name*="LinkedIn"]',                                    p.linkedin_profile_url || ''],
+      ['textarea[id*="CoverLetter"],textarea[id*="Summary"]',                               p.cover_letter || DEFAULTS.cover],
+    ];
+    for (const [sel, val] of PAY_MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await autoFillPage();
+    LOG('Paylocity autofill done');
+  }
+
+  /* ── JazzHR autofill ─────────────────────────────────────────── */
+  async function jazzhrAutofill() {
+    const isJazzHR = HOST.includes('jazzhr.com') || HOST.includes('resumatorapi.com') ||
+      !!$('[class*="jazzhr"],form[class*="jazz"],#apply-form');
+    if (!isJazzHR) return;
+    const p = await getProfile();
+    LOG('JazzHR: filling');
+
+    const JAZZ_MAP = [
+      ['input[id="first_name"],input[name="first_name"]',    p.first_name],
+      ['input[id="last_name"],input[name="last_name"]',       p.last_name],
+      ['input[id="email"],input[name="email"],input[type="email"]', p.email],
+      ['input[id="phone"],input[name="phone"],input[type="tel"]',   p.phone],
+      ['input[id="location"],input[name="location"]',         `${p.city||''}, ${p.country||''}`.replace(/^, |, $/,'')],
+      ['input[id="linkedin"],input[name="linkedin"]',         p.linkedin_profile_url || ''],
+      ['input[id="website"],input[name="website"]',           p.website_url || ''],
+      ['textarea[id="cover_letter"],textarea[name="cover_letter"]', p.cover_letter || DEFAULTS.cover],
+    ];
+    for (const [sel, val] of JAZZ_MAP) {
+      if (!val) continue;
+      const el = $(sel);
+      if (el && isVisible(el) && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await autoFillPage();
+    LOG('JazzHR autofill done');
+  }
+
+  /* ── Teamtailor autofill ─────────────────────────────────────── */
+  async function teamtailorAutofill() {
+    const isTT = HOST.includes('teamtailor.com') || !!$('[class*="teamtailor"],[data-teamtailor]');
+    if (!isTT) return;
+    const p = await getProfile();
+    LOG('Teamtailor: filling');
+
+    const TT_MAP = [
+      ['input[name="candidate[first_name]"],input[id*="first_name"]', p.first_name],
+      ['input[name="candidate[last_name]"],input[id*="last_name"]',   p.last_name],
+      ['input[name="candidate[email]"],input[type="email"]',          p.email],
+      ['input[name="candidate[phone]"],input[type="tel"]',            p.phone],
+      ['input[name="candidate[linkedin_url]"],input[id*="linkedin"]', p.linkedin_profile_url || ''],
+      ['input[name="candidate[website]"],input[id*="website"]',       p.website_url || ''],
+      ['textarea[name="candidate[pitch]"],textarea[id*="pitch"],textarea[id*="cover"]', p.cover_letter || DEFAULTS.cover],
+    ];
+    for (const [sel, val] of TT_MAP) {
+      if (!val) continue;
+      const el = $(sel);
+      if (el && isVisible(el) && !el.value?.trim()) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await autoFillPage();
+    LOG('Teamtailor autofill done');
+  }
+
   /* ── waitForFormStable — wait until DOM stops changing ──────
    * Waits up to `timeout` ms for the form to stop mutating, then
    * resolves.  Prevents filling fields that are still being added
@@ -1905,22 +2214,31 @@
 
   /* ── Shared ATS dispatch helper ─────────────────────────── */
   async function runAtsAutofill() {
-    await waitForFormStable(2000);
-    switch (CURRENT_ATS) {
-      case 'Workday':          await workdayAutofill();    break;
-      case 'OracleCloud':      await oracleAutofill();     break;
-      case 'SmartRecruiters':  await srAutofill();         break;
-      case 'Greenhouse':       await greenhouseAutofill(); break;
-      case 'Ashby':            await ashbyAutofill();      break;
-      case 'BambooHR':         await bambooAutofill();     break;
-      case 'Jobvite':          await jobviteAutofill();    break;
-      case 'Lever':            await leverAutofill();      break;
-      case 'Workable':         await workableAutofill();   break;
-      default:                 await autoFillPage();       break;
-    }
-    // Generic pass after platform-specific (catches missed fields)
-    if (!['Ashby','BambooHR','Jobvite','Lever','Workable'].includes(CURRENT_ATS)) {
-      await autoFillPage();
+    _fillActive = true;
+    try {
+      await waitForFormStable(2000);
+      switch (CURRENT_ATS) {
+        case 'Workday':          await workdayAutofill();      break;
+        case 'OracleCloud':      await oracleAutofill();       break;
+        case 'SmartRecruiters':  await srAutofill();           break;
+        case 'Greenhouse':       await greenhouseAutofill();   break;
+        case 'Ashby':            await ashbyAutofill();        break;
+        case 'BambooHR':         await bambooAutofill();       break;
+        case 'Jobvite':          await jobviteAutofill();      break;
+        case 'Lever':            await leverAutofill();        break;
+        case 'Workable':         await workableAutofill();     break;
+        case 'iCIMS':            await icimsAutofill();        break;
+        case 'Paylocity':        await paylocityAutofill();    break;
+        case 'JazzHR':           await jazzhrAutofill();       break;
+        case 'Teamtailor':       await teamtailorAutofill();   break;
+        default:                 await autoFillPage();         break;
+      }
+      // Generic pass after platform-specific (catches missed fields)
+      if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor'].includes(CURRENT_ATS)) {
+        await autoFillPage();
+      }
+    } finally {
+      _fillActive = false;
     }
   }
 
@@ -1959,12 +2277,38 @@
       LOG(`CSV bridge: reported ${status} for job ${csvActiveJobId}`);
     };
 
-    chrome.runtime.onMessage.addListener(msg => {
-      if (msg?.type === 'COMPLEX_FORM_SUCCESS') report('done');
-      if (msg?.type === 'COMPLEX_FORM_ERROR')   report('failed', msg.errorType || msg.message || '');
-      if (msg?.type === 'APPLICATION_SUCCESS' || msg?.type === 'JOB_APPLIED') report('done');
-      if (msg?.type === 'APPLICATION_FAILED')   report('failed', msg.reason || '');
-      if (msg?.type === 'ALREADY_APPLIED_SKIP') report('duplicate');
+    chrome.runtime.onMessage.addListener(async msg => {
+      if (msg?.type === 'COMPLEX_FORM_SUCCESS') { report('done'); return; }
+      if (msg?.type === 'APPLICATION_SUCCESS' || msg?.type === 'JOB_APPLIED') { report('done'); return; }
+      if (msg?.type === 'ALREADY_APPLIED_SKIP') { report('duplicate'); return; }
+      if (msg?.type === 'APPLICATION_FAILED') { report('failed', msg.reason || ''); return; }
+
+      if (msg?.type === 'COMPLEX_FORM_ERROR') {
+        // Don't immediately fail — attempt one recovery autofill + submit pass
+        const errType = msg.errorType || msg.message || '';
+        LOG(`COMPLEX_FORM_ERROR (${errType}) — attempting recovery autofill`);
+        try {
+          _fillActive = true;
+          await waitForFormStable(1500);
+          await runAtsAutofill();
+          await detectAndFixValidationErrors();
+          await sleep(500);
+          _fillActive = false;
+          const recovered = await handleMultiStepCsvForm();
+          if (!recovered) {
+            // Give the page 5 more seconds to confirm submission
+            await sleep(5000);
+            const href = location.href.toLowerCase();
+            const body = document.body?.textContent?.toLowerCase() || '';
+            const isSuccess = /\/thanks|\/thank-you|\/success|\/confirmation|\/complete|\/submitted|\/applied|\/done/.test(href) ||
+              /application submitted|thank you for applying|we.ve received|successfully submitted/.test(body);
+            if (isSuccess) { report('done'); } else { report('failed', errType); }
+          }
+        } catch (_) {
+          _fillActive = false;
+          report('failed', errType);
+        }
+      }
     });
 
     const successPatterns = [
@@ -2056,8 +2400,11 @@
       const btn = $(sel);
       if (btn && isVisible(btn)) {
         LOG('Found submit button via selector:', sel);
+        await waitForSubmitReady(btn, 5000);
+        if (btn.disabled) { LOG('Submit button still disabled after 5s — skipping selector'); continue; }
         try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
-        await sleep(400);
+        await sleep(300);
+        markSubmitAttempted();
         realClick(btn);
         return true;
       }
@@ -2070,8 +2417,10 @@
     });
     if (typedSubmit) {
       LOG('Found type=submit button:', typedSubmit.textContent?.trim());
+      await waitForSubmitReady(typedSubmit, 5000);
       try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
-      await sleep(400);
+      await sleep(300);
+      markSubmitAttempted();
       realClick(typedSubmit);
       return true;
     }
@@ -2086,9 +2435,24 @@
 
     if (submitBtn) {
       LOG('Found submit button by text:', submitBtn.textContent?.trim());
+      await waitForSubmitReady(submitBtn, 5000);
       try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
-      await sleep(400);
+      await sleep(300);
+      markSubmitAttempted();
       realClick(submitBtn);
+      return true;
+    }
+
+    // Priority 4: input[type=submit]
+    const inputSubmit = $$('input[type="submit"]').filter(isVisible).find(el =>
+      !/next|continue|back|prev|cancel/i.test(el.value || '')
+    );
+    if (inputSubmit) {
+      await waitForSubmitReady(inputSubmit, 3000);
+      try { chrome.runtime.sendMessage({ type: 'SIDEBAR_STATUS', event: 'submitting' }).catch(() => {}); } catch (_) {}
+      await sleep(300);
+      markSubmitAttempted();
+      realClick(inputSubmit);
       return true;
     }
 
@@ -2102,22 +2466,34 @@
    * Returns true if the form was submitted.
    */
   async function handleMultiStepCsvForm() {
-    let maxSteps = 12; // guard: max form steps
+    let maxSteps = 15; // guard: max form steps
     while (maxSteps-- > 0) {
       await waitForFormStable(2000);
-      await runAtsAutofill();
-      await solveCaptcha();
-      await sleep(600); await sanitizeBadFills();
 
-      // Check for required fields still empty — log warning
-      const emptyRequired = $$(
-        'input[required]:not([type=hidden]):not([type=file]),input[aria-required="true"],' +
-        'select[required],select[aria-required="true"],textarea[required]'
-      ).filter(el => isVisible(el) && !el.value?.trim());
-      if (emptyRequired.length > 0) {
-        LOG(`Multi-step: ${emptyRequired.length} required fields still empty — retrying fill`);
-        await autoFillPage();
+      // Run ATS-specific fill
+      _fillActive = true;
+      try { await runAtsAutofill(); } finally { _fillActive = false; }
+      await solveCaptcha();
+      await sleep(500); await sanitizeBadFills();
+
+      // Fix any validation errors that appeared after our fill
+      const errFixed = await detectAndFixValidationErrors();
+      if (errFixed > 0) { await sleep(400); await sanitizeBadFills(); }
+
+      // Check for required fields still empty — retry up to 2 more times
+      for (let retry = 0; retry < 2; retry++) {
+        const emptyRequired = $$(
+          'input[required]:not([type=hidden]):not([type=file]),input[aria-required="true"],' +
+          'select[required],select[aria-required="true"],textarea[required],' +
+          '[aria-required="true"]:not([type=hidden])'
+        ).filter(el => isVisible(el) && !el.value?.trim());
+        if (emptyRequired.length === 0) break;
+        LOG(`Multi-step: ${emptyRequired.length} required fields still empty — retry ${retry + 1}`);
+        _fillActive = true;
+        try { await autoFillPage(); } finally { _fillActive = false; }
         await sleep(400);
+        await detectAndFixValidationErrors();
+        await sleep(200);
       }
 
       // Try Next/Continue step button first
@@ -2125,13 +2501,35 @@
       if (nextBtn) {
         LOG('Multi-step: clicking Next →', nextBtn.textContent?.trim());
         realClick(nextBtn);
-        await sleep(1800); // wait for new step to render
+        await sleep(2000); // wait for new step to render
         continue;
       }
 
       // No Next button — attempt final submit
       const submitted = await tryClickSubmit();
       LOG('Multi-step: submit attempt result:', submitted);
+
+      // If submitted, wait up to 8s to see if the page navigates to a success URL
+      if (submitted) {
+        await sleep(3000);
+        const href = location.href.toLowerCase();
+        const body = document.body?.textContent?.toLowerCase() || '';
+        const isSuccess =
+          /\/thanks|\/thank-you|\/success|\/confirmation|\/complete|\/submitted|\/applied|\/done|\/thank_you/.test(href) ||
+          /application submitted|thank you for applying|application received|we.ve received your|your application has been|successfully submitted|application complete|thanks for applying|we have received/.test(body) ||
+          !!document.querySelector('#application_confirmation,.application-confirmation,.confirmation-text,[data-automation-id="congratulationsMessage"],[data-automation-id="confirmationMessage"],.posting-confirmation');
+
+        if (!isSuccess) {
+          // Maybe there were validation errors — do one more fix+submit pass
+          const errFixed2 = await detectAndFixValidationErrors();
+          if (errFixed2 > 0) {
+            LOG('Multi-step: validation errors found after submit click — re-trying submit');
+            await sleep(400);
+            await tryClickSubmit();
+          }
+        }
+      }
+
       return submitted;
     }
     LOG('Multi-step: step limit reached');
@@ -2151,10 +2549,12 @@
     _fillDebounce = setTimeout(async () => {
       if (_csvFillRunning) return;
       _csvFillRunning = true;
+      _fillActive = true;
       try {
         await autoFillPage();
         await solveCaptcha();
         await sanitizeBadFills();
+        await detectAndFixValidationErrors();
         // After filling, click Next or Submit if form is ready
         const nextBtn = getNextStepButton();
         if (nextBtn) {
@@ -2164,6 +2564,7 @@
         }
       } finally {
         _csvFillRunning = false;
+        _fillActive = false;
       }
     }, 1200);
   }).observe(document.body, { childList: true, subtree: false });
@@ -2379,11 +2780,15 @@
 
     try {
       /* ATS-specific autofill (all platforms via shared helper) */
+      _fillActive = true;
       await runAtsAutofill();
       await solveCaptcha();
+      await sleep(500);
+      await detectAndFixValidationErrors();
       // Extra sanitize passes — OptimHire may fill after us
       await sleep(700);  await sanitizeBadFills();
       await sleep(1000); await sanitizeBadFills();
+      _fillActive = false;
 
       /* Remember */
       ohAutoFilledUrls.push(norm);
@@ -2872,5 +3277,5 @@
 
   })();
 
-  LOG(`v4.2 loaded | ${CURRENT_ATS || HOST}`);
+  LOG(`v5.0 loaded | ${CURRENT_ATS || HOST}`);
 })();
