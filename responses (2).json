@@ -94,7 +94,7 @@
       "number"
     ],
     "question": "Phone Number*",
-    "response": "+353 0874261508"
+    "response": "0874261508"
   },
   {
     "appearances": 2,
@@ -106,7 +106,7 @@
       "phone"
     ],
     "question": "Mobile Phone*",
-    "response": "+353 0874261508"
+    "response": "0874261508"
   },
   {
     "appearances": 2,
