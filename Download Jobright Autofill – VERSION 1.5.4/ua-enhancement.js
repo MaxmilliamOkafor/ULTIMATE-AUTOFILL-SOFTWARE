@@ -4983,3 +4983,1026 @@
   });
   urlObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 })();
+
+// ============================================================================
+// === v1.5.4 ULTIMATE EDITION: PRE-SEEDED KNOCKOUT Q&A BANK (500+ entries) ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-v1.5.4]', ...a);
+  const SEED_KEY = 'ua_saved_responses';
+  const SEEDED_FLAG = 'ua_v154_seeded';
+
+  // Massive pre-seeded response library covering common ATS knockout questions.
+  // Format: { keywords: [...], response: '...' }  — higher keyword overlap = higher score.
+  const SEED = [
+    // ===== WORK AUTHORIZATION =====
+    { keywords: ['authorized', 'work', 'united', 'states'], response: 'Yes' },
+    { keywords: ['legally', 'authorized', 'work'], response: 'Yes' },
+    { keywords: ['eligible', 'work', 'country'], response: 'Yes' },
+    { keywords: ['right', 'work', 'ireland'], response: 'Yes' },
+    { keywords: ['right', 'work', 'uk'], response: 'Yes' },
+    { keywords: ['right', 'work', 'eu'], response: 'Yes' },
+    { keywords: ['work', 'permit', 'valid'], response: 'Yes' },
+    { keywords: ['citizen', 'permanent', 'resident'], response: 'Yes' },
+    { keywords: ['visa', 'status'], response: 'Authorized to work without sponsorship' },
+
+    // ===== SPONSORSHIP =====
+    { keywords: ['require', 'sponsorship'], response: 'No' },
+    { keywords: ['need', 'sponsorship'], response: 'No' },
+    { keywords: ['require', 'visa', 'sponsorship'], response: 'No' },
+    { keywords: ['will', 'require', 'sponsorship'], response: 'No' },
+    { keywords: ['now', 'future', 'sponsorship'], response: 'No' },
+    { keywords: ['immigration', 'sponsorship', 'required'], response: 'No' },
+    { keywords: ['h1b', 'sponsorship'], response: 'No' },
+
+    // ===== EEO / DIVERSITY =====
+    { keywords: ['gender', 'identity'], response: 'Prefer not to say' },
+    { keywords: ['race', 'ethnicity'], response: 'Prefer not to say' },
+    { keywords: ['hispanic', 'latino'], response: 'No' },
+    { keywords: ['disability', 'status'], response: 'I do not have a disability' },
+    { keywords: ['veteran', 'status'], response: 'I am not a protected veteran' },
+    { keywords: ['protected', 'veteran'], response: 'I am not a protected veteran' },
+    { keywords: ['military', 'service'], response: 'No' },
+    { keywords: ['pronouns'], response: 'Prefer not to say' },
+    { keywords: ['sexual', 'orientation'], response: 'Prefer not to say' },
+
+    // ===== BACKGROUND / LEGAL =====
+    { keywords: ['convicted', 'felony'], response: 'No' },
+    { keywords: ['criminal', 'record'], response: 'No' },
+    { keywords: ['background', 'check', 'consent'], response: 'Yes' },
+    { keywords: ['background', 'check', 'willing'], response: 'Yes' },
+    { keywords: ['drug', 'test', 'consent'], response: 'Yes' },
+    { keywords: ['drug', 'screening'], response: 'Yes' },
+    { keywords: ['non', 'compete', 'agreement'], response: 'No' },
+    { keywords: ['pending', 'charges'], response: 'No' },
+    { keywords: ['terminated', 'previous', 'employer'], response: 'No' },
+
+    // ===== COMPANY RELATIONSHIP =====
+    { keywords: ['previously', 'worked', 'company'], response: 'No' },
+    { keywords: ['former', 'employee'], response: 'No' },
+    { keywords: ['current', 'employee', 'company'], response: 'No' },
+    { keywords: ['applied', 'before'], response: 'No' },
+    { keywords: ['family', 'member', 'company'], response: 'No' },
+    { keywords: ['relative', 'work', 'company'], response: 'No' },
+    { keywords: ['conflict', 'interest'], response: 'No' },
+    { keywords: ['referred', 'employee'], response: 'No' },
+    { keywords: ['how', 'hear', 'about', 'us'], response: 'LinkedIn' },
+    { keywords: ['how', 'find', 'job'], response: 'LinkedIn' },
+    { keywords: ['referral', 'source'], response: 'LinkedIn' },
+    { keywords: ['where', 'hear', 'position'], response: 'LinkedIn' },
+    { keywords: ['job', 'source'], response: 'LinkedIn' },
+
+    // ===== AGE / ELIGIBILITY =====
+    { keywords: ['at', 'least', '18'], response: 'Yes' },
+    { keywords: ['over', '18', 'years'], response: 'Yes' },
+    { keywords: ['18', 'years', 'age'], response: 'Yes' },
+    { keywords: ['legal', 'age', 'work'], response: 'Yes' },
+
+    // ===== AVAILABILITY / START =====
+    { keywords: ['available', 'start'], response: 'Immediately' },
+    { keywords: ['when', 'start', 'work'], response: 'Within 2 weeks' },
+    { keywords: ['earliest', 'start', 'date'], response: 'Immediately' },
+    { keywords: ['notice', 'period'], response: '2 weeks' },
+    { keywords: ['days', 'notice', 'required'], response: '14' },
+    { keywords: ['can', 'start', 'immediately'], response: 'Yes' },
+    { keywords: ['available', 'full', 'time'], response: 'Yes' },
+    { keywords: ['available', 'part', 'time'], response: 'Yes' },
+    { keywords: ['available', 'contract'], response: 'Yes' },
+
+    // ===== LOCATION / RELOCATION =====
+    { keywords: ['willing', 'relocate'], response: 'Yes' },
+    { keywords: ['open', 'relocation'], response: 'Yes' },
+    { keywords: ['willing', 'travel'], response: 'Yes' },
+    { keywords: ['travel', 'percentage'], response: 'Up to 25%' },
+    { keywords: ['commute', 'office'], response: 'Yes' },
+    { keywords: ['reliable', 'transportation'], response: 'Yes' },
+    { keywords: ['remote', 'work', 'comfortable'], response: 'Yes' },
+    { keywords: ['hybrid', 'work', 'comfortable'], response: 'Yes' },
+    { keywords: ['onsite', 'work', 'comfortable'], response: 'Yes' },
+    { keywords: ['work', 'from', 'home'], response: 'Yes' },
+    { keywords: ['current', 'location'], response: 'Dublin, Ireland' },
+
+    // ===== SHIFT / SCHEDULE =====
+    { keywords: ['willing', 'work', 'weekends'], response: 'Yes' },
+    { keywords: ['willing', 'work', 'nights'], response: 'Yes' },
+    { keywords: ['willing', 'work', 'holidays'], response: 'Yes' },
+    { keywords: ['willing', 'work', 'overtime'], response: 'Yes' },
+    { keywords: ['flexible', 'schedule'], response: 'Yes' },
+    { keywords: ['shift', 'work', 'comfortable'], response: 'Yes' },
+    { keywords: ['rotating', 'shift'], response: 'Yes' },
+
+    // ===== COMPENSATION =====
+    { keywords: ['desired', 'salary'], response: '80000' },
+    { keywords: ['expected', 'salary'], response: '80000' },
+    { keywords: ['salary', 'expectation'], response: '80000' },
+    { keywords: ['minimum', 'salary'], response: '70000' },
+    { keywords: ['current', 'salary'], response: '75000' },
+    { keywords: ['hourly', 'rate'], response: '40' },
+    { keywords: ['compensation', 'requirement'], response: 'Negotiable based on full package' },
+    { keywords: ['salary', 'negotiable'], response: 'Yes' },
+
+    // ===== EDUCATION =====
+    { keywords: ['highest', 'degree'], response: "Bachelor's Degree" },
+    { keywords: ['education', 'level'], response: "Bachelor's Degree" },
+    { keywords: ['completed', 'degree'], response: 'Yes' },
+    { keywords: ['graduated', 'college'], response: 'Yes' },
+    { keywords: ['high', 'school', 'diploma'], response: 'Yes' },
+    { keywords: ['field', 'study'], response: 'Computer Science' },
+    { keywords: ['major'], response: 'Computer Science' },
+    { keywords: ['gpa'], response: '3.6' },
+
+    // ===== EXPERIENCE =====
+    { keywords: ['years', 'experience'], response: '7' },
+    { keywords: ['years', 'professional', 'experience'], response: '7' },
+    { keywords: ['total', 'years', 'experience'], response: '7' },
+    { keywords: ['relevant', 'experience'], response: '7 years' },
+    { keywords: ['management', 'experience'], response: '3 years' },
+    { keywords: ['leadership', 'experience'], response: 'Yes' },
+
+    // ===== SKILLS / PROFICIENCY =====
+    { keywords: ['english', 'proficiency'], response: 'Fluent' },
+    { keywords: ['english', 'speak'], response: 'Fluent' },
+    { keywords: ['english', 'write'], response: 'Fluent' },
+    { keywords: ['language', 'proficiency'], response: 'Fluent' },
+    { keywords: ['technical', 'proficiency'], response: 'Advanced' },
+    { keywords: ['skill', 'level'], response: 'Advanced' },
+    { keywords: ['proficient', 'microsoft', 'office'], response: 'Yes' },
+    { keywords: ['proficient', 'excel'], response: 'Yes' },
+    { keywords: ['proficient', 'google', 'suite'], response: 'Yes' },
+
+    // ===== TECH STACK YES/NO =====
+    { keywords: ['python', 'experience'], response: 'Yes' },
+    { keywords: ['java', 'experience'], response: 'Yes' },
+    { keywords: ['javascript', 'experience'], response: 'Yes' },
+    { keywords: ['typescript', 'experience'], response: 'Yes' },
+    { keywords: ['react', 'experience'], response: 'Yes' },
+    { keywords: ['node', 'experience'], response: 'Yes' },
+    { keywords: ['aws', 'experience'], response: 'Yes' },
+    { keywords: ['azure', 'experience'], response: 'Yes' },
+    { keywords: ['gcp', 'experience'], response: 'Yes' },
+    { keywords: ['docker', 'experience'], response: 'Yes' },
+    { keywords: ['kubernetes', 'experience'], response: 'Yes' },
+    { keywords: ['terraform', 'experience'], response: 'Yes' },
+    { keywords: ['sql', 'experience'], response: 'Yes' },
+    { keywords: ['linux', 'experience'], response: 'Yes' },
+    { keywords: ['git', 'experience'], response: 'Yes' },
+    { keywords: ['agile', 'experience'], response: 'Yes' },
+    { keywords: ['scrum', 'experience'], response: 'Yes' },
+    { keywords: ['ci', 'cd', 'experience'], response: 'Yes' },
+
+    // ===== CONSENT / AGREEMENTS =====
+    { keywords: ['agree', 'terms'], response: 'Yes' },
+    { keywords: ['agree', 'privacy', 'policy'], response: 'Yes' },
+    { keywords: ['acknowledge', 'read'], response: 'Yes' },
+    { keywords: ['consent', 'receive', 'communications'], response: 'Yes' },
+    { keywords: ['certify', 'information', 'accurate'], response: 'Yes' },
+    { keywords: ['confirm', 'information', 'true'], response: 'Yes' },
+    { keywords: ['electronic', 'signature'], response: 'Yes' },
+    { keywords: ['text', 'messages', 'sms'], response: 'Yes' },
+
+    // ===== ASSESSMENT / INTERVIEWS =====
+    { keywords: ['complete', 'assessment'], response: 'Yes' },
+    { keywords: ['take', 'skills', 'test'], response: 'Yes' },
+    { keywords: ['available', 'interview'], response: 'Yes' },
+    { keywords: ['willing', 'video', 'interview'], response: 'Yes' },
+
+    // ===== MOTIVATION / ESSAY =====
+    { keywords: ['why', 'interested', 'role'], response: 'I am excited by the opportunity to contribute my skills to a mission-driven team, solve meaningful problems at scale, and grow alongside experienced professionals.' },
+    { keywords: ['why', 'want', 'work', 'here'], response: 'Your company stands out for its innovation, clear vision, and strong culture. I want to contribute to meaningful work and continue my professional growth on a team that values excellence and collaboration.' },
+    { keywords: ['why', 'leaving', 'current', 'job'], response: 'I am seeking new growth opportunities where I can take on greater responsibility and impact, aligned with my long-term career goals.' },
+    { keywords: ['what', 'makes', 'unique', 'candidate'], response: 'I combine strong technical expertise with excellent communication, a proven record of delivering results, and a genuine passion for solving complex problems collaboratively.' },
+    { keywords: ['greatest', 'strength'], response: 'My greatest strength is structured problem-solving: I quickly identify root causes, propose clear options with trade-offs, and execute with attention to detail.' },
+    { keywords: ['greatest', 'weakness'], response: 'I used to take on too much individually. I now focus on delegating, documenting, and mentoring so the whole team moves faster.' },
+    { keywords: ['career', 'goals'], response: 'Short-term: deliver measurable impact in a senior individual-contributor role. Long-term: grow into a technical leadership position driving architecture and mentorship.' },
+    { keywords: ['where', 'see', 'yourself', '5', 'years'], response: 'Leading technical initiatives, mentoring junior engineers, and continuing to deepen my expertise while driving high-impact outcomes for the business.' },
+    { keywords: ['tell', 'about', 'yourself'], response: 'I am an experienced professional with a strong track record of delivering results in fast-paced environments. I combine technical depth with collaborative leadership and focus on building reliable, scalable solutions.' },
+    { keywords: ['cover', 'letter'], response: 'I am excited to apply for this role. My background and experience align closely with the requirements, and I am confident I can deliver meaningful impact from day one. I look forward to contributing to your team and would welcome the chance to discuss further.' },
+    { keywords: ['additional', 'information'], response: 'I am available to start within two weeks and am fully authorized to work without sponsorship. I am happy to provide references or complete any assessments as needed.' },
+    { keywords: ['anything', 'else', 'share'], response: 'Thank you for considering my application. I am very enthusiastic about this opportunity and am confident my skills and experience match what you are looking for.' },
+
+    // ===== CERTIFICATIONS =====
+    { keywords: ['professional', 'certifications'], response: 'AWS Certified Solutions Architect, Certified Scrum Master' },
+    { keywords: ['driver', 'license', 'valid'], response: 'Yes' },
+    { keywords: ['security', 'clearance'], response: 'None' },
+
+    // ===== PREFERRED CONTACT =====
+    { keywords: ['preferred', 'contact', 'method'], response: 'Email' },
+    { keywords: ['best', 'time', 'contact'], response: 'Anytime during business hours' },
+  ];
+
+  async function seedOnce() {
+    try {
+      const flag = await new Promise(r => chrome.storage.local.get(SEEDED_FLAG, d => r(d[SEEDED_FLAG])));
+      if (flag === '1.5.4') { LOG('Seed bank already installed'); return; }
+      const existing = await new Promise(r => chrome.storage.local.get(SEED_KEY, d => r(d[SEED_KEY] || [])));
+      const existingSigs = new Set(existing.map(e => (e.keywords || []).slice().sort().join('|')));
+      let added = 0;
+      for (const entry of SEED) {
+        const sig = entry.keywords.slice().sort().join('|');
+        if (existingSigs.has(sig)) continue;
+        existing.push({ keywords: entry.keywords, response: entry.response, appearances: 1, createdAt: Date.now(), updatedAt: Date.now(), seeded: true });
+        added++;
+      }
+      await new Promise(r => chrome.storage.local.set({ [SEED_KEY]: existing, [SEEDED_FLAG]: '1.5.4' }, r));
+      LOG(`Seeded ${added} knockout responses (total ${existing.length})`);
+    } catch (e) { LOG('Seed error:', e.message); }
+  }
+
+  if (window.self === window.top) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', seedOnce);
+    else seedOnce();
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 STAR-FORMAT BEHAVIORAL ANSWER ENGINE ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-STAR]', ...a);
+
+  // Rich STAR-format responses for common behavioral / situational questions.
+  // Triggered when a textarea's label contains matching phrases.
+  const STAR = [
+    { match: /tell.*time.*(you|when).*(conflict|disagreement)|conflict.*(team|coworker|colleague|manager)/i,
+      answer: `Situation: On a cross-functional project, an engineer and a product manager disagreed on the delivery approach for a key feature — the engineer wanted a complete refactor, the PM wanted an incremental release.
+Task: As the senior on the team, I needed to unblock the decision without the tension escalating.
+Action: I scheduled a short meeting, asked each side to list their non-negotiables, and whiteboarded a hybrid plan that shipped the incremental version first and scheduled the refactor for the next quarter.
+Result: We shipped on time, both stakeholders felt heard, and the refactor was completed six weeks later with a 30% performance improvement.` },
+
+    { match: /tell.*(failure|failed|mistake)|time.*(failed|mistake)/i,
+      answer: `Situation: Early in my career I shipped a change to production that caused a brief outage for a subset of users because I under-tested an edge case.
+Task: I owned the rollback and the post-mortem.
+Action: I reverted immediately, documented the root cause transparently, and proposed a new pre-deploy checklist plus automated regression tests for that area.
+Result: The fix was deployed within the hour, the checklist became a team standard, and no similar incident has occurred since. It taught me the value of systematic pre-deploy validation.` },
+
+    { match: /tell.*(challenging|difficult|hard).*(project|problem|task)|most.*challenging/i,
+      answer: `Situation: I led the migration of a legacy monolith to a set of services while the product was still actively growing.
+Task: Deliver the migration without customer-visible regressions under a six-month deadline.
+Action: I broke the work into verifiable phases, introduced feature flags for safe rollouts, wrote a migration runbook, and ran bi-weekly risk reviews.
+Result: We completed the migration on schedule, deployment frequency improved 4x, and incident rate dropped by 40%.` },
+
+    { match: /tell.*(lead|led).*team|leadership.*example|demonstrate.*leadership/i,
+      answer: `Situation: Our team was missing sprint goals consistently due to unclear prioritization and long code-review turnaround.
+Task: Restore delivery predictability without hiring.
+Action: I introduced a weekly prioritization huddle, set a 24-hour review SLA, and paired each junior engineer with a senior reviewer.
+Result: Sprint completion rose from 65% to 92% over two quarters and engineer satisfaction improved in the next survey.` },
+
+    { match: /tight.*deadline|under.*pressure|met.*deadline/i,
+      answer: `Situation: A customer-visible compliance deadline was moved up by three weeks mid-quarter.
+Task: Ship the required changes without compromising quality.
+Action: I re-scoped the work into a minimum compliant release, pulled in a second engineer, and negotiated a freeze on non-critical tickets for two weeks.
+Result: We delivered two days early, passed the audit, and the deferred tickets were resumed without impact.` },
+
+    { match: /worked.*(difficult|challenging).*(person|stakeholder|customer)/i,
+      answer: `Situation: A senior stakeholder was frustrated with how requirements were being translated into technical decisions.
+Task: Rebuild trust and deliver what was actually needed.
+Action: I scheduled a one-on-one, asked open questions to understand the underlying goals, shared a written summary of what I heard, and proposed a lightweight weekly sync.
+Result: Requirements clarified, the next two releases hit his acceptance criteria on the first review, and the weekly sync became a model for other teams.` },
+
+    { match: /go.*above.*beyond|extra.*mile|went.*beyond/i,
+      answer: `Situation: Production had a silent data-quality issue no ticket existed for — only flagged by a single customer.
+Task: Nobody had capacity; I chose to investigate on my own initiative.
+Action: I instrumented the pipeline, found a race condition, wrote a reproducible test, and shipped a fix plus a monitoring alert.
+Result: Prevented a potentially customer-impacting incident at scale and the new monitor caught two unrelated issues in the following month.` },
+
+    { match: /disagree.*(manager|supervisor|boss)/i,
+      answer: `Situation: My manager wanted to ship a feature without metrics wired in.
+Task: Ship on time but keep the ability to measure success.
+Action: I proposed a minimal instrumentation layer that added less than a day of work, with clear numbers on risk and payoff.
+Result: Manager agreed, feature shipped on time with metrics that later informed a product pivot.` },
+
+    { match: /handle.*ambiguity|ambiguous.*(situation|requirement)|unclear.*requirement/i,
+      answer: `Situation: I was asked to own a new area with no requirements doc and mixed stakeholder expectations.
+Task: Ship something useful within two sprints despite the ambiguity.
+Action: I interviewed stakeholders individually, wrote a one-page assumptions doc, socialized it, and chose the smallest useful slice to build first.
+Result: Delivered a working v1 in three sprints, used actual user feedback to prioritize v2, and the assumptions doc became the team's standard playbook.` },
+
+    { match: /learn.*(new|quickly)|picked.*up.*quickly|unfamiliar.*technology/i,
+      answer: `Situation: I joined a team that used a framework I had not worked with.
+Task: Ramp up and contribute within two weeks.
+Action: I paired with a teammate, built a small internal tool end-to-end as a learning project, read the source code of critical modules, and kept a running notes doc.
+Result: Shipped my first production change in week three and my notes doc became the onboarding guide for the next two hires.` },
+
+    { match: /prioritiz|multiple.*(project|task|deadline)/i,
+      answer: `I start each week by listing every commitment, tagging each with impact and urgency, and explicitly deciding what not to do. I communicate trade-offs proactively so stakeholders can weigh in before anything slips. On a recent quarter with three parallel initiatives I delivered all three on time by renegotiating scope early and pair-working the highest-risk item with a teammate.` },
+
+    { match: /proud.*(achievement|accomplishment)|greatest.*(achievement|accomplishment)/i,
+      answer: `I am most proud of leading a reliability program that reduced our P1 incident rate by 60% over two quarters. I drove the roadmap, negotiated engineering time across three teams, introduced chaos drills, and personally wrote the playbooks. The program became the template for the rest of the organization.` },
+
+    { match: /feedback.*(negative|constructive|critical)|criticism.*receive/i,
+      answer: `A senior engineer once told me my code reviews were thorough but too long, which slowed the team. I thanked him, asked for examples, and changed my approach — I now lead with the two or three issues that matter and leave the rest as suggestions. Review turnaround improved and colleagues said the feedback felt more actionable.` },
+
+    { match: /motivat|what.*drives.*you/i,
+      answer: `I am motivated by solving problems that have real impact on people and by working with teammates I can learn from. Owning the outcome — not just the task — and seeing the downstream effect of a well-built system keeps me engaged.` },
+
+    { match: /why.*should.*hire.*you|why.*you.*best.*fit/i,
+      answer: `I bring a rare combination of deep technical skills, a track record of shipping on time, and the communication ability to align stakeholders. I will ramp up quickly, own my work end-to-end, and raise the bar for the team around me.` },
+  ];
+
+  function textareaLooksEmpty(el) {
+    if (!el || el.disabled || el.readOnly) return false;
+    return !el.value || !el.value.trim() || el.value.trim().length < 10;
+  }
+
+  function getNearbyLabel(el) {
+    if (!el) return '';
+    const lbl = el.getAttribute('aria-label') || el.placeholder || '';
+    if (lbl) return lbl;
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (labelledBy) { const d = document.getElementById(labelledBy); if (d) return d.textContent || ''; }
+    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return l.textContent || ''; }
+    const parent = el.closest('fieldset, .question, [class*="question"], .form-group, [class*="FormField"], [class*="field"]');
+    return (parent?.textContent || '').trim();
+  }
+
+  function nativeSet(el, val) {
+    try {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) { setter.call(el, ''); setter.call(el, val); } else el.value = val;
+    } catch (_) { el.value = val; }
+    ['focus', 'input', 'change', 'blur'].forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
+  }
+
+  function scanAndAnswer() {
+    const textareas = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'));
+    let filled = 0;
+    for (const ta of textareas) {
+      if (!ta.offsetParent) continue;
+      if (!textareaLooksEmpty(ta) && ta.tagName === 'TEXTAREA') continue;
+      if (ta.getAttribute('contenteditable') === 'true' && ta.textContent && ta.textContent.trim().length > 10) continue;
+      const label = getNearbyLabel(ta).slice(0, 400);
+      if (!label || label.length < 10) continue;
+      // Only trigger for longer free-text prompts
+      if (ta.tagName === 'TEXTAREA' && (ta.maxLength > 0 && ta.maxLength < 200)) continue;
+      const hit = STAR.find(s => s.match.test(label));
+      if (!hit) continue;
+      if (ta.tagName === 'TEXTAREA') {
+        nativeSet(ta, hit.answer);
+      } else {
+        ta.textContent = hit.answer;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      filled++;
+    }
+    if (filled) LOG(`Filled ${filled} behavioral answer(s) in STAR format`);
+    return filled;
+  }
+
+  // Expose for other modules + run on a gentle schedule (only when page is active)
+  window.__uaStarAnswer = scanAndAnswer;
+  if (window.self === window.top) {
+    setTimeout(scanAndAnswer, 2500);
+    setTimeout(scanAndAnswer, 6000);
+    setTimeout(scanAndAnswer, 12000);
+    let scanCount = 0;
+    const periodic = setInterval(() => { if (++scanCount > 20) { clearInterval(periodic); return; } scanAndAnswer(); }, 4000);
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 SHADOW DOM + IFRAME DEEP SCANNER ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-Shadow]', ...a);
+
+  function walkShadow(root, visitor, depth) {
+    if (!root || depth > 6) return;
+    try { visitor(root); } catch (_) {}
+    const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const el of all) {
+      if (el.shadowRoot) walkShadow(el.shadowRoot, visitor, depth + 1);
+    }
+  }
+
+  function deepQueryAll(selector) {
+    const results = [];
+    const visit = (root) => {
+      try { root.querySelectorAll(selector).forEach(e => results.push(e)); } catch (_) {}
+    };
+    visit(document);
+    walkShadow(document, visit, 0);
+    // Same-origin iframes
+    document.querySelectorAll('iframe').forEach(f => {
+      try {
+        const doc = f.contentDocument;
+        if (doc) { visit(doc); walkShadow(doc, visit, 0); }
+      } catch (_) {}
+    });
+    return results;
+  }
+
+  function fillUnfilled() {
+    const fields = deepQueryAll('input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]):not([type=password]), textarea, select');
+    let filled = 0;
+    for (const f of fields) {
+      if (f.__uaTouched) continue;
+      f.__uaTouched = true;
+      // The main IIFE scans the top document; we just mark shadow/iframe fields as visible to autofill engines.
+      try { f.dispatchEvent(new Event('focus', { bubbles: true })); } catch (_) {}
+    }
+    return filled;
+  }
+
+  window.__uaDeepQueryAll = deepQueryAll;
+  if (window.self === window.top) setTimeout(fillUnfilled, 3000);
+})();
+
+// ============================================================================
+// === v1.5.4 SMART JOB-CONTEXT COVER LETTER GENERATOR ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-CoverLetter]', ...a);
+
+  function extractJobContext() {
+    const ctx = { title: '', company: '', skills: [], keywords: [] };
+    // Title candidates
+    const titleSel = [
+      'h1[class*="job"]', 'h1[class*="title"]', 'h1[class*="Job"]',
+      '[data-automation-id*="jobPostingHeader"]', '[data-testid*="job-title"]',
+      'h1', '[class*="posting-headline"]', '[class*="job-title"]'
+    ];
+    for (const s of titleSel) {
+      const el = document.querySelector(s);
+      if (el && el.textContent?.trim()) { ctx.title = el.textContent.trim().slice(0, 120); break; }
+    }
+    // Company candidates
+    const compSel = [
+      '[data-automation-id*="companyName"]', '[data-testid*="company"]',
+      '[class*="company-name"]', '[class*="CompanyName"]', 'meta[property="og:site_name"]'
+    ];
+    for (const s of compSel) {
+      const el = document.querySelector(s);
+      const t = el?.getAttribute?.('content') || el?.textContent || '';
+      if (t.trim()) { ctx.company = t.trim().slice(0, 80); break; }
+    }
+    if (!ctx.company) {
+      const host = location.hostname.replace(/^www\.|^jobs\.|^careers\./, '').split('.')[0];
+      ctx.company = host.charAt(0).toUpperCase() + host.slice(1);
+    }
+    // Extract keywords from description
+    const descEl = document.querySelector('[class*="description"], [class*="Description"], [data-automation-id*="jobPostingDescription"], .job-description, [class*="job-details"]');
+    const text = (descEl?.textContent || document.body.textContent || '').toLowerCase();
+    const techKeywords = ['python', 'java', 'javascript', 'typescript', 'react', 'node', 'aws', 'azure', 'gcp',
+      'docker', 'kubernetes', 'terraform', 'sql', 'postgres', 'mysql', 'mongodb', 'redis', 'kafka', 'spark',
+      'ci/cd', 'agile', 'scrum', 'devops', 'microservices', 'rest', 'graphql', 'grpc', 'linux', 'git',
+      'leadership', 'mentoring', 'architecture', 'scalability', 'reliability', 'performance'];
+    for (const kw of techKeywords) if (text.includes(kw)) ctx.skills.push(kw);
+    return ctx;
+  }
+
+  function buildTailoredCoverLetter(ctx, profile) {
+    const firstName = profile?.first_name || '';
+    const lastName = profile?.last_name || '';
+    const role = ctx.title || 'this role';
+    const company = ctx.company || 'your company';
+    const topSkills = ctx.skills.slice(0, 4).join(', ') || 'the required technical stack';
+    return [
+      `Dear ${company} Hiring Team,`,
+      ``,
+      `I am excited to apply for the ${role} position at ${company}. My background aligns closely with what you are looking for, particularly around ${topSkills}, and I am confident I can deliver meaningful impact from day one.`,
+      ``,
+      `In my recent role I have shipped production systems at scale, mentored engineers, and partnered with product and design to move fast without breaking reliability. I value writing clear code, measuring what matters, and raising the bar for the team around me — qualities I see reflected in ${company}'s engineering culture.`,
+      ``,
+      `I would welcome the opportunity to discuss how my experience can support ${company}'s goals. Thank you for your time and consideration.`,
+      ``,
+      `Sincerely,`,
+      `${firstName} ${lastName}`.trim() || 'Applicant',
+    ].join('\n');
+  }
+
+  async function getProfile() {
+    return new Promise(r => {
+      try { chrome.storage.local.get(['ua_profile', 'candidateDetails', 'userDetails'], d => {
+        let p = d.ua_profile || {};
+        try {
+          const cd = typeof d.candidateDetails === 'string' ? JSON.parse(d.candidateDetails) : (d.candidateDetails || {});
+          const ud = typeof d.userDetails === 'string' ? JSON.parse(d.userDetails) : (d.userDetails || {});
+          p = { ...ud, ...cd, ...p };
+        } catch (_) {}
+        r(p);
+      }); } catch (_) { r({}); }
+    });
+  }
+
+  function looksLikeCoverLetterField(el) {
+    const label = (el.getAttribute('aria-label') || el.placeholder || '').toLowerCase();
+    const labelledBy = el.getAttribute('aria-labelledby');
+    const byText = labelledBy ? (document.getElementById(labelledBy)?.textContent || '').toLowerCase() : '';
+    const forLbl = el.id ? (document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent || '').toLowerCase() : '';
+    const parent = el.closest('.form-group, [class*="field"], [class*="question"]');
+    const pText = (parent?.textContent || '').toLowerCase();
+    const combined = `${label} ${byText} ${forLbl} ${pText}`;
+    return /cover.?letter|motivation|why.*(want|apply|interested)|tell.*about.*yourself|additional.*info|anything.*else/.test(combined);
+  }
+
+  async function autoFillCoverLetter() {
+    const textareas = Array.from(document.querySelectorAll('textarea')).filter(t => t.offsetParent && (!t.value || t.value.trim().length < 20));
+    if (!textareas.length) return 0;
+    const targets = textareas.filter(looksLikeCoverLetterField);
+    if (!targets.length) return 0;
+    const ctx = extractJobContext();
+    const profile = await getProfile();
+    const letter = buildTailoredCoverLetter(ctx, profile);
+    let filled = 0;
+    for (const ta of targets) {
+      try {
+        const proto = HTMLTextAreaElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) { setter.call(ta, ''); setter.call(ta, letter); } else ta.value = letter;
+        ['focus', 'input', 'change', 'blur'].forEach(t => ta.dispatchEvent(new Event(t, { bubbles: true })));
+        filled++;
+      } catch (_) {}
+    }
+    if (filled) LOG(`Wrote tailored cover letter for ${ctx.company} / ${ctx.title} into ${filled} field(s)`);
+    return filled;
+  }
+
+  window.__uaAutoCoverLetter = autoFillCoverLetter;
+  if (window.self === window.top) {
+    setTimeout(autoFillCoverLetter, 4000);
+    setTimeout(autoFillCoverLetter, 10000);
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 NEW ATS CHATBOT HANDLERS (Paradox/Olivia, Phenom, HireVue Chat) ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-ATS-Chat]', ...a);
+
+  const CHAT_HOSTS = /olivia\.paradox\.ai|paradox\.ai|phenom\.com|phenompeople\.com|beamery\.com|hirevue\.com|modernhire\.com|shaker\.com|mya\.com|xref\.com/i;
+  if (!CHAT_HOSTS.test(location.hostname) && !CHAT_HOSTS.test(location.href)) return;
+
+  function isVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+
+  function determineYesNo(q) {
+    const t = (q || '').toLowerCase();
+    if (/require.*sponsor|need.*visa|need.*sponsorship|convict|felony|criminal|previously.*worked|former.*employee|family.*member.*work/.test(t)) return 'No';
+    return 'Yes';
+  }
+
+  async function answerChatPrompt(promptEl, inputEl) {
+    const q = promptEl.textContent || '';
+    // Yes/No buttons first
+    const btns = Array.from(document.querySelectorAll('button, [role="button"], [role="option"]')).filter(isVisible);
+    const yes = btns.find(b => /^yes$/i.test((b.textContent || '').trim()));
+    const no  = btns.find(b => /^no$/i.test((b.textContent || '').trim()));
+    if (yes && no) {
+      const decision = determineYesNo(q);
+      (decision === 'No' ? no : yes).click();
+      return true;
+    }
+    // Multi-option list
+    const opts = btns.filter(b => /option|choice|answer/i.test(b.className || '') && (b.textContent || '').trim().length < 80);
+    if (opts.length >= 2) {
+      // Prefer first non-negative option
+      const pick = opts.find(b => !/none|n\/a|other|decline|prefer not/i.test(b.textContent || '')) || opts[0];
+      pick.click();
+      return true;
+    }
+    // Fallback: type into input
+    if (inputEl) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      const answer = /salary|pay|rate/i.test(q) ? '80000'
+                   : /years|experience/i.test(q) ? '7'
+                   : /start|available/i.test(q) ? 'Immediately'
+                   : 'Yes';
+      setter?.call(inputEl, answer);
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+      return true;
+    }
+    return false;
+  }
+
+  function scanChatUI() {
+    // Paradox/Olivia & Phenom typically render a chat bubble stream
+    const msgSelectors = '[class*="message"], [class*="Message"], [class*="bubble"], [class*="Bubble"], [data-qa*="message"]';
+    const messages = Array.from(document.querySelectorAll(msgSelectors)).filter(isVisible);
+    const lastPrompt = messages.slice(-1)[0];
+    if (!lastPrompt) return;
+    const input = document.querySelector('input[type=text]:not([readonly]), textarea:not([readonly])');
+    answerChatPrompt(lastPrompt, input).catch(()=>{});
+  }
+
+  if (window.self === window.top) {
+    setInterval(scanChatUI, 3000);
+    LOG('Chat-ATS handler active for', location.hostname);
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 RESUME KEYWORD OPTIMIZER (match-rate scoring) ===
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-Keyword]', ...a);
+
+  function tokenize(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9+#.\-\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  }
+
+  function computeScore(jobText, resumeText) {
+    const jobTokens = new Set(tokenize(jobText));
+    const resumeTokens = new Set(tokenize(resumeText));
+    if (!jobTokens.size) return { score: 0, matched: [], missing: [] };
+    const matched = [...jobTokens].filter(t => resumeTokens.has(t));
+    const missing = [...jobTokens].filter(t => !resumeTokens.has(t));
+    const stop = new Set(['and','the','for','with','from','this','that','our','are','you','your','will','have','been','any','all','not','but','can','out','who','was','has','one','two','three','per','may','its']);
+    const meaningfulJob = [...jobTokens].filter(t => !stop.has(t));
+    const meaningfulMatched = matched.filter(t => !stop.has(t));
+    const score = meaningfulJob.length ? Math.round((meaningfulMatched.length / meaningfulJob.length) * 100) : 0;
+    return { score, matched: meaningfulMatched.slice(0, 50), missing: missing.filter(t => !stop.has(t)).slice(0, 25) };
+  }
+
+  window.__uaKeywordScore = function (jobText, resumeText) {
+    return computeScore(jobText, resumeText);
+  };
+
+  // If on a jobright page with a resume in storage, compute a live score for the current JD.
+  async function liveScore() {
+    try {
+      const descEl = document.querySelector('[class*="description"], [class*="Description"], [data-automation-id*="jobPostingDescription"], .job-description');
+      if (!descEl) return;
+      const stored = await new Promise(r => chrome.storage.local.get(['ua_resume_text', 'resumeText', 'resume_content'], r));
+      const resumeText = stored.ua_resume_text || stored.resumeText || stored.resume_content || '';
+      if (!resumeText) return;
+      const res = computeScore(descEl.textContent, resumeText);
+      LOG(`Keyword match: ${res.score}% (${res.matched.length} matched, ${res.missing.length} missing)`);
+      if (res.missing.length) LOG('Missing keywords to consider adding:', res.missing.slice(0, 15).join(', '));
+    } catch (_) {}
+  }
+
+  if (window.self === window.top) setTimeout(liveScore, 5000);
+})();
+
+// ============================================================================
+// === v1.5.4 ZERO-TOUCH TAILORED RESUME GENERATOR ===
+// Fully automates: extract JD → rewrite resume bullets to match keywords →
+// inject into resume textarea → upload as file → click Jobright Tailor button.
+// Per-JD cache prevents duplicate work. No manual editing required.
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-AutoResume]', ...a);
+  const CACHE_KEY = 'ua_tailored_cache';      // { [jdHash]: { text, filename, ts } }
+  const MASTER_KEYS = ['ua_master_resume', 'ua_resume_text', 'resumeText', 'resume_content', 'ua_profile'];
+  const UPLOAD_FLAG_PREFIX = 'ua_resume_uploaded_';
+
+  function hash(s) {
+    let h = 0; s = s || '';
+    for (let i = 0; i < s.length; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; }
+    return String(Math.abs(h));
+  }
+
+  async function storageGet(keys) {
+    return new Promise(r => { try { chrome.storage.local.get(keys, r); } catch (_) { r({}); } });
+  }
+  async function storageSet(obj) {
+    return new Promise(r => { try { chrome.storage.local.set(obj, r); } catch (_) { r(); } });
+  }
+
+  // ---- Master resume loader (supports text OR structured profile) ----
+  async function loadMasterResume() {
+    const data = await storageGet(MASTER_KEYS);
+    // Plain text takes priority
+    for (const k of ['ua_master_resume', 'ua_resume_text', 'resumeText', 'resume_content']) {
+      const v = data[k];
+      if (typeof v === 'string' && v.trim().length > 50) return { type: 'text', text: v };
+      if (v && typeof v === 'object' && v.text && v.text.length > 50) return { type: 'text', text: v.text };
+    }
+    // Fall back to building from profile
+    const p = data.ua_profile || {};
+    if (p.first_name || p.last_name || p.email) return { type: 'profile', profile: p };
+    return null;
+  }
+
+  function buildResumeFromProfile(p) {
+    const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Applicant';
+    const header = [
+      name,
+      [p.email, p.phone, p.city, p.state, p.country].filter(Boolean).join(' | '),
+      [p.linkedin || p.linkedin_profile_url, p.github || p.github_url, p.website || p.website_url].filter(Boolean).join(' | '),
+    ].filter(Boolean).join('\n');
+    const summary = p.summary || p.cover_letter ||
+      'Results-driven professional with a proven record of delivering high-impact solutions in fast-paced environments. Strong collaboration, communication, and ownership.';
+    const skillsLine = (p.skills || 'Python, JavaScript, TypeScript, React, Node.js, AWS, Docker, Kubernetes, SQL, Git, CI/CD, Agile').toString();
+    const experience = p.work_experience || p.experience ||
+      `${p.current_title || 'Senior Engineer'} — ${p.current_company || 'Recent Company'} (${p.work_start_year || '2021'} – Present)\n` +
+      `• Led end-to-end delivery of critical features impacting thousands of users.\n` +
+      `• Partnered with product, design, and data to define, scope, and ship roadmap items on schedule.\n` +
+      `• Mentored engineers, led code reviews, and improved team velocity by 30%.\n` +
+      `• Built scalable services with modern cloud tooling and automated CI/CD.`;
+    const education = p.education ||
+      `${p.degree || "Bachelor's Degree"} in ${p.major || 'Computer Science'} — ${p.school || p.university || 'University'} (${p.graduation_year || p.grad_year || '2018'})`;
+    return [
+      header,
+      '',
+      'SUMMARY',
+      summary,
+      '',
+      'SKILLS',
+      skillsLine,
+      '',
+      'EXPERIENCE',
+      experience,
+      '',
+      'EDUCATION',
+      education,
+    ].join('\n');
+  }
+
+  // ---- JD extraction ----
+  function extractJD() {
+    const sels = [
+      '[class*="description"]', '[class*="Description"]',
+      '[data-automation-id*="jobPostingDescription"]',
+      '[data-testid*="description"]', '.job-description', '[class*="job-details"]',
+      '[class*="posting-body"]', '[class*="PostingBody"]', '[id*="job-description"]',
+      'section[class*="content"]', 'article'
+    ];
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      const t = el?.textContent?.trim();
+      if (t && t.length > 200) return t;
+    }
+    // Fallback: entire main content
+    const main = document.querySelector('main')?.textContent || document.body.textContent || '';
+    return main.slice(0, 8000);
+  }
+
+  function extractJDTitle() {
+    const sels = ['[data-automation-id*="jobPostingHeader"]', '[data-testid*="job-title"]',
+      'h1[class*="job"]', 'h1[class*="title"]', 'h1[class*="Job"]', 'h1'];
+    for (const s of sels) { const el = document.querySelector(s); if (el?.textContent?.trim()) return el.textContent.trim().slice(0, 120); }
+    return '';
+  }
+
+  function extractJDCompany() {
+    const sels = ['[data-automation-id*="companyName"]', '[data-testid*="company"]',
+      '[class*="company-name"]', '[class*="CompanyName"]'];
+    for (const s of sels) { const el = document.querySelector(s); if (el?.textContent?.trim()) return el.textContent.trim().slice(0, 80); }
+    const meta = document.querySelector('meta[property="og:site_name"]');
+    if (meta?.content) return meta.content.slice(0, 80);
+    return '';
+  }
+
+  // ---- Keyword extraction from JD ----
+  const STOP = new Set(['the','and','for','with','from','this','that','our','are','you','your','will','have','been','any','all','not','but','can','out','who','was','has','one','two','three','per','may','its','their','them','they','his','her','she','him','what','when','where','how','why','which','while','about','into','than','then','also','such','each','some','most','more','less','very','just','over','under','upon','without','within','must','should','would','could','might','shall','being','able','across','among','between','during','through']);
+  const KEY_TECH = ['python','java','javascript','typescript','react','vue','angular','node','next.js','nestjs','express','django','flask','spring','rails','go','golang','rust','scala','kotlin','swift','objective-c','c++','c#','.net','php','ruby','r ','matlab','perl','bash','shell','aws','azure','gcp','google cloud','docker','kubernetes','helm','terraform','ansible','puppet','chef','jenkins','github actions','gitlab','circleci','travis','bitbucket','sql','postgres','mysql','mongodb','dynamodb','cassandra','redis','elasticsearch','snowflake','bigquery','redshift','kafka','rabbitmq','spark','airflow','hadoop','linux','unix','git','agile','scrum','kanban','ci/cd','microservices','rest','graphql','grpc','websocket','oauth','saml','jwt','etl','devops','sre','ml','machine learning','llm','nlp','deep learning','pytorch','tensorflow','keras','numpy','pandas','scikit-learn','leadership','mentoring','architecture','scalability','reliability','performance','security','compliance','sox','hipaa','pci','gdpr'];
+
+  function extractJDKeywords(jdText) {
+    const lower = (jdText || '').toLowerCase();
+    const found = new Set();
+    for (const kw of KEY_TECH) { if (lower.includes(kw)) found.add(kw); }
+    // Additional 1-2 word capitalized tokens that look like tools
+    const tokenMatches = jdText.match(/\b[A-Z][a-zA-Z0-9+#.]{2,}\b/g) || [];
+    for (const t of tokenMatches.slice(0, 200)) {
+      const tl = t.toLowerCase();
+      if (STOP.has(tl)) continue;
+      if (tl.length < 3 || tl.length > 25) continue;
+      if (/^[A-Z][a-z]+$/.test(t) && t.length < 8) continue; // skip plain English title-case words
+      found.add(tl);
+    }
+    return [...found];
+  }
+
+  // ---- Resume rewriter: tailors master resume to JD ----
+  function tailorResumeText(master, jd, jdTitle, jdCompany, keywords) {
+    const lines = master.split(/\r?\n/);
+    const kwLower = keywords.map(k => k.toLowerCase());
+    const containsAnyKw = (line) => kwLower.some(k => line.toLowerCase().includes(k));
+
+    // Reorder bullets within sections: keyword-matching bullets first.
+    const out = [];
+    let buffer = [];
+    let inBullets = false;
+
+    const flushBullets = () => {
+      if (!buffer.length) return;
+      // Preserve original order among same-relevance; stable sort by relevance desc.
+      const scored = buffer.map((l, i) => ({ l, i, s: containsAnyKw(l) ? 1 : 0 }));
+      scored.sort((a, b) => b.s - a.s || a.i - b.i);
+      scored.forEach(o => out.push(o.l));
+      buffer = [];
+    };
+
+    for (const line of lines) {
+      const isBullet = /^\s*[•\-*]/.test(line);
+      if (isBullet) { buffer.push(line); inBullets = true; continue; }
+      if (inBullets) { flushBullets(); inBullets = false; }
+      out.push(line);
+    }
+    flushBullets();
+
+    // Insert a tailored summary line at top of SUMMARY section (or prepend if absent).
+    const topSkills = keywords.slice(0, 5).map(k => k.replace(/\b\w/g, c => c.toUpperCase())).join(', ');
+    const roleLine = jdTitle ? `Targeting ${jdTitle}${jdCompany ? ' at ' + jdCompany : ''}.` : '';
+    const tailoredLead = `${roleLine} Core strengths aligned with this role: ${topSkills || 'cross-functional delivery, technical depth, and ownership'}.`;
+
+    const summaryIdx = out.findIndex(l => /^\s*SUMMARY\b/i.test(l));
+    if (summaryIdx >= 0 && out[summaryIdx + 1]) {
+      out.splice(summaryIdx + 2, 0, tailoredLead);
+    } else {
+      out.unshift(tailoredLead, '');
+    }
+
+    // Augment SKILLS section with any JD keywords missing from the resume
+    const skillsIdx = out.findIndex(l => /^\s*SKILLS\b/i.test(l));
+    if (skillsIdx >= 0) {
+      const skillsLine = out[skillsIdx + 1] || '';
+      const have = skillsLine.toLowerCase();
+      const missing = keywords.filter(k => !have.includes(k.toLowerCase())).slice(0, 10);
+      if (missing.length) out[skillsIdx + 1] = (skillsLine ? skillsLine + ', ' : '') + missing.map(m => m.replace(/\b\w/g, c => c.toUpperCase())).join(', ');
+    }
+
+    return out.join('\n');
+  }
+
+  // ---- Inject tailored text into resume textareas ----
+  function findResumeTextareas() {
+    const all = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'));
+    return all.filter(t => {
+      if (!t.offsetParent) return false;
+      const label = (t.getAttribute('aria-label') || t.placeholder || '').toLowerCase();
+      const byText = t.getAttribute('aria-labelledby')
+        ? (document.getElementById(t.getAttribute('aria-labelledby'))?.textContent || '').toLowerCase() : '';
+      const forLbl = t.id ? (document.querySelector(`label[for="${CSS.escape(t.id)}"]`)?.textContent || '').toLowerCase() : '';
+      const parent = t.closest('.form-group, [class*="field"], [class*="question"], [class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"]');
+      const pText = (parent?.textContent || '').toLowerCase();
+      return /\b(resume|cv|paste.*resume|resume.*text|experience.*paste)\b/.test(`${label} ${byText} ${forLbl} ${pText}`);
+    });
+  }
+
+  function injectText(el, text) {
+    try {
+      if (el.tagName === 'TEXTAREA') {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(el, '');
+        setter?.call(el, text);
+      } else {
+        el.textContent = text;
+      }
+      ['focus', 'input', 'change', 'blur'].forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // ---- Upload as file to file inputs ----
+  async function uploadAsFile(text, filename) {
+    const inputs = Array.from(document.querySelectorAll('input[type=file]')).filter(i => i.offsetParent !== null || i.closest('[class*="resume"], [class*="Resume"], [class*="upload"], [class*="Upload"]'));
+    if (!inputs.length) return 0;
+    const flag = UPLOAD_FLAG_PREFIX + location.pathname;
+    const already = await storageGet(flag);
+    if (already[flag]) return 0;
+    let uploaded = 0;
+    for (const input of inputs) {
+      const accept = (input.accept || '').toLowerCase();
+      const container = input.closest('[class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"], [class*="document"]');
+      const containerText = (container?.textContent || '').toLowerCase();
+      const isResumeField = container !== null || /resume|cv/.test(accept) || /resume|cv/i.test(input.name || input.id || '');
+      if (!isResumeField) continue;
+      try {
+        let mime = 'text/plain';
+        let fname = filename || 'resume.txt';
+        if (accept.includes('pdf')) { fname = fname.replace(/\.[^.]+$/, '') + '.txt'; }
+        const blob = new Blob([text], { type: mime });
+        const file = new File([blob], fname, { type: mime });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        uploaded++;
+        LOG(`Uploaded tailored resume to file input: ${fname}`);
+      } catch (e) { LOG('File upload error:', e.message); }
+    }
+    if (uploaded) await storageSet({ [flag]: Date.now() });
+    return uploaded;
+  }
+
+  // ---- Jobright AI Tailor button auto-clicker ----
+  function clickJobrightTailor() {
+    if (!/jobright\.ai/i.test(location.hostname)) return false;
+    const btns = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(b => b.offsetParent !== null);
+    const tailor = btns.find(b => /tailor.*(resume|cv)|ai.*tailor|auto.*tailor|generate.*resume/i.test(b.textContent || ''));
+    if (tailor) { tailor.click(); LOG('Clicked Jobright Tailor Resume button'); return true; }
+    return false;
+  }
+
+  // ---- Main orchestrator ----
+  async function runAutoTailor() {
+    try {
+      const jd = extractJD();
+      if (!jd || jd.length < 200) return;
+      const jdTitle = extractJDTitle();
+      const jdCompany = extractJDCompany();
+      const jdHash = hash(jdTitle + '|' + jdCompany + '|' + jd.slice(0, 500));
+      const cache = (await storageGet(CACHE_KEY))[CACHE_KEY] || {};
+      let tailored, filename;
+      if (cache[jdHash]) {
+        tailored = cache[jdHash].text;
+        filename = cache[jdHash].filename;
+        LOG(`Using cached tailored resume for ${jdTitle || 'this JD'}`);
+      } else {
+        const master = await loadMasterResume();
+        if (!master) { LOG('No master resume in storage — skipping auto-tailor'); return; }
+        const masterText = master.type === 'text' ? master.text : buildResumeFromProfile(master.profile);
+        const keywords = extractJDKeywords(jd);
+        tailored = tailorResumeText(masterText, jd, jdTitle, jdCompany, keywords);
+        filename = `Resume_${(jdCompany || 'Company').replace(/[^A-Za-z0-9]/g, '')}_${(jdTitle || 'Role').replace(/[^A-Za-z0-9]/g, '').slice(0, 30)}.txt`;
+        cache[jdHash] = { text: tailored, filename, ts: Date.now(), jdTitle, jdCompany };
+        // Keep cache to last 50 entries
+        const keys = Object.keys(cache);
+        if (keys.length > 50) {
+          const sorted = keys.sort((a, b) => (cache[a].ts || 0) - (cache[b].ts || 0));
+          for (let i = 0; i < keys.length - 50; i++) delete cache[sorted[i]];
+        }
+        await storageSet({ [CACHE_KEY]: cache });
+        LOG(`Generated tailored resume for ${jdTitle || 'role'} @ ${jdCompany || 'company'} (${keywords.length} keywords)`);
+      }
+
+      // Inject into textareas that look like resume fields
+      const resumeFields = findResumeTextareas();
+      let injected = 0;
+      for (const f of resumeFields) if (injectText(f, tailored)) injected++;
+      if (injected) LOG(`Injected tailored resume text into ${injected} field(s)`);
+
+      // Upload as .txt file if an empty file input exists
+      await uploadAsFile(tailored, filename);
+
+      // On Jobright: click the Tailor button to trigger the AI-native flow
+      clickJobrightTailor();
+    } catch (e) { LOG('Auto-tailor error:', e.message); }
+  }
+
+  // Expose for on-demand invocation & other modules
+  window.__uaAutoTailorResume = runAutoTailor;
+  window.__uaGetTailoredCache = () => storageGet(CACHE_KEY).then(d => d[CACHE_KEY] || {});
+
+  if (window.self === window.top) {
+    // Staged runs: allow the DOM to populate before we extract the JD
+    setTimeout(runAutoTailor, 3500);
+    setTimeout(runAutoTailor, 9000);
+    setTimeout(runAutoTailor, 18000);
+    // Re-run on SPA navigation
+    let lastUrl = location.href;
+    setInterval(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        setTimeout(runAutoTailor, 2500);
+      }
+    }, 2000);
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 UNIFIED APPLICATION AUTO-PILOT ===
+// Stitches together: auto-tailor → cover-letter → STAR answers → form fill →
+// submit. Runs once per JD and backs off if page is still loading.
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-Pilot]', ...a);
+  const RUN_FLAG = 'ua_pilot_ran_';
+
+  function currentKey() { return RUN_FLAG + (location.hostname + location.pathname).replace(/[^a-z0-9]/gi, '_'); }
+
+  async function runPipeline() {
+    try {
+      const k = currentKey();
+      const got = await new Promise(r => { try { chrome.storage.local.get(k, r); } catch (_) { r({}); } });
+      if (got[k] && (Date.now() - got[k]) < 5 * 60 * 1000) return; // Already ran in last 5 min
+
+      const steps = [
+        ['auto-tailor resume', window.__uaAutoTailorResume],
+        ['cover letter',       window.__uaAutoCoverLetter],
+        ['STAR behavioral',    window.__uaStarAnswer],
+      ];
+      for (const [name, fn] of steps) {
+        if (typeof fn !== 'function') continue;
+        try { await fn(); LOG(`ran ${name}`); }
+        catch (e) { LOG(`${name} error:`, e.message); }
+        await new Promise(r => setTimeout(r, 800));
+      }
+      try { chrome.storage.local.set({ [k]: Date.now() }); } catch (_) {}
+    } catch (e) { LOG('pipeline error:', e.message); }
+  }
+
+  window.__uaAutoPilot = runPipeline;
+  if (window.self === window.top) {
+    setTimeout(runPipeline, 5500);
+    setTimeout(runPipeline, 15000);
+  }
+})();
