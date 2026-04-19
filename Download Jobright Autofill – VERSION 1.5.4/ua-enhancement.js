@@ -5647,3 +5647,362 @@ Result: Shipped my first production change in week three and my notes doc became
 
   if (window.self === window.top) setTimeout(liveScore, 5000);
 })();
+
+// ============================================================================
+// === v1.5.4 ZERO-TOUCH TAILORED RESUME GENERATOR ===
+// Fully automates: extract JD → rewrite resume bullets to match keywords →
+// inject into resume textarea → upload as file → click Jobright Tailor button.
+// Per-JD cache prevents duplicate work. No manual editing required.
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-AutoResume]', ...a);
+  const CACHE_KEY = 'ua_tailored_cache';      // { [jdHash]: { text, filename, ts } }
+  const MASTER_KEYS = ['ua_master_resume', 'ua_resume_text', 'resumeText', 'resume_content', 'ua_profile'];
+  const UPLOAD_FLAG_PREFIX = 'ua_resume_uploaded_';
+
+  function hash(s) {
+    let h = 0; s = s || '';
+    for (let i = 0; i < s.length; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; }
+    return String(Math.abs(h));
+  }
+
+  async function storageGet(keys) {
+    return new Promise(r => { try { chrome.storage.local.get(keys, r); } catch (_) { r({}); } });
+  }
+  async function storageSet(obj) {
+    return new Promise(r => { try { chrome.storage.local.set(obj, r); } catch (_) { r(); } });
+  }
+
+  // ---- Master resume loader (supports text OR structured profile) ----
+  async function loadMasterResume() {
+    const data = await storageGet(MASTER_KEYS);
+    // Plain text takes priority
+    for (const k of ['ua_master_resume', 'ua_resume_text', 'resumeText', 'resume_content']) {
+      const v = data[k];
+      if (typeof v === 'string' && v.trim().length > 50) return { type: 'text', text: v };
+      if (v && typeof v === 'object' && v.text && v.text.length > 50) return { type: 'text', text: v.text };
+    }
+    // Fall back to building from profile
+    const p = data.ua_profile || {};
+    if (p.first_name || p.last_name || p.email) return { type: 'profile', profile: p };
+    return null;
+  }
+
+  function buildResumeFromProfile(p) {
+    const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Applicant';
+    const header = [
+      name,
+      [p.email, p.phone, p.city, p.state, p.country].filter(Boolean).join(' | '),
+      [p.linkedin || p.linkedin_profile_url, p.github || p.github_url, p.website || p.website_url].filter(Boolean).join(' | '),
+    ].filter(Boolean).join('\n');
+    const summary = p.summary || p.cover_letter ||
+      'Results-driven professional with a proven record of delivering high-impact solutions in fast-paced environments. Strong collaboration, communication, and ownership.';
+    const skillsLine = (p.skills || 'Python, JavaScript, TypeScript, React, Node.js, AWS, Docker, Kubernetes, SQL, Git, CI/CD, Agile').toString();
+    const experience = p.work_experience || p.experience ||
+      `${p.current_title || 'Senior Engineer'} — ${p.current_company || 'Recent Company'} (${p.work_start_year || '2021'} – Present)\n` +
+      `• Led end-to-end delivery of critical features impacting thousands of users.\n` +
+      `• Partnered with product, design, and data to define, scope, and ship roadmap items on schedule.\n` +
+      `• Mentored engineers, led code reviews, and improved team velocity by 30%.\n` +
+      `• Built scalable services with modern cloud tooling and automated CI/CD.`;
+    const education = p.education ||
+      `${p.degree || "Bachelor's Degree"} in ${p.major || 'Computer Science'} — ${p.school || p.university || 'University'} (${p.graduation_year || p.grad_year || '2018'})`;
+    return [
+      header,
+      '',
+      'SUMMARY',
+      summary,
+      '',
+      'SKILLS',
+      skillsLine,
+      '',
+      'EXPERIENCE',
+      experience,
+      '',
+      'EDUCATION',
+      education,
+    ].join('\n');
+  }
+
+  // ---- JD extraction ----
+  function extractJD() {
+    const sels = [
+      '[class*="description"]', '[class*="Description"]',
+      '[data-automation-id*="jobPostingDescription"]',
+      '[data-testid*="description"]', '.job-description', '[class*="job-details"]',
+      '[class*="posting-body"]', '[class*="PostingBody"]', '[id*="job-description"]',
+      'section[class*="content"]', 'article'
+    ];
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      const t = el?.textContent?.trim();
+      if (t && t.length > 200) return t;
+    }
+    // Fallback: entire main content
+    const main = document.querySelector('main')?.textContent || document.body.textContent || '';
+    return main.slice(0, 8000);
+  }
+
+  function extractJDTitle() {
+    const sels = ['[data-automation-id*="jobPostingHeader"]', '[data-testid*="job-title"]',
+      'h1[class*="job"]', 'h1[class*="title"]', 'h1[class*="Job"]', 'h1'];
+    for (const s of sels) { const el = document.querySelector(s); if (el?.textContent?.trim()) return el.textContent.trim().slice(0, 120); }
+    return '';
+  }
+
+  function extractJDCompany() {
+    const sels = ['[data-automation-id*="companyName"]', '[data-testid*="company"]',
+      '[class*="company-name"]', '[class*="CompanyName"]'];
+    for (const s of sels) { const el = document.querySelector(s); if (el?.textContent?.trim()) return el.textContent.trim().slice(0, 80); }
+    const meta = document.querySelector('meta[property="og:site_name"]');
+    if (meta?.content) return meta.content.slice(0, 80);
+    return '';
+  }
+
+  // ---- Keyword extraction from JD ----
+  const STOP = new Set(['the','and','for','with','from','this','that','our','are','you','your','will','have','been','any','all','not','but','can','out','who','was','has','one','two','three','per','may','its','their','them','they','his','her','she','him','what','when','where','how','why','which','while','about','into','than','then','also','such','each','some','most','more','less','very','just','over','under','upon','without','within','must','should','would','could','might','shall','being','able','across','among','between','during','through']);
+  const KEY_TECH = ['python','java','javascript','typescript','react','vue','angular','node','next.js','nestjs','express','django','flask','spring','rails','go','golang','rust','scala','kotlin','swift','objective-c','c++','c#','.net','php','ruby','r ','matlab','perl','bash','shell','aws','azure','gcp','google cloud','docker','kubernetes','helm','terraform','ansible','puppet','chef','jenkins','github actions','gitlab','circleci','travis','bitbucket','sql','postgres','mysql','mongodb','dynamodb','cassandra','redis','elasticsearch','snowflake','bigquery','redshift','kafka','rabbitmq','spark','airflow','hadoop','linux','unix','git','agile','scrum','kanban','ci/cd','microservices','rest','graphql','grpc','websocket','oauth','saml','jwt','etl','devops','sre','ml','machine learning','llm','nlp','deep learning','pytorch','tensorflow','keras','numpy','pandas','scikit-learn','leadership','mentoring','architecture','scalability','reliability','performance','security','compliance','sox','hipaa','pci','gdpr'];
+
+  function extractJDKeywords(jdText) {
+    const lower = (jdText || '').toLowerCase();
+    const found = new Set();
+    for (const kw of KEY_TECH) { if (lower.includes(kw)) found.add(kw); }
+    // Additional 1-2 word capitalized tokens that look like tools
+    const tokenMatches = jdText.match(/\b[A-Z][a-zA-Z0-9+#.]{2,}\b/g) || [];
+    for (const t of tokenMatches.slice(0, 200)) {
+      const tl = t.toLowerCase();
+      if (STOP.has(tl)) continue;
+      if (tl.length < 3 || tl.length > 25) continue;
+      if (/^[A-Z][a-z]+$/.test(t) && t.length < 8) continue; // skip plain English title-case words
+      found.add(tl);
+    }
+    return [...found];
+  }
+
+  // ---- Resume rewriter: tailors master resume to JD ----
+  function tailorResumeText(master, jd, jdTitle, jdCompany, keywords) {
+    const lines = master.split(/\r?\n/);
+    const kwLower = keywords.map(k => k.toLowerCase());
+    const containsAnyKw = (line) => kwLower.some(k => line.toLowerCase().includes(k));
+
+    // Reorder bullets within sections: keyword-matching bullets first.
+    const out = [];
+    let buffer = [];
+    let inBullets = false;
+
+    const flushBullets = () => {
+      if (!buffer.length) return;
+      // Preserve original order among same-relevance; stable sort by relevance desc.
+      const scored = buffer.map((l, i) => ({ l, i, s: containsAnyKw(l) ? 1 : 0 }));
+      scored.sort((a, b) => b.s - a.s || a.i - b.i);
+      scored.forEach(o => out.push(o.l));
+      buffer = [];
+    };
+
+    for (const line of lines) {
+      const isBullet = /^\s*[•\-*]/.test(line);
+      if (isBullet) { buffer.push(line); inBullets = true; continue; }
+      if (inBullets) { flushBullets(); inBullets = false; }
+      out.push(line);
+    }
+    flushBullets();
+
+    // Insert a tailored summary line at top of SUMMARY section (or prepend if absent).
+    const topSkills = keywords.slice(0, 5).map(k => k.replace(/\b\w/g, c => c.toUpperCase())).join(', ');
+    const roleLine = jdTitle ? `Targeting ${jdTitle}${jdCompany ? ' at ' + jdCompany : ''}.` : '';
+    const tailoredLead = `${roleLine} Core strengths aligned with this role: ${topSkills || 'cross-functional delivery, technical depth, and ownership'}.`;
+
+    const summaryIdx = out.findIndex(l => /^\s*SUMMARY\b/i.test(l));
+    if (summaryIdx >= 0 && out[summaryIdx + 1]) {
+      out.splice(summaryIdx + 2, 0, tailoredLead);
+    } else {
+      out.unshift(tailoredLead, '');
+    }
+
+    // Augment SKILLS section with any JD keywords missing from the resume
+    const skillsIdx = out.findIndex(l => /^\s*SKILLS\b/i.test(l));
+    if (skillsIdx >= 0) {
+      const skillsLine = out[skillsIdx + 1] || '';
+      const have = skillsLine.toLowerCase();
+      const missing = keywords.filter(k => !have.includes(k.toLowerCase())).slice(0, 10);
+      if (missing.length) out[skillsIdx + 1] = (skillsLine ? skillsLine + ', ' : '') + missing.map(m => m.replace(/\b\w/g, c => c.toUpperCase())).join(', ');
+    }
+
+    return out.join('\n');
+  }
+
+  // ---- Inject tailored text into resume textareas ----
+  function findResumeTextareas() {
+    const all = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'));
+    return all.filter(t => {
+      if (!t.offsetParent) return false;
+      const label = (t.getAttribute('aria-label') || t.placeholder || '').toLowerCase();
+      const byText = t.getAttribute('aria-labelledby')
+        ? (document.getElementById(t.getAttribute('aria-labelledby'))?.textContent || '').toLowerCase() : '';
+      const forLbl = t.id ? (document.querySelector(`label[for="${CSS.escape(t.id)}"]`)?.textContent || '').toLowerCase() : '';
+      const parent = t.closest('.form-group, [class*="field"], [class*="question"], [class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"]');
+      const pText = (parent?.textContent || '').toLowerCase();
+      return /\b(resume|cv|paste.*resume|resume.*text|experience.*paste)\b/.test(`${label} ${byText} ${forLbl} ${pText}`);
+    });
+  }
+
+  function injectText(el, text) {
+    try {
+      if (el.tagName === 'TEXTAREA') {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(el, '');
+        setter?.call(el, text);
+      } else {
+        el.textContent = text;
+      }
+      ['focus', 'input', 'change', 'blur'].forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // ---- Upload as file to file inputs ----
+  async function uploadAsFile(text, filename) {
+    const inputs = Array.from(document.querySelectorAll('input[type=file]')).filter(i => i.offsetParent !== null || i.closest('[class*="resume"], [class*="Resume"], [class*="upload"], [class*="Upload"]'));
+    if (!inputs.length) return 0;
+    const flag = UPLOAD_FLAG_PREFIX + location.pathname;
+    const already = await storageGet(flag);
+    if (already[flag]) return 0;
+    let uploaded = 0;
+    for (const input of inputs) {
+      const accept = (input.accept || '').toLowerCase();
+      const container = input.closest('[class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"], [class*="document"]');
+      const containerText = (container?.textContent || '').toLowerCase();
+      const isResumeField = container !== null || /resume|cv/.test(accept) || /resume|cv/i.test(input.name || input.id || '');
+      if (!isResumeField) continue;
+      try {
+        let mime = 'text/plain';
+        let fname = filename || 'resume.txt';
+        if (accept.includes('pdf')) { fname = fname.replace(/\.[^.]+$/, '') + '.txt'; }
+        const blob = new Blob([text], { type: mime });
+        const file = new File([blob], fname, { type: mime });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        uploaded++;
+        LOG(`Uploaded tailored resume to file input: ${fname}`);
+      } catch (e) { LOG('File upload error:', e.message); }
+    }
+    if (uploaded) await storageSet({ [flag]: Date.now() });
+    return uploaded;
+  }
+
+  // ---- Jobright AI Tailor button auto-clicker ----
+  function clickJobrightTailor() {
+    if (!/jobright\.ai/i.test(location.hostname)) return false;
+    const btns = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(b => b.offsetParent !== null);
+    const tailor = btns.find(b => /tailor.*(resume|cv)|ai.*tailor|auto.*tailor|generate.*resume/i.test(b.textContent || ''));
+    if (tailor) { tailor.click(); LOG('Clicked Jobright Tailor Resume button'); return true; }
+    return false;
+  }
+
+  // ---- Main orchestrator ----
+  async function runAutoTailor() {
+    try {
+      const jd = extractJD();
+      if (!jd || jd.length < 200) return;
+      const jdTitle = extractJDTitle();
+      const jdCompany = extractJDCompany();
+      const jdHash = hash(jdTitle + '|' + jdCompany + '|' + jd.slice(0, 500));
+      const cache = (await storageGet(CACHE_KEY))[CACHE_KEY] || {};
+      let tailored, filename;
+      if (cache[jdHash]) {
+        tailored = cache[jdHash].text;
+        filename = cache[jdHash].filename;
+        LOG(`Using cached tailored resume for ${jdTitle || 'this JD'}`);
+      } else {
+        const master = await loadMasterResume();
+        if (!master) { LOG('No master resume in storage — skipping auto-tailor'); return; }
+        const masterText = master.type === 'text' ? master.text : buildResumeFromProfile(master.profile);
+        const keywords = extractJDKeywords(jd);
+        tailored = tailorResumeText(masterText, jd, jdTitle, jdCompany, keywords);
+        filename = `Resume_${(jdCompany || 'Company').replace(/[^A-Za-z0-9]/g, '')}_${(jdTitle || 'Role').replace(/[^A-Za-z0-9]/g, '').slice(0, 30)}.txt`;
+        cache[jdHash] = { text: tailored, filename, ts: Date.now(), jdTitle, jdCompany };
+        // Keep cache to last 50 entries
+        const keys = Object.keys(cache);
+        if (keys.length > 50) {
+          const sorted = keys.sort((a, b) => (cache[a].ts || 0) - (cache[b].ts || 0));
+          for (let i = 0; i < keys.length - 50; i++) delete cache[sorted[i]];
+        }
+        await storageSet({ [CACHE_KEY]: cache });
+        LOG(`Generated tailored resume for ${jdTitle || 'role'} @ ${jdCompany || 'company'} (${keywords.length} keywords)`);
+      }
+
+      // Inject into textareas that look like resume fields
+      const resumeFields = findResumeTextareas();
+      let injected = 0;
+      for (const f of resumeFields) if (injectText(f, tailored)) injected++;
+      if (injected) LOG(`Injected tailored resume text into ${injected} field(s)`);
+
+      // Upload as .txt file if an empty file input exists
+      await uploadAsFile(tailored, filename);
+
+      // On Jobright: click the Tailor button to trigger the AI-native flow
+      clickJobrightTailor();
+    } catch (e) { LOG('Auto-tailor error:', e.message); }
+  }
+
+  // Expose for on-demand invocation & other modules
+  window.__uaAutoTailorResume = runAutoTailor;
+  window.__uaGetTailoredCache = () => storageGet(CACHE_KEY).then(d => d[CACHE_KEY] || {});
+
+  if (window.self === window.top) {
+    // Staged runs: allow the DOM to populate before we extract the JD
+    setTimeout(runAutoTailor, 3500);
+    setTimeout(runAutoTailor, 9000);
+    setTimeout(runAutoTailor, 18000);
+    // Re-run on SPA navigation
+    let lastUrl = location.href;
+    setInterval(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        setTimeout(runAutoTailor, 2500);
+      }
+    }, 2000);
+  }
+})();
+
+// ============================================================================
+// === v1.5.4 UNIFIED APPLICATION AUTO-PILOT ===
+// Stitches together: auto-tailor → cover-letter → STAR answers → form fill →
+// submit. Runs once per JD and backs off if page is still loading.
+// ============================================================================
+(function () {
+  'use strict';
+  const LOG = (...a) => console.log('[UA-Pilot]', ...a);
+  const RUN_FLAG = 'ua_pilot_ran_';
+
+  function currentKey() { return RUN_FLAG + (location.hostname + location.pathname).replace(/[^a-z0-9]/gi, '_'); }
+
+  async function runPipeline() {
+    try {
+      const k = currentKey();
+      const got = await new Promise(r => { try { chrome.storage.local.get(k, r); } catch (_) { r({}); } });
+      if (got[k] && (Date.now() - got[k]) < 5 * 60 * 1000) return; // Already ran in last 5 min
+
+      const steps = [
+        ['auto-tailor resume', window.__uaAutoTailorResume],
+        ['cover letter',       window.__uaAutoCoverLetter],
+        ['STAR behavioral',    window.__uaStarAnswer],
+      ];
+      for (const [name, fn] of steps) {
+        if (typeof fn !== 'function') continue;
+        try { await fn(); LOG(`ran ${name}`); }
+        catch (e) { LOG(`${name} error:`, e.message); }
+        await new Promise(r => setTimeout(r, 800));
+      }
+      try { chrome.storage.local.set({ [k]: Date.now() }); } catch (_) {}
+    } catch (e) { LOG('pipeline error:', e.message); }
+  }
+
+  window.__uaAutoPilot = runPipeline;
+  if (window.self === window.top) {
+    setTimeout(runPipeline, 5500);
+    setTimeout(runPipeline, 15000);
+  }
+})();
