@@ -6061,10 +6061,10 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   async function waitFor(fn, timeoutMs) {
-    const deadline = Date.now() + (timeoutMs || 60000);
+    const deadline = Date.now() + (timeoutMs || 25000);
     while (Date.now() < deadline) {
       try { const r = fn(); if (r) return r; } catch (_) {}
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 150));
     }
     return null;
   }
@@ -6088,33 +6088,33 @@ Result: Shipped my first production change in week three and my notes doc became
     if (!genBtn) { setStatus('Not found — running Autofill instead'); return actionAutofill(); }
     realClick(genBtn);
 
-    setStatus('Generating tailored resume…');
+    setStatus('Generating…');
     // Jobright flow often has a "Generate My New Resume" confirm button
-    const confirmBtn = await waitFor(() => findButtonByText(/generate.*my.*new.*resume|start.*generating|generate.*now/i), 6000);
+    const confirmBtn = await waitFor(() => findButtonByText(/generate.*my.*new.*resume|start.*generating|generate.*now/i), 2000);
     if (confirmBtn) realClick(confirmBtn);
 
-    // Wait up to 60s for the "Continue to Autofill" button to appear
-    setStatus('Waiting for resume to finalize (10–20s)…');
-    const continueBtn = await waitFor(() => findButtonByText(/continue.*(to\s*)?autofill|autofill.*with.*this|use.*this.*resume/i), 90000);
-    if (!continueBtn) { setStatus('Generation timed out — running Autofill'); return actionAutofill(); }
+    // Wait for the "Continue to Autofill" button to appear (typically 10–20s)
+    setStatus('Finalizing resume…');
+    const continueBtn = await waitFor(() => findButtonByText(/continue.*(to\s*)?autofill|autofill.*with.*this|use.*this.*resume/i), 25000);
+    if (!continueBtn) { setStatus('Timed out — running Autofill'); return actionAutofill(); }
     realClick(continueBtn);
 
-    // Give the extension time to attach the new resume into the application file input
-    setStatus('Attaching resume to application…');
-    await new Promise(r => setTimeout(r, 3500));
+    // Brief wait for the new resume to attach to the file input
+    setStatus('Attaching resume…');
+    await new Promise(r => setTimeout(r, 800));
 
     // Confirm "are you sure to autofill again" popup if it appears
     const yesBtn = await waitFor(() => {
       const b = findButtonByText(/^\s*yes\s*$/i);
       if (b && /autofill.*again|overwrite|replace/i.test(b.closest('body')?.textContent?.slice(0, 500) || '')) return b;
       return null;
-    }, 5000);
+    }, 1500);
     if (yesBtn) realClick(yesBtn);
 
     // Finally trigger autofill
-    setStatus('Running Autofill…');
+    setStatus('Autofilling…');
     await actionAutofill();
-    setTimeout(() => setStatus(''), 4000);
+    setTimeout(() => setStatus(''), 2000);
   }
 
   function mount() {
