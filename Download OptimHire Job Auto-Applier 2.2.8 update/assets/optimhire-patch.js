@@ -1,6 +1,6 @@
 /**
- * OptimHire Comprehensive Patch v5.0
- * Covers ALL 23 tasks — runs as a content script on every page
+ * OptimHire Comprehensive Patch v6.0
+ * Covers ALL 30 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
  * T2  – Credits locked at 9999 forever
@@ -24,6 +24,13 @@
  * T21 – Validation error detection + auto-fix before submit
  * T22 – Skip suppression: no skip fired while form is actively filling
  * T23 – React-Select / Select2 / custom combobox support
+ * T24 – KNOCKOUT QUESTIONS MEGA-PATTERNS (200+ question types)
+ * T25 – Q&A memory: learns from past successful answers
+ * T26 – Cookie banner + modal auto-dismisser
+ * T27 – Review page detection + auto-submit
+ * T28 – Dynamic cover letter generator (job title + company aware)
+ * T29 – Resume URL → File blob upload automation
+ * T30 – Recruitee / Pinpoint / SuccessFactors / UKG / Avature ATS coverage
  *
  * v4.5 fixes (2026-04-01):
  *   - ROOT CAUSE FIX: background autoSkipDuration changed to 180s in v2.4.2.
