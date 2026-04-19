@@ -1,6 +1,6 @@
 /**
  * OptimHire Comprehensive Patch v6.0
- * Covers ALL 30 tasks — runs as a content script on every page
+ * Covers ALL 35 tasks — runs as a content script on every page
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
  * T2  – Credits locked at 9999 forever
@@ -31,6 +31,11 @@
  * T28 – Dynamic cover letter generator (job title + company aware)
  * T29 – Resume URL → File blob upload automation
  * T30 – Recruitee / Pinpoint / SuccessFactors / UKG / Avature ATS coverage
+ * T31 – v2.5.0: PAGE_DATA bridge (inject.js) for Paylocity state/country
+ * T32 – v2.5.0: Notice-period smart-match (exact days → closest option)
+ * T33 – v2.5.0: Apply-on-company-site auto-skip (don't get stuck)
+ * T34 – v2.5.0: cleanQuestionText normaliser for Q&A memory keys
+ * T35 – v2.5.0: Shadow-DOM aware querySelector (queryAllWithShadow)
  *
  * v4.5 fixes (2026-04-01):
  *   - ROOT CAUSE FIX: background autoSkipDuration changed to 180s in v2.4.2.
@@ -138,6 +143,16 @@
     'breezy.hr':           'BreezyHR',   // ensure breezy.hr itself is caught
     'app.breezy.hr':       'BreezyHR',
     'jobs.breezy.hr':      'BreezyHR',
+    // v6.0 (T30): five new ATS
+    'recruitee.com':       'Recruitee',
+    'jobs.recruitee.com':  'Recruitee',
+    'pinpointhq.com':      'Pinpoint',
+    'careers.pinpointhq.com': 'Pinpoint',
+    'successfactors.com':  'SuccessFactors',
+    'successfactors.eu':   'SuccessFactors',
+    'ultipro.com':         'UKG',
+    'recruiting2.ultipro.com': 'UKG',
+    'avature.net':          'Avature',
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
@@ -384,21 +399,407 @@
     gender:       'Prefer not to say',
     ethnicity:    'Prefer not to say',
     race:         'Prefer not to say',
-    years:        '7',           // 7 years passes most "at least X years" knockout questions
+    years:        '7',           // passes most "at least X years" knockout questions
     salary:       '80000',
+    salaryRange:  '80000-110000',
+    hourly:       '45',
     notice:       '2 weeks',
     availability: 'Immediately',
-    cover: `I am excited to apply for this role. My background and skills make me an excellent candidate and I look forward to contributing to your team.`,
-    why: 'I admire the company culture and the opportunity to make a meaningful impact.',
+    startDate:    '2 weeks from offer',
+    // Professional canned answers — used ONLY if profile has none
+    cover: `I am excited to apply for this role. My background and skills make me a strong fit for the position, and I am eager to contribute to your team's continued success. I bring the technical expertise, drive, and collaborative mindset needed to make an immediate impact.`,
+    why: 'I admire the company culture and the opportunity to make a meaningful impact through work that aligns with my skills and long-term career goals.',
+    whyCompany: 'Your company\'s reputation for innovation, strong values, and commitment to growth make it a place where I can contribute meaningfully while continuing to develop professionally.',
+    whyRole: 'This role aligns perfectly with my skills and career direction. The opportunity to apply my experience to meaningful challenges while contributing to a talented team is exactly what I\'m looking for.',
+    strengths: 'My key strengths are technical proficiency, strong problem-solving ability, effective communication, and a collaborative team-first mindset.',
+    weakness: 'I have been working on delegating more effectively. I naturally want to ensure quality by handling things myself, and I\'ve been consciously building trust with colleagues to share responsibility.',
+    goals: 'Over the next 3-5 years, I want to deepen my expertise, take on greater leadership responsibility, and contribute to impactful projects that drive real business outcomes.',
+    tellAbout: 'I\'m a dedicated professional with a track record of delivering strong results. I combine technical depth with a collaborative approach, and I thrive in roles where I can solve meaningful problems and help teams succeed.',
+    motivation: 'I\'m motivated by meaningful impact, continuous learning, and the opportunity to work alongside talented people on problems that matter.',
+    valueAdd: 'I bring the right combination of experience, technical skill, and work ethic to make an immediate positive impact. I move fast, communicate clearly, and consistently deliver quality work.',
+    reasonLeaving: 'I\'m seeking new challenges and an opportunity for greater impact and growth, which this role represents.',
     howHeard: 'LinkedIn',
+    pronouns: 'they/them',
+    hoursPerWeek: '40',
+    weekendsAvail: 'Yes',
+    eveningsAvail: 'Yes',
+    overtime: 'Yes',
+    travelPct: '25',
+    driversLicense: 'Yes',
+    clearance: 'No',
+    criminalRecord: 'No',
+    drugTest: 'Yes',
+    backgroundCheck: 'Yes',
+    languageProficiency: 'Fluent',
+    willingToDrugTest: 'Yes',
+    willingBackgroundCheck: 'Yes',
+    references: 'Available upon request',
+    age: '28',
+    over18: 'Yes',
+    nativeLanguage: 'English',
+    preferredShift: 'Day',
+    canCommute: 'Yes',
+    hasTransportation: 'Yes',
+    hasEquipment: 'Yes',
+    hasInternet: 'Yes',
+    hasQuietWorkspace: 'Yes',
   };
 
   // Experience-related label patterns — used in both guessValue and select handling
   const EXP_LABEL_RE = /how.?many.?years|number.?of.?years|years.?of.?(professional\s+)?exp|years?.?(exp|experience|work(?:ing)?)|exp(?:erience)?.?in.?years|total.?years|years.?in.?(the\s+)?(?:field|industry|role|profession)|years.?with|years.?as|exp(?:erience)?.?(long|total|professional)|how.?long.?(have.?you|working)|professional.?exp|work.?exp|prior.?exp/i;
 
+  /* ── T31: PAGE_DATA bridge (ported from v2.5.0 inject.js) ───────────
+   * Paylocity ATS pre-loads country/state data as window.pageData. The
+   * official extension reads this via a page-world script + postMessage.
+   * We reproduce the same bridge so Paylocity country/state selects fill.
+   * ────────────────────────────────────────────────────────────────── */
+  let _pagePageData = null;
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window) return;
+    const d = ev.data;
+    if (d && d.type === 'PAGE_DATA' && d.payload) {
+      _pagePageData = d.payload;
+      LOG('Received PAGE_DATA from page world');
+    }
+  });
+  (function injectPageDataBridge() {
+    try {
+      const s = document.createElement('script');
+      s.textContent = `;(function(){if(window&&window.pageData){window.postMessage({type:"PAGE_DATA",payload:window.pageData||null},"*");}})();`;
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+    } catch (_) {}
+  })();
+
+  /* ── T34: cleanQuestionText (ported from v2.5.0) ────────────────────
+   * Strip leading/trailing punctuation, asterisks (required markers),
+   * collapse whitespace, lowercase. Used as the Q&A memory key so
+   * "First Name *", " First  name:", "first name" all hash the same.
+   * ────────────────────────────────────────────────────────────────── */
+  function cleanQuestionText(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/\*+/g, ' ')
+      .replace(/[\u200B-\u200F\uFEFF]/g, '')
+      .replace(/[^\w\s?]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .slice(0, 240);
+  }
+
+  /* ── T35: Shadow-DOM aware query (ported from v2.5.0) ───────────────
+   * Many modern ATS (Workday, SuccessFactors) wrap inputs in shadow
+   * roots. Plain document.querySelectorAll misses these. We descend
+   * into every open shadow root and aggregate matches.
+   * ────────────────────────────────────────────────────────────────── */
+  function queryAllWithShadow(selector, root = document) {
+    const out = [];
+    try {
+      out.push(...root.querySelectorAll(selector));
+      const all = root.querySelectorAll('*');
+      for (const el of all) {
+        if (el.shadowRoot) {
+          out.push(...queryAllWithShadow(selector, el.shadowRoot));
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  /* ── T33: Apply-on-company-site auto-skip (ported from v2.5.0) ──────
+   * On Indeed/LinkedIn job pages the only action is "Apply on company
+   * site" which opens an external URL. If we land on such a page and
+   * there's no form to fill, skip it so the queue advances.
+   * ────────────────────────────────────────────────────────────────── */
+  const APPLY_EXTERNAL_RE = /apply\s+on\s+company\s+site|apply\s+externally|view\s+on\s+company\s+site/i;
+  function isApplyOnCompanySitePage() {
+    try {
+      const btns = document.querySelectorAll('a, button, [role="button"]');
+      for (const b of btns) {
+        const t = (b.innerText || b.textContent || '').trim();
+        if (APPLY_EXTERNAL_RE.test(t)) return b;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /* ── T32: Notice-period smart-match (ported from v2.5.0) ────────────
+   * Some ATS present notice period as a dropdown with text options
+   * like "2 weeks", "1 month", "30 days". Convert user's "2 weeks"
+   * (or 14 days numeric) to closest matching option by day count.
+   * ────────────────────────────────────────────────────────────────── */
+  function parseDaysFromText(txt) {
+    if (!txt) return null;
+    const s = String(txt).toLowerCase();
+    if (/immediate|asap|now|right away/.test(s)) return 0;
+    const m = s.match(/(\d+)\s*(day|week|month|year)/);
+    if (!m) {
+      const n = s.match(/(\d+)/);
+      return n ? parseInt(n[1], 10) : null;
+    }
+    const n = parseInt(m[1], 10);
+    const unit = m[2];
+    if (unit === 'day')   return n;
+    if (unit === 'week')  return n * 7;
+    if (unit === 'month') return n * 30;
+    if (unit === 'year')  return n * 365;
+    return n;
+  }
+
+  function pickNoticePeriodOption(select, target) {
+    if (!select || !select.options || !select.options.length) return null;
+    const targetDays = parseDaysFromText(target);
+    if (targetDays == null) return null;
+    let bestIdx = -1, bestDiff = Infinity, exactIdx = -1;
+    for (let i = 0; i < select.options.length; i++) {
+      const opt = select.options[i];
+      const d = parseDaysFromText(opt.text);
+      if (d == null) continue;
+      if (d === targetDays) { exactIdx = i; break; }
+      const diff = Math.abs(d - targetDays);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    }
+    return exactIdx !== -1 ? exactIdx : (bestIdx !== -1 ? bestIdx : null);
+  }
+
+  /* ── T25: Q&A memory persistence ─────────────────────────────────────
+   * Store question→answer pairs keyed by normalised label, so repeat
+   * knockout questions across applications get the same answer that
+   * previously succeeded.
+   * ────────────────────────────────────────────────────────────────── */
+  const QA_MEMORY_KEY = 'ohQaMemory';
+  const QA_MAX_ENTRIES = 2000;
+  let _qaCache = null;
+
+  function normalizeQa(label) {
+    // Use the v2.5.0-compatible cleanQuestionText so keys match the official
+    // extension's question normalisation (improves cross-session memory hits).
+    return cleanQuestionText(label);
+  }
+
+  async function loadQaMemory() {
+    if (_qaCache) return _qaCache;
+    try {
+      const { [QA_MEMORY_KEY]: raw = {} } = await ST.get(QA_MEMORY_KEY);
+      _qaCache = raw && typeof raw === 'object' ? raw : {};
+    } catch (_) { _qaCache = {}; }
+    return _qaCache;
+  }
+
+  async function getSavedQA(label) {
+    const k = normalizeQa(label);
+    if (!k) return null;
+    const mem = await loadQaMemory();
+    const entry = mem[k];
+    return entry && entry.answer != null ? entry.answer : null;
+  }
+
+  async function saveQA(label, answer, success = true) {
+    const k = normalizeQa(label);
+    if (!k || answer == null || answer === '') return;
+    const mem = await loadQaMemory();
+    const prev = mem[k];
+    if (prev && prev.success && !success) return; // don't overwrite successes with failures
+    mem[k] = { answer: String(answer).slice(0, 500), success: !!success, ts: Date.now() };
+    const keys = Object.keys(mem);
+    if (keys.length > QA_MAX_ENTRIES) {
+      keys.sort((a, b) => (mem[a].ts || 0) - (mem[b].ts || 0));
+      keys.slice(0, keys.length - QA_MAX_ENTRIES).forEach(k2 => delete mem[k2]);
+    }
+    try { await ST.set({ [QA_MEMORY_KEY]: mem }); } catch (_) {}
+  }
+
+  /* ── T26: Cookie banner + modal dismisser ───────────────────────────
+   * Many ATS / company career sites pop GDPR cookie banners or modals
+   * that steal focus and block our clicks. Auto-click accept/close.
+   * ────────────────────────────────────────────────────────────────── */
+  const COOKIE_ACCEPT_RE = /^(accept|accept all|allow all|agree|i agree|got it|ok|okay|continue|close|dismiss|no thanks|decline|reject all)$/i;
+  const COOKIE_CONTAINER_SEL = [
+    '[id*="cookie" i]', '[class*="cookie" i]',
+    '[id*="consent" i]', '[class*="consent" i]',
+    '[id*="gdpr" i]', '[class*="gdpr" i]',
+    '[id*="onetrust" i]', '[class*="onetrust" i]', '#onetrust-banner-sdk',
+    '[id*="cookiebot" i]', '[class*="cookiebot" i]', '#CybotCookiebotDialog',
+    '[class*="privacy-banner" i]', '[class*="privacy-notice" i]',
+    '[aria-label*="cookie" i]', '[aria-label*="consent" i]',
+    '[role="dialog"]', '[role="alertdialog"]',
+  ].join(',');
+
+  function dismissCookieBanner() {
+    try {
+      const banners = document.querySelectorAll(COOKIE_CONTAINER_SEL);
+      for (const banner of banners) {
+        if (!banner.offsetParent && banner.getClientRects().length === 0) continue;
+        const btns = banner.querySelectorAll('button, [role="button"], a[href]');
+        for (const btn of btns) {
+          const txt = (btn.innerText || btn.textContent || btn.getAttribute('aria-label') || '').trim();
+          if (COOKIE_ACCEPT_RE.test(txt)) {
+            btn.click();
+            return true;
+          }
+        }
+      }
+      // Global fallback: any visible button with accept-y text, lexical match
+      const allBtns = document.querySelectorAll('button, [role="button"]');
+      for (const btn of allBtns) {
+        const txt = (btn.innerText || btn.textContent || '').trim();
+        if (txt.length > 30) continue;
+        if (/^(accept all cookies|accept cookies|allow all cookies)$/i.test(txt)) {
+          btn.click();
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Run at load and periodically — banners often appear after DOM ready
+  setTimeout(dismissCookieBanner, 600);
+  setTimeout(dismissCookieBanner, 2000);
+  setInterval(dismissCookieBanner, 8000);
+
+  /* ── T27: Review-page detector + auto-submit ─────────────────────────
+   * Many multi-step ATS flows end with a "Review your application" step
+   * where the only action is a Submit button. Detect this state and
+   * click Submit without re-filling anything.
+   * ────────────────────────────────────────────────────────────────── */
+  const REVIEW_PAGE_RE = /review\s+your\s+application|review\s+and\s+submit|confirm\s+and\s+submit|please\s+review|final\s+review|application\s+summary/i;
+  const SUBMIT_BTN_RE = /^(submit|submit application|send application|apply|finish|confirm|complete application|submit my application)$/i;
+
+  function isReviewPage() {
+    const bodyText = (document.body?.innerText || '').slice(0, 8000);
+    if (REVIEW_PAGE_RE.test(bodyText)) return true;
+    const hdr = document.querySelector('h1,h2,h3,[role="heading"]');
+    if (hdr && REVIEW_PAGE_RE.test(hdr.innerText || '')) return true;
+    return false;
+  }
+
+  function findSubmitButton() {
+    const btns = document.querySelectorAll(
+      'button[type="submit"], input[type="submit"], button, [role="button"]'
+    );
+    for (const b of btns) {
+      if (b.disabled) continue;
+      if (!b.offsetParent && b.getClientRects().length === 0) continue;
+      const txt = (b.innerText || b.value || b.getAttribute('aria-label') || '').trim();
+      if (SUBMIT_BTN_RE.test(txt)) return b;
+    }
+    return null;
+  }
+
+  async function tryReviewAutoSubmit() {
+    if (!isReviewPage()) return false;
+    const btn = findSubmitButton();
+    if (!btn) return false;
+    LOG('Review page detected — clicking Submit');
+    markSubmitAttempted();
+    btn.click();
+    return true;
+  }
+
+  /* ── T28: Cover letter generator — personalised per job/company ─────
+   * Pull job title + company from the page (common ATS selectors), then
+   * personalise DEFAULTS.cover by injecting ${title} and ${company}.
+   * ────────────────────────────────────────────────────────────────── */
+  function extractJobContext() {
+    const h1 = document.querySelector('h1')?.innerText?.trim() || '';
+    let title = '';
+    let company = '';
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+    const docTitle = document.title || '';
+    // Common patterns: "Job Title at Company" / "Job Title | Company" / "Job Title - Company"
+    const combo = (ogTitle || docTitle).trim();
+    const m = combo.match(/^(.+?)\s+(?:at|[-|•–])\s+(.+?)(?:\s*[-|•]\s*.+)?$/i);
+    if (m) { title = m[1].trim(); company = m[2].trim(); }
+    if (!title) title = h1 || combo;
+    // Look for company via meta or structured data
+    if (!company) {
+      company = document.querySelector('meta[property="og:site_name"]')?.content
+             || document.querySelector('[itemprop="hiringOrganization"]')?.innerText?.trim()
+             || document.querySelector('[class*="company" i]')?.innerText?.trim()
+             || '';
+    }
+    // Sanity — strip overly long strings
+    if (title.length > 120) title = title.slice(0, 120);
+    if (company.length > 80) company = company.slice(0, 80);
+    return { title, company };
+  }
+
+  function generateCoverLetter(p = {}) {
+    const { title, company } = extractJobContext();
+    const base = p.cover_letter || DEFAULTS.cover;
+    // Lightweight personalisation — only prepend if we have useful context
+    if (title && company) {
+      return `Dear ${company} Hiring Team,\n\nI am excited to apply for the ${title} role at ${company}. ${base}\n\nBest regards,\n${(p.first_name||'') + ' ' + (p.last_name||'')}`.trim();
+    }
+    if (title) {
+      return `I am excited to apply for the ${title} role. ${base}`;
+    }
+    return base;
+  }
+
+  /* ── T29: Resume upload automation ───────────────────────────────────
+   * If the profile has a resume URL, fetch it as a Blob, create a File,
+   * and attach to any empty file input that looks like a resume/CV.
+   * ────────────────────────────────────────────────────────────────── */
+  const RESUME_INPUT_RE = /resume|cv\b|curriculum|upload.*resume|attach.*resume/i;
+
+  async function fetchResumeFile(url, filename = 'resume.pdf') {
+    if (!url) return null;
+    try {
+      const res = await fetch(url, { credentials: 'omit' });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const type = blob.type || 'application/pdf';
+      return new File([blob], filename, { type });
+    } catch (_) { return null; }
+  }
+
+  async function tryResumeUpload(p = {}) {
+    const url = p.resume_url || p.resumeUrl || p.resume;
+    if (!url) return 0;
+    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    if (!fileInputs.length) return 0;
+    let attached = 0;
+    const fname = (p.first_name || 'resume') + '_' + (p.last_name || 'file') + '.pdf';
+    for (const inp of fileInputs) {
+      if (inp.files && inp.files.length > 0) continue;
+      const hint = [
+        inp.name, inp.id, inp.getAttribute('aria-label') || '',
+        inp.closest('label')?.innerText || '',
+        inp.parentElement?.innerText?.slice(0, 200) || '',
+      ].join(' ');
+      if (!RESUME_INPUT_RE.test(hint) && fileInputs.length > 1) continue;
+      const file = await fetchResumeFile(url, fname);
+      if (!file) break;
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        attached++;
+      } catch (_) {}
+    }
+    if (attached) LOG(`Resume attached to ${attached} input(s)`);
+    return attached;
+  }
+
+  // Prime Q&A cache once at startup so guessValue() can do sync lookups
+  loadQaMemory().catch(() => {});
+
   function guessValue(label, p = {}, inputType = '') {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
     const fullName = `${p.first_name||''} ${p.last_name||''}`.trim();
+
+    // T25: Q&A memory — prefer a previously-successful answer for this exact label
+    if (_qaCache) {
+      const k = normalizeQa(label);
+      if (k && _qaCache[k] && _qaCache[k].success && _qaCache[k].answer != null) {
+        return _qaCache[k].answer;
+      }
+    }
 
     // Type-based direct fill (most reliable, survives label changes)
     if (inputType === 'email')  return p.email || '';
@@ -454,28 +855,117 @@
     // The select handler will convert this to the closest range option.
     if (EXP_LABEL_RE.test(l))                             return p.years_experience || DEFAULTS.years;
 
-    if (/availab|start.?date|notice/.test(l))             return DEFAULTS.availability;
-    if (/authoriz|eligible|work.*right|right.*work|legally.*work|permit.*work/.test(l))
+    if (/notice.?period|period.?of.?notice/.test(l))       return p.notice_period || DEFAULTS.notice;
+    if (/availab|start.?date|when.*start|when.*begin|earliest.*start/.test(l))
+                                                          return p.availability || DEFAULTS.availability;
+    if (/authoriz|eligible|work.*right|right.*work|legally.*work|permit.*work|legally.*authoriz|entitled.*work/.test(l))
                                                           return DEFAULTS.authorized;
-    // Sponsorship patterns BEFORE the generic "do you" catch-all
-    if (/require.*sponsor|need.*visa|visa.*sponsor|future.*visa|work.*visa|need.*permit/i.test(l))
-                                                          return DEFAULTS.sponsorship;
-    if (/will.*sponsor|currently.*sponsor|immigration.*support/.test(l))
-                                                          return DEFAULTS.sponsorship;
-    if (/relocat/.test(l))                                return DEFAULTS.relocation;
-    if (/remote|work.*home|hybrid|onsite|in.?person/.test(l)) return DEFAULTS.remote;
-    if (/veteran|military|protected/.test(l))             return DEFAULTS.veteran;
-    if (/disabilit/.test(l))                              return DEFAULTS.disability;
-    if (/gender|sex\b/.test(l))                           return DEFAULTS.gender;
-    if (/ethnic|race|racial|hispanic|latino/.test(l))     return DEFAULTS.ethnicity;
-    if (/driver.?s?.?licen|driving.?licen/.test(l))       return 'Yes';
-    if (/certif|accredit/.test(l))                        return 'Yes';
-    if (/agree|accept|confirm|consent/.test(l))           return 'Yes';
-    if (/willing|happy|open\s+to|comfortable|able\s+to|prepared\s+to/.test(l))
+    if (/us.*citizen|citizen.*us|citizen.*united.?states/.test(l))  return p.is_us_citizen || 'Yes';
+    if (/citizen|residency|permanent.?resident|green.?card|irish.?citizen|eu.?citizen/.test(l))
                                                           return 'Yes';
+    if (/require.*sponsor|need.*visa|visa.*sponsor|future.*visa|work.*visa|need.*permit|sponsorship.*required|require.*visa/i.test(l))
+                                                          return DEFAULTS.sponsorship;
+    if (/will.*sponsor|currently.*sponsor|immigration.*support|h.?1b.?sponsor|now.*or.*future/.test(l))
+                                                          return DEFAULTS.sponsorship;
+
+    // ── Location / relocation / remote ───────────────────────────────────
+    if (/relocat/.test(l))                                return DEFAULTS.relocation;
+    if (/willing.*commut|able.*commut|can.*commut|within.*commut/.test(l))
+                                                          return DEFAULTS.canCommute;
+    if (/remote|work.*home|wfh|telecommut|hybrid|onsite|in.?person|on.?site/.test(l))
+                                                          return DEFAULTS.remote;
+    if (/travel.*percent|percent.*travel|travel.*require|willing.*travel/.test(l))
+                                                          return DEFAULTS.travelPct;
+    if (/shift|schedul/.test(l))                          return DEFAULTS.preferredShift;
+    if (/overtime|over.?time/.test(l))                    return DEFAULTS.overtime;
+    if (/weekend/.test(l))                                return DEFAULTS.weekendsAvail;
+    if (/evening|night.?shift/.test(l))                   return DEFAULTS.eveningsAvail;
+    if (/hours.*per.*week|weekly.*hours|hours.*week/.test(l)) return DEFAULTS.hoursPerWeek;
+
+    // ── EEO / demographic ─────────────────────────────────────────────────
+    if (/veteran|military|protected|armed.?forces/.test(l))
+                                                          return DEFAULTS.veteran;
+    if (/disabilit|impair|accommodat/.test(l))            return DEFAULTS.disability;
+    if (/\bgender\b|\bsex\b/.test(l))                     return DEFAULTS.gender;
+    if (/\bpronoun/.test(l))                              return DEFAULTS.pronouns;
+    if (/ethnic|race|racial|hispanic|latino|latinx/.test(l)) return DEFAULTS.ethnicity;
+    if (/\bage\b|date.?of.?birth|\bdob\b|birth.?date/.test(l)) {
+      if (/^age$|\byour.?age\b/.test(l)) return DEFAULTS.age;
+      return ''; // DOB fields — leave blank (legal/privacy)
+    }
+    if (/over.?18|at.?least.?18|18.?or.?over|legal.?age/.test(l)) return DEFAULTS.over18;
+
+    // ── Background / legal / compliance ──────────────────────────────────
+    if (/criminal|felon|conviction|ever.*arrest/.test(l))  return DEFAULTS.criminalRecord;
+    if (/background.?check|willing.*background/.test(l))   return DEFAULTS.willingBackgroundCheck;
+    if (/drug.?test|willing.*drug|substance.?test/.test(l)) return DEFAULTS.willingDrugTest || DEFAULTS.drugTest;
+    if (/security.?clearance|clearance.?level|clearance\b|polygraph/.test(l))
+                                                          return DEFAULTS.clearance;
+    if (/drivers?.?licen|driving.?licen/.test(l))         return DEFAULTS.driversLicense;
+    if (/reliable.?transport|own.?transport|transport.?to.?work/.test(l))
+                                                          return DEFAULTS.hasTransportation;
+    if (/have.*laptop|own.*laptop|have.*computer|own.*computer|have.*equipment/.test(l))
+                                                          return DEFAULTS.hasEquipment;
+    if (/reliable.?internet|high.?speed.?internet|stable.?internet/.test(l))
+                                                          return DEFAULTS.hasInternet;
+    if (/quiet.?workspace|dedicated.?workspace|home.?office/.test(l))
+                                                          return DEFAULTS.hasQuietWorkspace;
+
+    // ── Certifications / education / skills / language ──────────────────
+    if (/certif|accredit|credential|licens(e|ing).?to|professional.*licens/.test(l))
+                                                          return 'Yes';
+    if (/english.?proficien|speak.?english|english.?level|level.?of.?english|fluent.?english|english.?fluen/.test(l))
+                                                          return DEFAULTS.languageProficiency;
+    if (/native.?language|primary.?language|first.?language/.test(l))
+                                                          return DEFAULTS.nativeLanguage;
+    if (/language.?proficien|language.?level|languages.?speak|speak.*fluent/.test(l))
+                                                          return DEFAULTS.languageProficiency;
+    if (/highest.?(level.?of.?)?education|education.?level|degree.?level|highest.?degree/.test(l))
+                                                          return p.highest_degree || p.degree || "Bachelor's Degree";
+
+    // ── References ──────────────────────────────────────────────────────
+    if (/\breferenc|professional.?ref/.test(l))           return DEFAULTS.references;
+
+    // ── Behavioural / motivation / company fit (open-ended) ─────────────
+    if (/tell.?(us|me).?about.?yourself|introduce.?yourself|briefly.?describe/.test(l))
+                                                          return p.summary || DEFAULTS.tellAbout;
+    if (/greatest.?strength|key.?strength|your.?strength/.test(l)) return DEFAULTS.strengths;
+    if (/greatest.?weakness|weak.?ness|areas.?(for|of).?improvement/.test(l))
+                                                          return DEFAULTS.weakness;
+    if (/career.?goal|long.?term.?goal|five.?year|5.?year.?plan|where.*see.*yourself/.test(l))
+                                                          return DEFAULTS.goals;
+    if (/motivat|what.?drive|what.?inspir/.test(l))       return DEFAULTS.motivation;
+    if (/value.?add|what.*bring|unique.?value|what.?make.?you|differentiat/.test(l))
+                                                          return DEFAULTS.valueAdd;
+    if (/reason.?for.?leav|leaving.?current|why.?leav|why.?looking/.test(l))
+                                                          return DEFAULTS.reasonLeaving;
+    if (/why.*hire|hire.*you|we.?should.?hire/.test(l))   return DEFAULTS.valueAdd;
+    if (/why.*compan|interest.*compan|appeal.*compan/.test(l))
+                                                          return DEFAULTS.whyCompany;
+    if (/why.*role|why.*position|interest.*role|interest.*position|excite.*role|why.*apply/.test(l))
+                                                          return DEFAULTS.whyRole;
+    if (/describe.?(a\s+)?challeng|tell.?(me|us).?about.?a.?time|example.?of|situation.?where/.test(l))
+                                                          return p.summary || DEFAULTS.tellAbout;
+
+    // ── Agreements / consent / willingness ───────────────────────────────
+    if (/agree|accept|confirm|consent|acknowledge|certif(y|ied)|attest|declare/.test(l))
+                                                          return 'Yes';
+    if (/willing|happy|open\s+to|comfortable|able\s+to|prepared\s+to|interest(ed)?\s+in/.test(l))
+                                                          return 'Yes';
+    if (/would.?you|can.?you/.test(l) && /(willing|able|comfortable|available)/.test(l))
+                                                          return 'Yes';
+
+    // ── Negative-framed questions → NO ──────────────────────────────────
+    if (/\bever.?been.?fired|terminated|dismissed.?for.?cause/.test(l))
+                                                          return 'No';
+    if (/ever.?been.?convict|ever.?plead.?guilty/.test(l)) return 'No';
+    if (/do.?you.?have.?any.?(issue|concern|problem|objection)/.test(l)) return 'No';
+    if (/non.?compet|conflict.?of.?interest|currently.?employ.?by.?compet/.test(l))
+                                                          return 'No';
+
     // Generic yes/no catch-all — only fires for truly unclassified questions.
     // Intentionally comes AFTER all specific negative-answer patterns above.
-    if (/\bdo you\b|\bhave you\b|\bare you\b|\bcan you\b|\bwill you\b/.test(l))
+    if (/\bdo you\b|\bhave you\b|\bare you\b|\bcan you\b|\bwill you\b|\bare.?you.?able/.test(l))
                                                           return 'Yes';
     return '';
   }
@@ -728,7 +1218,7 @@
    * bestSelectOption — finds the best <option> in a <select> for a given value.
    * Uses: exact match → starts-with → contains → first non-empty.
    */
-  function bestSelectOption(sel, target) {
+  function bestSelectOption(sel, target, labelHint = '') {
     if (!target) return null;
     const t = target.toLowerCase();
     const opts = $$('option', sel).filter(o => o.value && o.value !== '');
@@ -737,7 +1227,13 @@
     const starts  = opts.find(o => o.text.toLowerCase().startsWith(t));
     if (starts) return starts;
     const contains = opts.find(o => o.text.toLowerCase().includes(t) || t.includes(o.text.toLowerCase()));
-    return contains || null;
+    if (contains) return contains;
+    // T32: Notice-period / time-duration smart-match by parsed days.
+    if (/notice|availab|start|when.*begin/i.test(labelHint) || /notice|availab|start/i.test(t) || /week|month|day|immediate/i.test(t)) {
+      const idx = pickNoticePeriodOption(sel, target);
+      if (idx != null && sel.options[idx]) return sel.options[idx];
+    }
+    return null;
   }
 
   async function autoFillPage() {
@@ -2219,11 +2715,149 @@
   setInterval(processFreshness, 4000);
   processFreshness();
 
+  /* ── T30a: Recruitee autofill ───────────────────────────── */
+  async function recruiteeAutofill() {
+    if (CURRENT_ATS !== 'Recruitee') return;
+    const p = await getProfile();
+    LOG('Recruitee: filling');
+    const MAP = [
+      ['input[name*="first_name" i],input[placeholder*="First name" i]', p.first_name],
+      ['input[name*="last_name" i],input[placeholder*="Last name" i]',   p.last_name],
+      ['input[type="email"],input[name*="email" i]',                     p.email],
+      ['input[type="tel"],input[name*="phone" i]',                       p.phone],
+      ['input[name*="city" i],input[placeholder*="City" i]',             p.city],
+      ['input[name*="linkedin" i]',                                      p.linkedin_profile_url || ''],
+      ['input[name*="github" i]',                                        p.github_url || ''],
+      ['textarea[name*="cover" i],textarea[id*="cover" i]',              generateCoverLetter(p)],
+    ];
+    for (const [sel, val] of MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await tryResumeUpload(p);
+    await autoFillPage();
+  }
+
+  /* ── T30b: Pinpoint autofill ────────────────────────────── */
+  async function pinpointAutofill() {
+    if (CURRENT_ATS !== 'Pinpoint') return;
+    const p = await getProfile();
+    LOG('Pinpoint: filling');
+    const MAP = [
+      ['input[id*="first_name" i],input[name*="first_name" i]', p.first_name],
+      ['input[id*="last_name" i],input[name*="last_name" i]',   p.last_name],
+      ['input[type="email"]',                                    p.email],
+      ['input[type="tel"]',                                      p.phone],
+      ['input[id*="city" i],input[name*="city" i]',              p.city],
+      ['textarea[id*="cover" i],textarea[name*="cover" i]',      generateCoverLetter(p)],
+    ];
+    for (const [sel, val] of MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await tryResumeUpload(p);
+    await autoFillPage();
+  }
+
+  /* ── T30c: SAP SuccessFactors autofill ──────────────────── */
+  async function successFactorsAutofill() {
+    if (CURRENT_ATS !== 'SuccessFactors') return;
+    const p = await getProfile();
+    LOG('SuccessFactors: filling');
+    // SuccessFactors uses iframes + dynamic ids; rely mostly on generic fill
+    const MAP = [
+      ['input[id*="firstName" i],input[name*="firstName" i]',  p.first_name],
+      ['input[id*="lastName" i],input[name*="lastName" i]',    p.last_name],
+      ['input[type="email"]',                                   p.email],
+      ['input[type="tel"],input[id*="phone" i]',               p.phone],
+      ['input[id*="city" i]',                                   p.city],
+      ['input[id*="country" i]',                                p.country || 'Ireland'],
+    ];
+    for (const [sel, val] of MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await tryResumeUpload(p);
+    await autoFillPage();
+  }
+
+  /* ── T30d: UKG / UltiPro autofill ───────────────────────── */
+  async function ukgAutofill() {
+    if (CURRENT_ATS !== 'UKG') return;
+    const p = await getProfile();
+    LOG('UKG: filling');
+    const MAP = [
+      ['input[name*="FirstName" i],input[id*="FirstName" i]', p.first_name],
+      ['input[name*="LastName" i],input[id*="LastName" i]',   p.last_name],
+      ['input[type="email"],input[name*="Email" i]',           p.email],
+      ['input[type="tel"],input[name*="Phone" i]',             p.phone],
+      ['input[name*="City" i]',                                p.city],
+      ['input[name*="PostalCode" i],input[name*="Zip" i]',     p.postal_code || p.zip || ''],
+    ];
+    for (const [sel, val] of MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await tryResumeUpload(p);
+    await autoFillPage();
+  }
+
+  /* ── T30e: Avature autofill ─────────────────────────────── */
+  async function avatureAutofill() {
+    if (CURRENT_ATS !== 'Avature') return;
+    const p = await getProfile();
+    LOG('Avature: filling');
+    const MAP = [
+      ['input[name*="firstName" i],input[id*="firstName" i]', p.first_name],
+      ['input[name*="lastName" i],input[id*="lastName" i]',   p.last_name],
+      ['input[type="email"]',                                  p.email],
+      ['input[type="tel"]',                                    p.phone],
+      ['input[name*="city" i]',                                p.city],
+      ['input[name*="country" i]',                             p.country || 'Ireland'],
+      ['textarea[name*="cover" i]',                            generateCoverLetter(p)],
+    ];
+    for (const [sel, val] of MAP) {
+      if (!val) continue;
+      const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
+      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+    }
+    await tryResumeUpload(p);
+    await autoFillPage();
+  }
+
   /* ── Shared ATS dispatch helper ─────────────────────────── */
   async function runAtsAutofill() {
     _fillActive = true;
     try {
+      // T26: Dismiss cookie banners before filling so buttons aren't obscured
+      dismissCookieBanner();
       await waitForFormStable(2000);
+
+      // T33: If this is an "Apply on company site" page with no form inputs,
+      // broadcast failure so the queue advances instead of watching for 100s.
+      if (isApplyOnCompanySitePage() && !document.querySelector('form input:not([type="hidden"]), form textarea')) {
+        LOG('Apply-on-company-site detected — requesting skip');
+        try {
+          chrome.runtime.sendMessage({
+            type: 'APPLICATION_FAILED',
+            reason: 'external_apply_link',
+            url: location.href,
+          }).catch(() => {});
+        } catch (_) {}
+        _fillActive = false;
+        return;
+      }
+
+      // T27: If this is a pure review page, just submit — don't re-fill
+      if (await tryReviewAutoSubmit()) {
+        _fillActive = false;
+        return;
+      }
+
       switch (CURRENT_ATS) {
         case 'Workday':          await workdayAutofill();      break;
         case 'OracleCloud':      await oracleAutofill();       break;
@@ -2238,12 +2872,26 @@
         case 'Paylocity':        await paylocityAutofill();    break;
         case 'JazzHR':           await jazzhrAutofill();       break;
         case 'Teamtailor':       await teamtailorAutofill();   break;
+        case 'Recruitee':        await recruiteeAutofill();    break;
+        case 'Pinpoint':         await pinpointAutofill();     break;
+        case 'SuccessFactors':   await successFactorsAutofill(); break;
+        case 'UKG':              await ukgAutofill();          break;
+        case 'Avature':          await avatureAutofill();      break;
         default:                 await autoFillPage();         break;
       }
       // Generic pass after platform-specific (catches missed fields)
-      if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor'].includes(CURRENT_ATS)) {
+      if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor','Recruitee','Pinpoint','SuccessFactors','UKG','Avature'].includes(CURRENT_ATS)) {
         await autoFillPage();
       }
+
+      // T29: Resume upload — try once after main fill (non-adapter ATS already covered)
+      try {
+        const p = await getProfile();
+        await tryResumeUpload(p);
+      } catch (_) {}
+
+      // T27: After fill, check if we've landed on a review step
+      await tryReviewAutoSubmit();
     } finally {
       _fillActive = false;
     }
