@@ -6169,9 +6169,6 @@ Result: Shipped my first production change in week three and my notes doc became
           }
           return;
         }
-        const mins = Math.floor((Date.now() - start) / 60000);
-        const secs = Math.floor(((Date.now() - start) % 60000) / 1000);
-        if (statusEl) statusEl.textContent = 'Waiting for tailored resume… ' + (mins ? mins + 'm' : '') + secs + 's';
         await new Promise(r => setTimeout(r, 800));
       }
       setStatus('');
