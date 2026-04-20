@@ -6060,128 +6060,232 @@ Result: Shipped my first production change in week three and my notes doc became
     });
   }
 
+  // Look for a resume-file-input that became populated (strongest signal that tailored resume attached)
+  function findResumeFileInput() {
+    const inputs = deepQueryAll('input[type=file]');
+    return inputs.find(i => (i.name + ' ' + i.id + ' ' + (i.accept || '') + ' ' + (i.closest('[class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"], [class*="upload"], [class*="Upload"]')?.textContent || '')).toLowerCase().match(/resume|cv|upload/));
+  }
+  function resumeFileCount() {
+    const f = findResumeFileInput();
+    return f && f.files ? f.files.length : 0;
+  }
+  function findAttachedResumeName() {
+    const inputs = deepQueryAll('input[type=file]');
+    for (const i of inputs) { if (i.files && i.files[0]) return i.files[0].name; }
+    // Filename label near an upload control
+    const labels = deepQueryAll('[class*="resume"], [class*="Resume"], [class*="upload"], [class*="Upload"]');
+    for (const l of labels) {
+      const m = (l.textContent || '').match(/[\w\-]+\.(pdf|doc|docx|txt)/i);
+      if (m) return m[0];
+    }
+    return '';
+  }
+
   async function waitFor(fn, timeoutMs) {
-    const deadline = Date.now() + (timeoutMs || 25000);
+    const deadline = Date.now() + (timeoutMs || 15000);
     while (Date.now() < deadline) {
       try { const r = fn(); if (r) return r; } catch (_) {}
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 120));
     }
     return null;
   }
 
+  // Cancellation token so user can abort a long flow
+  let __uaCancel = false;
+  function resetCancel() { __uaCancel = false; }
+  function cancelNow() { __uaCancel = true; }
+
   // --- Action 1: Autofill only ---
   async function actionAutofill() {
     LOG('Autofill clicked');
-    // Prefer Jobright sidebar "Autofill" button
-    const jrBtn = findButtonByText(/^\s*autofill\s*$/i);
+    // Match all known autofill button copy: "Autofill", "APPLY WITH AUTOFILL", "Autofill from resume"
+    const jrBtn = findButtonByText(/^\s*autofill\s*$/i)
+      || findButtonByText(/apply.*with.*autofill/i)
+      || findButtonByText(/^autofill\s+with\b/i)
+      || findButtonByText(/^autofill.*resume/i);
     if (jrBtn) { realClick(jrBtn); LOG('Clicked Jobright Autofill'); return; }
-    // Fall back to ATS-native "Autofill from resume" / "Upload file" button chain,
-    // or just dispatch the internal autofill (handled by main IIFE on ATS pages).
+    // Dispatch force-autofill event as fallback
     try { window.dispatchEvent(new CustomEvent('ua-force-autofill')); } catch (_) {}
   }
 
   // --- Action 2: Generate Custom Resume → Continue to Autofill → attach → autofill ---
-  async function actionGenerateAndAutofill(statusEl) {
+  // Cross-origin safe: the generator UI may live in the Jobright panel on a
+  // different origin, so we watch the file input on this page for a
+  // populated-resume signal rather than polling for the Continue button.
+  async function actionGenerateAndAutofill(statusEl, stopBtn) {
+    resetCancel();
     const setStatus = (t) => { if (statusEl) statusEl.textContent = t; LOG(t); };
-    setStatus('Locating Generate Custom Resume…');
-    const genBtn = findButtonByText(/generate.*(custom|new|tailor).*resume|generate.*resume/i);
-    if (!genBtn) { setStatus('Not found — running Autofill instead'); return actionAutofill(); }
-    realClick(genBtn);
+    const start = Date.now();
+    try {
+      setStatus('Opening resume generator…');
+      const genBtn = findButtonByText(/generate.*(custom|new|tailor).*resume|customize.*your.*resume|generate.*resume/i);
+      if (!genBtn) {
+        setStatus('Generator not found — running Autofill');
+        await actionAutofill();
+        return;
+      }
+      realClick(genBtn);
 
-    setStatus('Generating…');
-    // Jobright flow often has a "Generate My New Resume" confirm button
-    const confirmBtn = await waitFor(() => findButtonByText(/generate.*my.*new.*resume|start.*generating|generate.*now/i), 2000);
-    if (confirmBtn) realClick(confirmBtn);
+      // Record current attached file (if any) so we can detect a replacement
+      const priorName = findAttachedResumeName();
+      const priorCount = resumeFileCount();
+      LOG('prior resume:', priorName, 'count:', priorCount);
 
-    // Wait for the "Continue to Autofill" button to appear (typically 10–20s)
-    setStatus('Finalizing resume…');
-    const continueBtn = await waitFor(() => findButtonByText(/continue.*(to\s*)?autofill|autofill.*with.*this|use.*this.*resume/i), 25000);
-    if (!continueBtn) { setStatus('Timed out — running Autofill'); return actionAutofill(); }
-    realClick(continueBtn);
+      // Optional: confirm the generator dialog on jobright.ai
+      const confirmBtn = await waitFor(() => findButtonByText(/^\s*generate.*my.*new.*resume\s*$|start.*generating|generate.*now/i), 1500);
+      if (confirmBtn) realClick(confirmBtn);
 
-    // Brief wait for the new resume to attach to the file input
-    setStatus('Attaching resume…');
-    await new Promise(r => setTimeout(r, 800));
+      // Race: either a "Continue to Autofill" button shows up on THIS page,
+      // or the file input on this page gets a new file (meaning the Jobright
+      // panel completed the flow in its own tab/iframe and attached the file).
+      setStatus('Generating… (cancel any time)');
+      const deadline = Date.now() + 30000;
+      let continueClicked = false;
+      let attached = false;
+      while (Date.now() < deadline) {
+        if (__uaCancel) { setStatus('Cancelled — running Autofill'); await actionAutofill(); return; }
+        // Signal A: file input now has a (new) resume attached
+        const cur = resumeFileCount();
+        const curName = findAttachedResumeName();
+        if ((cur > 0 && cur !== priorCount) || (curName && curName !== priorName)) {
+          attached = true;
+          LOG('Detected new attached resume:', curName);
+          break;
+        }
+        // Signal B: a Continue-to-Autofill button is visible here — click it
+        const cont = findButtonByText(/continue.*(to\s*)?autofill|autofill.*with.*this|use.*this.*resume/i);
+        if (cont && !continueClicked) { realClick(cont); continueClicked = true; setStatus('Attaching resume…'); }
+        // Signal C: a "Yes" confirmation for autofill-again
+        const yes = findButtonByText(/^\s*yes\s*$/i);
+        if (yes && /autofill.*again|overwrite|replace/i.test((yes.closest('body')?.textContent || '').slice(0, 800))) {
+          realClick(yes);
+        }
+        // Elapsed feedback
+        const sec = Math.floor((Date.now() - start) / 1000);
+        statusEl && (statusEl.textContent = (continueClicked ? 'Attaching resume…' : 'Generating…') + ' ' + sec + 's');
+        await new Promise(r => setTimeout(r, 250));
+      }
 
-    // Confirm "are you sure to autofill again" popup if it appears
-    const yesBtn = await waitFor(() => {
-      const b = findButtonByText(/^\s*yes\s*$/i);
-      if (b && /autofill.*again|overwrite|replace/i.test(b.closest('body')?.textContent?.slice(0, 500) || '')) return b;
-      return null;
-    }, 1500);
-    if (yesBtn) realClick(yesBtn);
-
-    // Finally trigger autofill
-    setStatus('Autofilling…');
-    await actionAutofill();
-    setTimeout(() => setStatus(''), 2000);
+      if (!attached && !continueClicked) {
+        setStatus('No resume attached yet — running Autofill');
+      } else {
+        setStatus('Autofilling…');
+      }
+      await actionAutofill();
+      setTimeout(() => setStatus(''), 1500);
+    } catch (e) {
+      setStatus('Error: ' + (e.message || e));
+      setTimeout(() => setStatus(''), 2500);
+    }
   }
 
-  function mount() {
-    if (document.getElementById(HOST_ID)) return;
-    if (!isApplicationPage()) return;
-
-    const host = document.createElement('div');
-    host.id = HOST_ID;
-    host.style.cssText = 'position:fixed;z-index:2147483640;bottom:24px;left:24px;pointer-events:none;';
-    const shadow = host.attachShadow({ mode: 'open' });
-    shadow.innerHTML = `
-      <style>
-        :host { all: initial; }
-        .wrap { pointer-events:auto; display:flex; flex-direction:column; gap:10px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-        button { cursor:pointer; border:0; border-radius:12px; padding:12px 18px; font-size:14px; font-weight:600;
-          box-shadow:0 8px 24px rgba(0,0,0,.35), 0 2px 6px rgba(0,0,0,.2); transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;
-          min-width:260px; text-align:left; display:flex; align-items:center; gap:10px; }
-        button:hover { transform:translateY(-1px); filter:brightness(1.06); }
-        button:active { transform:translateY(0); filter:brightness(.96); }
-        .primary { background:linear-gradient(135deg,#33e09e 0%,#1fbf7f 100%); color:#0b2a1d; }
-        .secondary { background:linear-gradient(135deg,#8b5cf6 0%,#6d28d9 100%); color:#fff; }
-        .ico { font-size:16px; }
-        .status { color:#fff; background:rgba(0,0,0,.7); padding:6px 10px; border-radius:8px; font-size:12px; min-height:14px; max-width:280px; }
-        .hide { display:none; }
-        .drag { color:#9aa0a6; font-size:11px; text-align:right; padding-right:4px; user-select:none; }
-        .minbtn { background:#222; color:#fff; border-radius:50%; width:22px; height:22px; padding:0; min-width:22px; display:inline-flex; align-items:center; justify-content:center; font-size:14px; margin-left:6px; box-shadow:none; }
-      </style>
-      <div class="wrap" part="wrap">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div class="drag">Jobright v1.5.4</div>
-          <button class="minbtn" id="min" title="Hide">–</button>
-        </div>
-        <button class="primary" id="btn-autofill">
-          <span class="ico">⚡</span><span>Autofill</span>
-        </button>
-        <button class="secondary" id="btn-generate">
-          <span class="ico">✨</span><span>Generate Custom Resume + Autofill</span>
-        </button>
-        <div class="status" id="status"></div>
-      </div>
-    `;
-    document.documentElement.appendChild(host);
-
-    const $ = (s) => shadow.querySelector(s);
-    const statusEl = $('#status');
-    let hidden = false;
-    $('#min').addEventListener('click', () => {
-      hidden = !hidden;
-      $('#btn-autofill').classList.toggle('hide', hidden);
-      $('#btn-generate').classList.toggle('hide', hidden);
-      statusEl.classList.toggle('hide', hidden);
-      $('#min').textContent = hidden ? '+' : '–';
-    });
-    $('#btn-autofill').addEventListener('click', () => actionAutofill().catch(e => LOG('autofill err', e)));
-    $('#btn-generate').addEventListener('click', () => actionGenerateAndAutofill(statusEl).catch(e => LOG('generate err', e)));
-
-    LOG('Dual-action buttons mounted');
+  // Locate the native Jobright sidebar "Autofill" button across shadow roots.
+  function findNativeAutofillBtn() {
+    const candidates = deepQueryAll('button, [role="button"], a, div[class*="btn"]');
+    for (const b of candidates) {
+      if (!b.offsetParent && !b.getClientRects().length) continue;
+      const txt = (b.textContent || '').trim();
+      if (/^autofill$/i.test(txt) || /apply.*with.*autofill/i.test(txt)) return b;
+    }
+    return null;
   }
 
-  function tryMount() { try { mount(); } catch (e) { LOG('mount err:', e.message); } }
+  const INJECT_ID = 'ua-gen-autofill-btn';
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
-  else tryMount();
-  // Remount on SPA route changes
+  function injectUnderNative() {
+    const native = findNativeAutofillBtn();
+    if (!native) return false;
+
+    // If we already injected inside the same container, keep it.
+    const parent = native.parentElement;
+    if (!parent) return false;
+    if (parent.querySelector('#' + INJECT_ID)) return true;
+
+    // Clone the native button's class list + computed styles so the new
+    // button matches exactly (gradient, radius, padding, typography).
+    const clone = native.cloneNode(false); // copy tag + attrs, not children
+    clone.id = INJECT_ID;
+    clone.removeAttribute('data-testid');
+    clone.removeAttribute('aria-label');
+    clone.removeAttribute('name');
+    // Re-copy class list to be safe
+    clone.className = native.className;
+    // Match size
+    const cs = getComputedStyle(native);
+    try {
+      clone.style.display = cs.display || 'flex';
+      clone.style.width = native.getBoundingClientRect().width + 'px';
+      clone.style.marginTop = '10px';
+      clone.style.cursor = 'pointer';
+      // Preserve gradient/bg
+      clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none'
+        ? cs.backgroundImage : cs.backgroundColor;
+      clone.style.color = cs.color;
+      clone.style.borderRadius = cs.borderRadius;
+      clone.style.fontSize = cs.fontSize;
+      clone.style.fontWeight = cs.fontWeight;
+      clone.style.fontFamily = cs.fontFamily;
+      clone.style.padding = cs.padding;
+      clone.style.textAlign = cs.textAlign || 'center';
+      clone.style.border = cs.border;
+      clone.style.boxShadow = cs.boxShadow;
+    } catch (_) {}
+
+    // Set content — center-aligned like the native Autofill
+    clone.textContent = 'Generate Custom Resume + Autofill';
+
+    // Small status line below (persists in the sidebar shadow)
+    const statusEl = document.createElement('div');
+    statusEl.id = INJECT_ID + '-status';
+    try {
+      statusEl.style.cssText = 'margin-top:6px;font-size:12px;color:' + cs.color + ';opacity:.8;text-align:center;min-height:14px;font-family:' + cs.fontFamily + ';';
+    } catch (_) {
+      statusEl.style.cssText = 'margin-top:6px;font-size:12px;color:#fff;opacity:.8;text-align:center;min-height:14px;';
+    }
+
+    // Stop intrinsic onClick handlers: we only want our chained flow to fire.
+    const handler = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation?.();
+      actionGenerateAndAutofill(statusEl).catch(e => LOG('generate err', e));
+    };
+    clone.addEventListener('click', handler, true);
+    // Add hover feedback to mimic original
+    clone.addEventListener('mouseenter', () => { clone.style.filter = 'brightness(1.05)'; });
+    clone.addEventListener('mouseleave', () => { clone.style.filter = ''; });
+
+    // Insert right after the native Autofill button
+    if (native.nextSibling) {
+      parent.insertBefore(clone, native.nextSibling);
+      parent.insertBefore(statusEl, clone.nextSibling);
+    } else {
+      parent.appendChild(clone);
+      parent.appendChild(statusEl);
+    }
+    LOG('Injected Generate+Autofill button under native Autofill');
+    return true;
+  }
+
+  function tryInject() {
+    try {
+      if (injectUnderNative()) return true;
+    } catch (e) { LOG('inject err:', e.message); }
+    return false;
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryInject);
+  else tryInject();
+
+  // Re-inject on SPA route changes and when the sidebar mounts later
   let lastUrl = location.href;
+  const mo = new MutationObserver(() => {
+    // Check periodically — the Plasmo sidebar mounts asynchronously
+    if (!deepQueryAll('#' + INJECT_ID).length) tryInject();
+  });
+  try { mo.observe(document.body || document.documentElement, { childList: true, subtree: true }); } catch (_) {}
   setInterval(() => {
-    if (location.href !== lastUrl) { lastUrl = location.href; setTimeout(tryMount, 1500); }
-    if (!document.getElementById(HOST_ID) && isApplicationPage()) tryMount();
+    if (location.href !== lastUrl) { lastUrl = location.href; setTimeout(tryInject, 1200); }
+    if (!deepQueryAll('#' + INJECT_ID).length) tryInject();
   }, 2500);
 })();
