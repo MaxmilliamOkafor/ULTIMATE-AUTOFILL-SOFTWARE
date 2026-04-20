@@ -6040,6 +6040,14 @@ Result: Shipped my first production change in week three and my notes doc became
       el.click();
     } catch (_) {}
   }
+  // Pass-through click that preserves the native handler's behaviour exactly
+  // (React/Next onClick, target="_blank" popup gesture, window.open, etc.).
+  // Must be called synchronously from within a user-gesture stack.
+  function nativeClick(el) {
+    if (!el) return;
+    try { el.scrollIntoView({ block: 'center' }); } catch (_) {}
+    try { el.click(); } catch (_) {}
+  }
 
   function deepQueryAll(selector) {
     const results = [];
@@ -6108,84 +6116,100 @@ Result: Shipped my first production change in week three and my notes doc became
     try { window.dispatchEvent(new CustomEvent('ua-force-autofill')); } catch (_) {}
   }
 
-  // --- Action 2: Generate Custom Resume → Continue to Autofill → attach → autofill ---
-  // Cross-origin safe: the generator UI may live in the Jobright panel on a
-  // different origin, so we watch the file input on this page for a
-  // populated-resume signal rather than polling for the Continue button.
-  async function actionGenerateAndAutofill(statusEl, stopBtn) {
-    resetCancel();
+  // --- Action 2: Trigger native "Generate Custom Resume" (preserving original
+  // new-tab flow), then watch for attachment + tab-focus to auto-autofill. ---
+  // We do NOT replace or wrap the native handler — we click it synchronously
+  // inside the user-gesture so its window.open() / popup / navigation behaves
+  // exactly as if the user clicked it themselves.
+  function actionGenerateAndAutofill(statusEl, ev) {
     const setStatus = (t) => { if (statusEl) statusEl.textContent = t; LOG(t); };
+    resetCancel();
+
+    // Record pre-click state so we can detect a newly attached file later
+    const priorName = findAttachedResumeName();
+    const priorCount = resumeFileCount();
+
+    // Find native generator button — ONLY in the Plasmo sidebar
+    const allGen = deepQueryAll('button, a, [role="button"], div[class*="btn"], span[class*="btn"]');
+    let genBtn = null;
+    for (const b of allGen) {
+      if (!b.offsetParent && !b.getClientRects().length) continue;
+      const t = (b.textContent || b.getAttribute('aria-label') || '').trim();
+      if (!/generate.*(custom|new|tailor).*resume|customize.*your.*resume|generate.*resume/i.test(t)) continue;
+      if (!isInsidePlasmoSidebar(b)) continue;
+      genBtn = b; break;
+    }
+    if (!genBtn) {
+      setStatus('Generator not found — running Autofill');
+      actionAutofill();
+      setTimeout(() => setStatus(''), 2000);
+      return;
+    }
+    // Synchronous native click — preserves new-tab / popup gesture
+    setStatus('Opening resume generator…');
+    nativeClick(genBtn);
+
+    // Now poll in background for resume attachment. When it lands (or the
+    // user returns to this tab with a new file), fire Autofill automatically.
     const start = Date.now();
-    try {
-      setStatus('Opening resume generator…');
-      const genBtn = findButtonByText(/generate.*(custom|new|tailor).*resume|customize.*your.*resume|generate.*resume/i);
-      if (!genBtn) {
-        setStatus('Generator not found — running Autofill');
-        await actionAutofill();
-        return;
-      }
-      realClick(genBtn);
+    const maxMs = 10 * 60 * 1000; // 10 minutes — user may take time
+    let autofired = false;
 
-      // Record current attached file (if any) so we can detect a replacement
-      const priorName = findAttachedResumeName();
-      const priorCount = resumeFileCount();
-      LOG('prior resume:', priorName, 'count:', priorCount);
-
-      // Optional: confirm the generator dialog on jobright.ai
-      const confirmBtn = await waitFor(() => findButtonByText(/^\s*generate.*my.*new.*resume\s*$|start.*generating|generate.*now/i), 1500);
-      if (confirmBtn) realClick(confirmBtn);
-
-      // Race: either a "Continue to Autofill" button shows up on THIS page,
-      // or the file input on this page gets a new file (meaning the Jobright
-      // panel completed the flow in its own tab/iframe and attached the file).
-      setStatus('Generating… (cancel any time)');
-      const deadline = Date.now() + 30000;
-      let continueClicked = false;
-      let attached = false;
-      while (Date.now() < deadline) {
-        if (__uaCancel) { setStatus('Cancelled — running Autofill'); await actionAutofill(); return; }
-        // Signal A: file input now has a (new) resume attached
+    async function watcher() {
+      while (Date.now() - start < maxMs) {
+        if (__uaCancel) { setStatus(''); return; }
         const cur = resumeFileCount();
         const curName = findAttachedResumeName();
-        if ((cur > 0 && cur !== priorCount) || (curName && curName !== priorName)) {
-          attached = true;
-          LOG('Detected new attached resume:', curName);
-          break;
+        if ((cur > 0 && cur !== priorCount) || (curName && curName && curName !== priorName)) {
+          if (!autofired) {
+            autofired = true;
+            setStatus('Resume attached — autofilling…');
+            await actionAutofill();
+            setTimeout(() => setStatus(''), 1800);
+          }
+          return;
         }
-        // Signal B: a Continue-to-Autofill button is visible here — click it
-        const cont = findButtonByText(/continue.*(to\s*)?autofill|autofill.*with.*this|use.*this.*resume/i);
-        if (cont && !continueClicked) { realClick(cont); continueClicked = true; setStatus('Attaching resume…'); }
-        // Signal C: a "Yes" confirmation for autofill-again
-        const yes = findButtonByText(/^\s*yes\s*$/i);
-        if (yes && /autofill.*again|overwrite|replace/i.test((yes.closest('body')?.textContent || '').slice(0, 800))) {
-          realClick(yes);
-        }
-        // Elapsed feedback
-        const sec = Math.floor((Date.now() - start) / 1000);
-        statusEl && (statusEl.textContent = (continueClicked ? 'Attaching resume…' : 'Generating…') + ' ' + sec + 's');
-        await new Promise(r => setTimeout(r, 250));
+        const mins = Math.floor((Date.now() - start) / 60000);
+        const secs = Math.floor(((Date.now() - start) % 60000) / 1000);
+        if (statusEl) statusEl.textContent = 'Waiting for tailored resume… ' + (mins ? mins + 'm' : '') + secs + 's';
+        await new Promise(r => setTimeout(r, 800));
       }
-
-      if (!attached && !continueClicked) {
-        setStatus('No resume attached yet — running Autofill');
-      } else {
-        setStatus('Autofilling…');
-      }
-      await actionAutofill();
-      setTimeout(() => setStatus(''), 1500);
-    } catch (e) {
-      setStatus('Error: ' + (e.message || e));
-      setTimeout(() => setStatus(''), 2500);
+      setStatus('');
     }
+    watcher().catch(e => LOG('watcher err', e));
   }
 
-  // Locate the native Jobright sidebar "Autofill" button across shadow roots.
+  // Locate the native Jobright sidebar "Autofill" button ONLY inside a Plasmo
+  // shadow root — NOT any "APPLY WITH AUTOFILL" buttons on jobright.ai job
+  // listings (those are different UI elements on the main website).
+  function isInsidePlasmoSidebar(el) {
+    let n = el;
+    while (n) {
+      // Walk up through shadow roots too
+      if (n.nodeType === 1) {
+        const tag = (n.tagName || '').toLowerCase();
+        const id = (n.id || '').toLowerCase();
+        const cls = typeof n.className === 'string' ? n.className.toLowerCase() : '';
+        if (tag.includes('plasmo') || id.includes('plasmo') || cls.includes('plasmo')) return true;
+      }
+      if (n.parentNode) { n = n.parentNode; continue; }
+      const root = n.getRootNode && n.getRootNode();
+      if (root && root.host) { n = root.host; continue; }
+      break;
+    }
+    return false;
+  }
+
   function findNativeAutofillBtn() {
-    const candidates = deepQueryAll('button, [role="button"], a, div[class*="btn"]');
+    const candidates = deepQueryAll('button, [role="button"]');
     for (const b of candidates) {
       if (!b.offsetParent && !b.getClientRects().length) continue;
       const txt = (b.textContent || '').trim();
-      if (/^autofill$/i.test(txt) || /apply.*with.*autofill/i.test(txt)) return b;
+      // Only the sidebar's exact "Autofill" label — reject "APPLY WITH AUTOFILL"
+      // and other jobright.ai native controls.
+      if (!/^autofill$/i.test(txt)) continue;
+      if (!isInsidePlasmoSidebar(b)) continue;
+      return b;
     }
     return null;
   }
@@ -6196,66 +6220,71 @@ Result: Shipped my first production change in week three and my notes doc became
     const native = findNativeAutofillBtn();
     if (!native) return false;
 
-    // If we already injected inside the same container, keep it.
     const parent = native.parentElement;
     if (!parent) return false;
-    if (parent.querySelector('#' + INJECT_ID)) return true;
+    const root = native.getRootNode && native.getRootNode();
+    // If we already injected a sibling here, keep it.
+    if (root && root.querySelector && root.querySelector('#' + INJECT_ID)) return true;
+    if (parent.querySelector && parent.querySelector('#' + INJECT_ID)) return true;
 
-    // Clone the native button's class list + computed styles so the new
-    // button matches exactly (gradient, radius, padding, typography).
-    const clone = native.cloneNode(false); // copy tag + attrs, not children
+    // Clone the native button (tag + attrs only, not children) so it inherits
+    // the same class-based styling from the sidebar's scoped CSS.
+    const clone = native.cloneNode(false);
     clone.id = INJECT_ID;
     clone.removeAttribute('data-testid');
     clone.removeAttribute('aria-label');
     clone.removeAttribute('name');
-    // Re-copy class list to be safe
     clone.className = native.className;
-    // Match size
+
+    const rect = native.getBoundingClientRect();
     const cs = getComputedStyle(native);
+    // Slightly smaller font than the native button so "Generate Custom Resume
+    // + Autofill" fits on one line at a professional size.
+    const nativeFont = parseFloat(cs.fontSize) || 14;
+    const targetFont = Math.max(11, Math.min(13, nativeFont - 2));
     try {
       clone.style.display = cs.display || 'flex';
-      clone.style.width = native.getBoundingClientRect().width + 'px';
-      clone.style.marginTop = '10px';
+      clone.style.width = rect.width ? rect.width + 'px' : '';
+      clone.style.marginTop = '8px';
       clone.style.cursor = 'pointer';
-      // Preserve gradient/bg
-      clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none'
-        ? cs.backgroundImage : cs.backgroundColor;
+      clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none' ? cs.backgroundImage : cs.backgroundColor;
       clone.style.color = cs.color;
       clone.style.borderRadius = cs.borderRadius;
-      clone.style.fontSize = cs.fontSize;
+      clone.style.fontSize = targetFont + 'px';
+      clone.style.lineHeight = '1.2';
       clone.style.fontWeight = cs.fontWeight;
       clone.style.fontFamily = cs.fontFamily;
-      clone.style.padding = cs.padding;
-      clone.style.textAlign = cs.textAlign || 'center';
+      clone.style.padding = '8px 10px';
+      clone.style.textAlign = 'center';
       clone.style.border = cs.border;
       clone.style.boxShadow = cs.boxShadow;
+      clone.style.whiteSpace = 'nowrap';
+      clone.style.letterSpacing = '0.1px';
     } catch (_) {}
 
-    // Set content — center-aligned like the native Autofill
     clone.textContent = 'Generate Custom Resume + Autofill';
 
-    // Small status line below (persists in the sidebar shadow)
     const statusEl = document.createElement('div');
     statusEl.id = INJECT_ID + '-status';
     try {
-      statusEl.style.cssText = 'margin-top:6px;font-size:12px;color:' + cs.color + ';opacity:.8;text-align:center;min-height:14px;font-family:' + cs.fontFamily + ';';
+      statusEl.style.cssText = 'margin-top:4px;font-size:10.5px;color:' + cs.color + ';opacity:.75;text-align:center;min-height:12px;font-family:' + cs.fontFamily + ';line-height:1.2;';
     } catch (_) {
-      statusEl.style.cssText = 'margin-top:6px;font-size:12px;color:#fff;opacity:.8;text-align:center;min-height:14px;';
+      statusEl.style.cssText = 'margin-top:4px;font-size:10.5px;color:#fff;opacity:.75;text-align:center;min-height:12px;line-height:1.2;';
     }
 
-    // Stop intrinsic onClick handlers: we only want our chained flow to fire.
+    // IMPORTANT: Click handler must run the native click SYNCHRONOUSLY to
+    // preserve the user-gesture chain (needed for window.open / new tab).
     const handler = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation?.();
-      actionGenerateAndAutofill(statusEl).catch(e => LOG('generate err', e));
+      try { actionGenerateAndAutofill(statusEl, ev); }
+      catch (e) { LOG('generate err', e); }
     };
     clone.addEventListener('click', handler, true);
-    // Add hover feedback to mimic original
     clone.addEventListener('mouseenter', () => { clone.style.filter = 'brightness(1.05)'; });
     clone.addEventListener('mouseleave', () => { clone.style.filter = ''; });
 
-    // Insert right after the native Autofill button
     if (native.nextSibling) {
       parent.insertBefore(clone, native.nextSibling);
       parent.insertBefore(statusEl, clone.nextSibling);
@@ -6263,29 +6292,40 @@ Result: Shipped my first production change in week three and my notes doc became
       parent.appendChild(clone);
       parent.appendChild(statusEl);
     }
-    LOG('Injected Generate+Autofill button under native Autofill');
+    LOG('Injected Generate+Autofill button under sidebar Autofill');
     return true;
+  }
+
+  function removeStrayInjections() {
+    // Clean up any leftover from previous versions of this injection in places
+    // we now refuse to inject (i.e., outside the Plasmo sidebar).
+    const strays = deepQueryAll('#' + INJECT_ID);
+    for (const s of strays) {
+      if (!isInsidePlasmoSidebar(s)) {
+        const next = s.nextElementSibling;
+        if (next && next.id === INJECT_ID + '-status') next.remove();
+        s.remove();
+      }
+    }
   }
 
   function tryInject() {
     try {
-      if (injectUnderNative()) return true;
+      removeStrayInjections();
+      injectUnderNative();
     } catch (e) { LOG('inject err:', e.message); }
-    return false;
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryInject);
   else tryInject();
 
-  // Re-inject on SPA route changes and when the sidebar mounts later
   let lastUrl = location.href;
   const mo = new MutationObserver(() => {
-    // Check periodically — the Plasmo sidebar mounts asynchronously
-    if (!deepQueryAll('#' + INJECT_ID).length) tryInject();
+    if (!deepQueryAll('#' + INJECT_ID).filter(e => isInsidePlasmoSidebar(e)).length) tryInject();
   });
   try { mo.observe(document.body || document.documentElement, { childList: true, subtree: true }); } catch (_) {}
   setInterval(() => {
     if (location.href !== lastUrl) { lastUrl = location.href; setTimeout(tryInject, 1200); }
-    if (!deepQueryAll('#' + INJECT_ID).length) tryInject();
+    if (!deepQueryAll('#' + INJECT_ID).filter(e => isInsidePlasmoSidebar(e)).length) tryInject();
   }, 2500);
 })();
