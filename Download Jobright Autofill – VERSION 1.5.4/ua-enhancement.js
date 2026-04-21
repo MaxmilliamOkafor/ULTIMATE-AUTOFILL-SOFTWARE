@@ -4951,19 +4951,26 @@
     return false;
   }
 
-  // Monitor for the popup appearing
-  var popupObserver = new MutationObserver(function () {
-    findAndDismissPopup(document);
-  });
-  if (document.body) {
-    popupObserver.observe(document.body, { childList: true, subtree: true });
-  } else {
-    document.addEventListener('DOMContentLoaded', function () {
-      popupObserver.observe(document.body, { childList: true, subtree: true });
-    });
+  // Monitor for the popup appearing — ONLY on job-related pages so we don't
+  // hammer every site with a 1s full-tree scan.
+  function eligible() {
+    try { return typeof window.__uaIsEligiblePage === 'function' ? window.__uaIsEligiblePage() : true; }
+    catch (_) { return false; }
   }
-  // Also run periodically as shadow DOM mutations may not trigger MutationObserver
-  setInterval(function () { findAndDismissPopup(document); }, 1000);
+  function startWatch() {
+    if (!eligible()) return;
+    var popupObserver = new MutationObserver(function () { findAndDismissPopup(document); });
+    try { popupObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
+    // Periodic sweep throttled to 2.5s (was 1s on every site) and auto-stops
+    // after 2 minutes if nothing happened, to avoid forever-polling on idle tabs.
+    var ticks = 0;
+    var iv = setInterval(function () {
+      if (++ticks > 48) { clearInterval(iv); try { popupObserver.disconnect(); } catch (_) {} return; }
+      findAndDismissPopup(document);
+    }, 2500);
+  }
+  if (document.body) startWatch();
+  else document.addEventListener('DOMContentLoaded', startWatch, { once: true });
 })();
 
 // === SMARTRECRUITERS MULTI-PAGE AUTOFILL SUPPORT ===
@@ -4982,6 +4989,46 @@
     }
   });
   urlObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+})();
+
+// ============================================================================
+// === v1.5.4 MASTER PAGE-ELIGIBILITY GATE ===
+// Single source of truth for "should our heavy v1.5.4 modules run on this
+// page?". Prevents timers, observers, and DOM scanners from attaching on
+// random browsing pages (YouTube, Twitter, docs, Gmail, etc.) — which was
+// the primary source of glitches on non-job sites.
+// ============================================================================
+(function () {
+  'use strict';
+  const ATS_HOSTS = /(^|\.)(jobright\.ai|greenhouse\.io|lever\.co|myworkdayjobs\.com|workday\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|taleo\.net|bamboohr\.com|successfactors\.com|avature\.net|recruitee\.com|workable\.com|personio\.com|rippling\.com|jobvite\.com|jazzhr\.com|applytojob\.com|brassring\.com|ukg\.com|oraclecloud\.com|paylocity\.com|gusto\.com|breezy\.hr|breezyhr\.com|teamtailor\.com|manatal\.com|pinpointhq\.com|eightfold\.ai|phenom\.com|phenompeople\.com|paradox\.ai|hirevue\.com|modernhire\.com|mya\.com|beamery\.com|joinhandshake\.com|governmentjobs\.com|usajobs\.gov|adp\.com|workforcenow\.adp\.com|indeed\.com|dover\.com|pinpoint\.dev|polymer\.co|jobscore\.com|recruiterflow\.com|zoho\.com|zohorecruit\.com)$/i;
+  const CAREER_PATH = /(^|\/)(apply|application|applications|careers|career|jobs?|job-application|submit-application|opportunities|positions?|vacancies|openings|employment|hiring|recruit|recruiting|candidate|applicant)(\/|\?|-|_|$)/i;
+  let cached = null;
+  window.__uaIsEligiblePage = function () {
+    if (cached !== null) return cached;
+    try {
+      const h = (location.hostname || '').toLowerCase();
+      if (ATS_HOSTS.test(h)) { cached = true; return true; }
+      if (CAREER_PATH.test(location.pathname || '')) { cached = true; return true; }
+      // Strong signal: a file input labelled resume/cv present on the page
+      try {
+        const fi = document.querySelector('input[type=file][accept*="pdf" i], input[type=file][accept*="doc" i], input[type=file][name*="resume" i], input[type=file][name*="cv" i], input[type=file][id*="resume" i], input[type=file][id*="cv" i]');
+        if (fi) { cached = true; return true; }
+      } catch (_) {}
+      cached = false;
+      return false;
+    } catch (_) { cached = false; return false; }
+  };
+  // Recompute once the DOM has been parsed (document_start content scripts run
+  // before <body>, so the file-input probe above may miss on the first call).
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { cached = null; }, { once: true });
+  }
+  // SPA navigation: clear the cache when the URL changes so a navigation into
+  // an application page inside a single-page app re-enables the gate.
+  let __uaLastHref = location.href;
+  setInterval(function () {
+    if (location.href !== __uaLastHref) { __uaLastHref = location.href; cached = null; }
+  }, 2000);
 })();
 
 // ============================================================================
@@ -5354,7 +5401,7 @@ Result: Shipped my first production change in week three and my notes doc became
 
   // Expose for other modules + run on a gentle schedule (only when page is active)
   window.__uaStarAnswer = scanAndAnswer;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(scanAndAnswer, 2500);
     setTimeout(scanAndAnswer, 6000);
     setTimeout(scanAndAnswer, 12000);
@@ -5524,7 +5571,7 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   window.__uaAutoCoverLetter = autoFillCoverLetter;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(autoFillCoverLetter, 4000);
     setTimeout(autoFillCoverLetter, 10000);
   }
@@ -5598,7 +5645,13 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   if (window.self === window.top) {
-    setInterval(scanChatUI, 3000);
+    // Throttled to 4s and capped at ~15 min so it doesn't poll forever on
+    // idle tabs and drain CPU.
+    let chatTicks = 0;
+    const chatIv = setInterval(() => {
+      if (++chatTicks > 225) { clearInterval(chatIv); return; }
+      try { scanChatUI(); } catch (_) {}
+    }, 4000);
     LOG('Chat-ATS handler active for', location.hostname);
   }
 })();
@@ -5950,6 +6003,7 @@ Result: Shipped my first production change in week three and my notes doc became
   // Expose for on-demand invocation & other modules
   window.__uaAutoTailorResume = runAutoTailor;
   window.__uaGetTailoredCache = () => storageGet(CACHE_KEY).then(d => d[CACHE_KEY] || {});
+  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
 
   if (window.self === window.top) {
     // Staged runs: allow the DOM to populate before we extract the JD
@@ -6001,8 +6055,342 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   window.__uaAutoPilot = runPipeline;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(runPipeline, 5500);
     setTimeout(runPipeline, 15000);
   }
+})();
+
+// ============================================================================
+// === v1.5.4 FLOATING DUAL-ACTION BUTTONS ===
+// Adds two clearly-labeled floating buttons on every application page:
+//   [ Autofill ]                           -> triggers Jobright Autofill flow
+//   [ Generate Custom Resume + Autofill ]  -> clicks "Generate Custom Resume",
+//     waits for it to complete, clicks "Continue to Autofill", waits for the
+//     tailored resume to attach to the form's file input, then triggers
+//     autofill so no manual step is required.
+// ============================================================================
+(function () {
+  'use strict';
+  if (window.self !== window.top) return;
+  if (window.__uaDualButtonsMounted) return;
+  // Master gate: never attach observers/timers on non-job pages.
+  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
+  window.__uaDualButtonsMounted = true;
+  const LOG = (...a) => console.log('[UA-Buttons]', ...a);
+
+  const HOST_ID = 'ua-dual-action-buttons';
+  function isApplicationPage() {
+    return typeof window.__uaIsEligiblePage === 'function' ? window.__uaIsEligiblePage() : true;
+  }
+
+  function realClick(el) {
+    if (!el) return;
+    try {
+      el.scrollIntoView({ block: 'center' });
+      ['mouseover', 'mousedown', 'mouseup'].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true })));
+      el.click();
+    } catch (_) {}
+  }
+  // Pass-through click that preserves the native handler's behaviour exactly
+  // (React/Next onClick, target="_blank" popup gesture, window.open, etc.).
+  // Must be called synchronously from within a user-gesture stack.
+  function nativeClick(el) {
+    if (!el) return;
+    try { el.scrollIntoView({ block: 'center' }); } catch (_) {}
+    try { el.click(); } catch (_) {}
+  }
+
+  function deepQueryAll(selector) {
+    const results = [];
+    function visit(root) {
+      try { root.querySelectorAll(selector).forEach(e => results.push(e)); } catch (_) {}
+      try { root.querySelectorAll('*').forEach(el => { if (el.shadowRoot) visit(el.shadowRoot); }); } catch (_) {}
+    }
+    visit(document);
+    return results;
+  }
+
+  function findButtonByText(re) {
+    const candidates = deepQueryAll('button, a, [role="button"], div[class*="btn"], span[class*="btn"]');
+    return candidates.find(b => {
+      if (!b.offsetParent && !b.getClientRects().length) return false;
+      const t = (b.textContent || b.getAttribute('aria-label') || '').trim();
+      return t && re.test(t);
+    });
+  }
+
+  // Look for a resume-file-input that became populated (strongest signal that tailored resume attached)
+  function findResumeFileInput() {
+    const inputs = deepQueryAll('input[type=file]');
+    return inputs.find(i => (i.name + ' ' + i.id + ' ' + (i.accept || '') + ' ' + (i.closest('[class*="resume"], [class*="Resume"], [class*="cv"], [class*="CV"], [class*="upload"], [class*="Upload"]')?.textContent || '')).toLowerCase().match(/resume|cv|upload/));
+  }
+  function resumeFileCount() {
+    const f = findResumeFileInput();
+    return f && f.files ? f.files.length : 0;
+  }
+  function findAttachedResumeName() {
+    const inputs = deepQueryAll('input[type=file]');
+    for (const i of inputs) { if (i.files && i.files[0]) return i.files[0].name; }
+    // Filename label near an upload control
+    const labels = deepQueryAll('[class*="resume"], [class*="Resume"], [class*="upload"], [class*="Upload"]');
+    for (const l of labels) {
+      const m = (l.textContent || '').match(/[\w\-]+\.(pdf|doc|docx|txt)/i);
+      if (m) return m[0];
+    }
+    return '';
+  }
+
+  async function waitFor(fn, timeoutMs) {
+    const deadline = Date.now() + (timeoutMs || 15000);
+    while (Date.now() < deadline) {
+      try { const r = fn(); if (r) return r; } catch (_) {}
+      await new Promise(r => setTimeout(r, 120));
+    }
+    return null;
+  }
+
+  // Cancellation token so user can abort a long flow
+  let __uaCancel = false;
+  function resetCancel() { __uaCancel = false; }
+  function cancelNow() { __uaCancel = true; }
+
+  // --- Action 1: Autofill only ---
+  async function actionAutofill() {
+    LOG('Autofill clicked');
+    // Match all known autofill button copy: "Autofill", "APPLY WITH AUTOFILL", "Autofill from resume"
+    const jrBtn = findButtonByText(/^\s*autofill\s*$/i)
+      || findButtonByText(/apply.*with.*autofill/i)
+      || findButtonByText(/^autofill\s+with\b/i)
+      || findButtonByText(/^autofill.*resume/i);
+    if (jrBtn) { realClick(jrBtn); LOG('Clicked Jobright Autofill'); return; }
+    // Dispatch force-autofill event as fallback
+    try { window.dispatchEvent(new CustomEvent('ua-force-autofill')); } catch (_) {}
+  }
+
+  // --- Action 2: Trigger native "Generate Custom Resume" (preserving original
+  // new-tab flow), then watch for attachment + tab-focus to auto-autofill. ---
+  // We do NOT replace or wrap the native handler — we click it synchronously
+  // inside the user-gesture so its window.open() / popup / navigation behaves
+  // exactly as if the user clicked it themselves.
+  function actionGenerateAndAutofill(statusEl, ev) {
+    const setStatus = (t) => { if (statusEl) statusEl.textContent = t; LOG(t); };
+    resetCancel();
+
+    // Record pre-click state so we can detect a newly attached file later
+    const priorName = findAttachedResumeName();
+    const priorCount = resumeFileCount();
+
+    // Find native generator button — ONLY in the Plasmo sidebar
+    const allGen = deepQueryAll('button, a, [role="button"], div[class*="btn"], span[class*="btn"]');
+    let genBtn = null;
+    for (const b of allGen) {
+      if (!b.offsetParent && !b.getClientRects().length) continue;
+      const t = (b.textContent || b.getAttribute('aria-label') || '').trim();
+      if (!/generate.*(custom|new|tailor).*resume|customize.*your.*resume|generate.*resume/i.test(t)) continue;
+      if (!isInsidePlasmoSidebar(b)) continue;
+      genBtn = b; break;
+    }
+    if (!genBtn) {
+      setStatus('Generator not found — running Autofill');
+      actionAutofill();
+      setTimeout(() => setStatus(''), 2000);
+      return;
+    }
+    // Synchronous native click — preserves new-tab / popup gesture
+    setStatus('Opening resume generator…');
+    nativeClick(genBtn);
+
+    // Now poll in background for resume attachment. When it lands (or the
+    // user returns to this tab with a new file), fire Autofill automatically.
+    const start = Date.now();
+    const maxMs = 10 * 60 * 1000; // 10 minutes — user may take time
+    let autofired = false;
+
+    async function watcher() {
+      while (Date.now() - start < maxMs) {
+        if (__uaCancel) { setStatus(''); return; }
+        const cur = resumeFileCount();
+        const curName = findAttachedResumeName();
+        if ((cur > 0 && cur !== priorCount) || (curName && curName && curName !== priorName)) {
+          if (!autofired) {
+            autofired = true;
+            setStatus('Resume attached — autofilling…');
+            await actionAutofill();
+            setTimeout(() => setStatus(''), 1800);
+          }
+          return;
+        }
+        await new Promise(r => setTimeout(r, 800));
+      }
+      setStatus('');
+    }
+    watcher().catch(e => LOG('watcher err', e));
+  }
+
+  // Locate the native Jobright sidebar "Autofill" button ONLY inside a Plasmo
+  // shadow root — NOT any "APPLY WITH AUTOFILL" buttons on jobright.ai job
+  // listings (those are different UI elements on the main website).
+  function isInsidePlasmoSidebar(el) {
+    let n = el;
+    while (n) {
+      // Walk up through shadow roots too
+      if (n.nodeType === 1) {
+        const tag = (n.tagName || '').toLowerCase();
+        const id = (n.id || '').toLowerCase();
+        const cls = typeof n.className === 'string' ? n.className.toLowerCase() : '';
+        if (tag.includes('plasmo') || id.includes('plasmo') || cls.includes('plasmo')) return true;
+      }
+      if (n.parentNode) { n = n.parentNode; continue; }
+      const root = n.getRootNode && n.getRootNode();
+      if (root && root.host) { n = root.host; continue; }
+      break;
+    }
+    return false;
+  }
+
+  function findNativeAutofillBtn() {
+    const candidates = deepQueryAll('button, [role="button"]');
+    for (const b of candidates) {
+      if (!b.offsetParent && !b.getClientRects().length) continue;
+      const txt = (b.textContent || '').trim();
+      // Only the sidebar's exact "Autofill" label — reject "APPLY WITH AUTOFILL"
+      // and other jobright.ai native controls.
+      if (!/^autofill$/i.test(txt)) continue;
+      if (!isInsidePlasmoSidebar(b)) continue;
+      return b;
+    }
+    return null;
+  }
+
+  const INJECT_ID = 'ua-gen-autofill-btn';
+
+  function injectUnderNative() {
+    const native = findNativeAutofillBtn();
+    if (!native) return false;
+
+    const parent = native.parentElement;
+    if (!parent) return false;
+    const root = native.getRootNode && native.getRootNode();
+    // If we already injected a sibling here, keep it.
+    if (root && root.querySelector && root.querySelector('#' + INJECT_ID)) return true;
+    if (parent.querySelector && parent.querySelector('#' + INJECT_ID)) return true;
+
+    // Clone the native button (tag + attrs only, not children) so it inherits
+    // the same class-based styling from the sidebar's scoped CSS.
+    const clone = native.cloneNode(false);
+    clone.id = INJECT_ID;
+    clone.removeAttribute('data-testid');
+    clone.removeAttribute('aria-label');
+    clone.removeAttribute('name');
+    clone.className = native.className;
+
+    const rect = native.getBoundingClientRect();
+    const cs = getComputedStyle(native);
+    // Slightly smaller font than the native button so "Generate Custom Resume
+    // + Autofill" fits on one line at a professional size.
+    const nativeFont = parseFloat(cs.fontSize) || 14;
+    const targetFont = Math.max(11, Math.min(13, nativeFont - 2));
+    try {
+      clone.style.display = cs.display || 'flex';
+      clone.style.width = rect.width ? rect.width + 'px' : '';
+      clone.style.marginTop = '8px';
+      clone.style.cursor = 'pointer';
+      clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none' ? cs.backgroundImage : cs.backgroundColor;
+      clone.style.color = cs.color;
+      clone.style.borderRadius = cs.borderRadius;
+      clone.style.fontSize = targetFont + 'px';
+      clone.style.lineHeight = '1.2';
+      clone.style.fontWeight = cs.fontWeight;
+      clone.style.fontFamily = cs.fontFamily;
+      clone.style.padding = '8px 10px';
+      clone.style.textAlign = 'center';
+      clone.style.border = cs.border;
+      clone.style.boxShadow = cs.boxShadow;
+      clone.style.whiteSpace = 'nowrap';
+      clone.style.letterSpacing = '0.1px';
+    } catch (_) {}
+
+    clone.textContent = 'Generate Custom Resume + Autofill';
+
+    const statusEl = document.createElement('div');
+    statusEl.id = INJECT_ID + '-status';
+    try {
+      statusEl.style.cssText = 'margin-top:4px;font-size:10.5px;color:' + cs.color + ';opacity:.75;text-align:center;min-height:12px;font-family:' + cs.fontFamily + ';line-height:1.2;';
+    } catch (_) {
+      statusEl.style.cssText = 'margin-top:4px;font-size:10.5px;color:#fff;opacity:.75;text-align:center;min-height:12px;line-height:1.2;';
+    }
+
+    // IMPORTANT: Click handler must run the native click SYNCHRONOUSLY to
+    // preserve the user-gesture chain (needed for window.open / new tab).
+    const handler = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation?.();
+      try { actionGenerateAndAutofill(statusEl, ev); }
+      catch (e) { LOG('generate err', e); }
+    };
+    clone.addEventListener('click', handler, true);
+    clone.addEventListener('mouseenter', () => { clone.style.filter = 'brightness(1.05)'; });
+    clone.addEventListener('mouseleave', () => { clone.style.filter = ''; });
+
+    if (native.nextSibling) {
+      parent.insertBefore(clone, native.nextSibling);
+      parent.insertBefore(statusEl, clone.nextSibling);
+    } else {
+      parent.appendChild(clone);
+      parent.appendChild(statusEl);
+    }
+    LOG('Injected Generate+Autofill button under sidebar Autofill');
+    return true;
+  }
+
+  function removeStrayInjections() {
+    // Clean up any leftover from previous versions of this injection in places
+    // we now refuse to inject (i.e., outside the Plasmo sidebar).
+    const strays = deepQueryAll('#' + INJECT_ID);
+    for (const s of strays) {
+      if (!isInsidePlasmoSidebar(s)) {
+        const next = s.nextElementSibling;
+        if (next && next.id === INJECT_ID + '-status') next.remove();
+        s.remove();
+      }
+    }
+  }
+
+  function tryInject() {
+    try {
+      removeStrayInjections();
+      injectUnderNative();
+    } catch (e) { LOG('inject err:', e.message); }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryInject);
+  else tryInject();
+
+  let lastUrl = location.href;
+  // Debounced + lightweight mutation handler — avoids deep shadow-root walks
+  // on every SPA mutation, which was measurably slowing down busy pages.
+  let moTimer = null;
+  const moHandler = () => {
+    if (moTimer) return;
+    moTimer = setTimeout(() => {
+      moTimer = null;
+      try {
+        const found = deepQueryAll('#' + INJECT_ID).some(e => isInsidePlasmoSidebar(e));
+        if (!found) tryInject();
+      } catch (_) {}
+    }, 400);
+  };
+  const mo = new MutationObserver(moHandler);
+  try { mo.observe(document.body || document.documentElement, { childList: true, subtree: true }); } catch (_) {}
+  // URL-change poll (SPAs) + safety re-inject — throttled to 4s, auto-stops
+  // after 5 minutes so it doesn't run forever on a backgrounded tab.
+  let safetyTicks = 0;
+  const safetyIv = setInterval(() => {
+    if (++safetyTicks > 75) { clearInterval(safetyIv); return; }
+    if (location.href !== lastUrl) { lastUrl = location.href; safetyTicks = 0; setTimeout(tryInject, 1200); return; }
+    const found = deepQueryAll('#' + INJECT_ID).some(e => isInsidePlasmoSidebar(e));
+    if (!found) tryInject();
+  }, 4000);
 })();
