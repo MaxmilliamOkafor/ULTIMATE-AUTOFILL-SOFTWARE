@@ -4951,19 +4951,26 @@
     return false;
   }
 
-  // Monitor for the popup appearing
-  var popupObserver = new MutationObserver(function () {
-    findAndDismissPopup(document);
-  });
-  if (document.body) {
-    popupObserver.observe(document.body, { childList: true, subtree: true });
-  } else {
-    document.addEventListener('DOMContentLoaded', function () {
-      popupObserver.observe(document.body, { childList: true, subtree: true });
-    });
+  // Monitor for the popup appearing — ONLY on job-related pages so we don't
+  // hammer every site with a 1s full-tree scan.
+  function eligible() {
+    try { return typeof window.__uaIsEligiblePage === 'function' ? window.__uaIsEligiblePage() : true; }
+    catch (_) { return false; }
   }
-  // Also run periodically as shadow DOM mutations may not trigger MutationObserver
-  setInterval(function () { findAndDismissPopup(document); }, 1000);
+  function startWatch() {
+    if (!eligible()) return;
+    var popupObserver = new MutationObserver(function () { findAndDismissPopup(document); });
+    try { popupObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
+    // Periodic sweep throttled to 2.5s (was 1s on every site) and auto-stops
+    // after 2 minutes if nothing happened, to avoid forever-polling on idle tabs.
+    var ticks = 0;
+    var iv = setInterval(function () {
+      if (++ticks > 48) { clearInterval(iv); try { popupObserver.disconnect(); } catch (_) {} return; }
+      findAndDismissPopup(document);
+    }, 2500);
+  }
+  if (document.body) startWatch();
+  else document.addEventListener('DOMContentLoaded', startWatch, { once: true });
 })();
 
 // === SMARTRECRUITERS MULTI-PAGE AUTOFILL SUPPORT ===
@@ -4982,6 +4989,46 @@
     }
   });
   urlObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+})();
+
+// ============================================================================
+// === v1.5.4 MASTER PAGE-ELIGIBILITY GATE ===
+// Single source of truth for "should our heavy v1.5.4 modules run on this
+// page?". Prevents timers, observers, and DOM scanners from attaching on
+// random browsing pages (YouTube, Twitter, docs, Gmail, etc.) — which was
+// the primary source of glitches on non-job sites.
+// ============================================================================
+(function () {
+  'use strict';
+  const ATS_HOSTS = /(^|\.)(jobright\.ai|greenhouse\.io|lever\.co|myworkdayjobs\.com|workday\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|taleo\.net|bamboohr\.com|successfactors\.com|avature\.net|recruitee\.com|workable\.com|personio\.com|rippling\.com|jobvite\.com|jazzhr\.com|applytojob\.com|brassring\.com|ukg\.com|oraclecloud\.com|paylocity\.com|gusto\.com|breezy\.hr|breezyhr\.com|teamtailor\.com|manatal\.com|pinpointhq\.com|eightfold\.ai|phenom\.com|phenompeople\.com|paradox\.ai|hirevue\.com|modernhire\.com|mya\.com|beamery\.com|joinhandshake\.com|governmentjobs\.com|usajobs\.gov|adp\.com|workforcenow\.adp\.com|indeed\.com|dover\.com|pinpoint\.dev|polymer\.co|jobscore\.com|recruiterflow\.com|zoho\.com|zohorecruit\.com)$/i;
+  const CAREER_PATH = /(^|\/)(apply|application|applications|careers|career|jobs?|job-application|submit-application|opportunities|positions?|vacancies|openings|employment|hiring|recruit|recruiting|candidate|applicant)(\/|\?|-|_|$)/i;
+  let cached = null;
+  window.__uaIsEligiblePage = function () {
+    if (cached !== null) return cached;
+    try {
+      const h = (location.hostname || '').toLowerCase();
+      if (ATS_HOSTS.test(h)) { cached = true; return true; }
+      if (CAREER_PATH.test(location.pathname || '')) { cached = true; return true; }
+      // Strong signal: a file input labelled resume/cv present on the page
+      try {
+        const fi = document.querySelector('input[type=file][accept*="pdf" i], input[type=file][accept*="doc" i], input[type=file][name*="resume" i], input[type=file][name*="cv" i], input[type=file][id*="resume" i], input[type=file][id*="cv" i]');
+        if (fi) { cached = true; return true; }
+      } catch (_) {}
+      cached = false;
+      return false;
+    } catch (_) { cached = false; return false; }
+  };
+  // Recompute once the DOM has been parsed (document_start content scripts run
+  // before <body>, so the file-input probe above may miss on the first call).
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { cached = null; }, { once: true });
+  }
+  // SPA navigation: clear the cache when the URL changes so a navigation into
+  // an application page inside a single-page app re-enables the gate.
+  let __uaLastHref = location.href;
+  setInterval(function () {
+    if (location.href !== __uaLastHref) { __uaLastHref = location.href; cached = null; }
+  }, 2000);
 })();
 
 // ============================================================================
@@ -5354,7 +5401,7 @@ Result: Shipped my first production change in week three and my notes doc became
 
   // Expose for other modules + run on a gentle schedule (only when page is active)
   window.__uaStarAnswer = scanAndAnswer;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(scanAndAnswer, 2500);
     setTimeout(scanAndAnswer, 6000);
     setTimeout(scanAndAnswer, 12000);
@@ -5524,7 +5571,7 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   window.__uaAutoCoverLetter = autoFillCoverLetter;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(autoFillCoverLetter, 4000);
     setTimeout(autoFillCoverLetter, 10000);
   }
@@ -5598,7 +5645,13 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   if (window.self === window.top) {
-    setInterval(scanChatUI, 3000);
+    // Throttled to 4s and capped at ~15 min so it doesn't poll forever on
+    // idle tabs and drain CPU.
+    let chatTicks = 0;
+    const chatIv = setInterval(() => {
+      if (++chatTicks > 225) { clearInterval(chatIv); return; }
+      try { scanChatUI(); } catch (_) {}
+    }, 4000);
     LOG('Chat-ATS handler active for', location.hostname);
   }
 })();
@@ -5950,6 +6003,7 @@ Result: Shipped my first production change in week three and my notes doc became
   // Expose for on-demand invocation & other modules
   window.__uaAutoTailorResume = runAutoTailor;
   window.__uaGetTailoredCache = () => storageGet(CACHE_KEY).then(d => d[CACHE_KEY] || {});
+  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
 
   if (window.self === window.top) {
     // Staged runs: allow the DOM to populate before we extract the JD
@@ -6001,7 +6055,7 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   window.__uaAutoPilot = runPipeline;
-  if (window.self === window.top) {
+  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
     setTimeout(runPipeline, 5500);
     setTimeout(runPipeline, 15000);
   }
@@ -6020,16 +6074,14 @@ Result: Shipped my first production change in week three and my notes doc became
   'use strict';
   if (window.self !== window.top) return;
   if (window.__uaDualButtonsMounted) return;
+  // Master gate: never attach observers/timers on non-job pages.
+  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
   window.__uaDualButtonsMounted = true;
   const LOG = (...a) => console.log('[UA-Buttons]', ...a);
 
   const HOST_ID = 'ua-dual-action-buttons';
   function isApplicationPage() {
-    const url = location.href;
-    if (/jobright\.ai/i.test(location.hostname)) return true;
-    const text = document.body?.textContent || '';
-    return /apply|application|submit.*resume|upload.*resume|autofill/i.test(text) &&
-      (document.querySelector('input[type=file]') || document.querySelector('textarea, input[name*="resume" i], input[name*="email" i]'));
+    return typeof window.__uaIsEligiblePage === 'function' ? window.__uaIsEligiblePage() : true;
   }
 
   function realClick(el) {
@@ -6317,12 +6369,28 @@ Result: Shipped my first production change in week three and my notes doc became
   else tryInject();
 
   let lastUrl = location.href;
-  const mo = new MutationObserver(() => {
-    if (!deepQueryAll('#' + INJECT_ID).filter(e => isInsidePlasmoSidebar(e)).length) tryInject();
-  });
+  // Debounced + lightweight mutation handler — avoids deep shadow-root walks
+  // on every SPA mutation, which was measurably slowing down busy pages.
+  let moTimer = null;
+  const moHandler = () => {
+    if (moTimer) return;
+    moTimer = setTimeout(() => {
+      moTimer = null;
+      try {
+        const found = deepQueryAll('#' + INJECT_ID).some(e => isInsidePlasmoSidebar(e));
+        if (!found) tryInject();
+      } catch (_) {}
+    }, 400);
+  };
+  const mo = new MutationObserver(moHandler);
   try { mo.observe(document.body || document.documentElement, { childList: true, subtree: true }); } catch (_) {}
-  setInterval(() => {
-    if (location.href !== lastUrl) { lastUrl = location.href; setTimeout(tryInject, 1200); }
-    if (!deepQueryAll('#' + INJECT_ID).filter(e => isInsidePlasmoSidebar(e)).length) tryInject();
-  }, 2500);
+  // URL-change poll (SPAs) + safety re-inject — throttled to 4s, auto-stops
+  // after 5 minutes so it doesn't run forever on a backgrounded tab.
+  let safetyTicks = 0;
+  const safetyIv = setInterval(() => {
+    if (++safetyTicks > 75) { clearInterval(safetyIv); return; }
+    if (location.href !== lastUrl) { lastUrl = location.href; safetyTicks = 0; setTimeout(tryInject, 1200); return; }
+    const found = deepQueryAll('#' + INJECT_ID).some(e => isInsidePlasmoSidebar(e));
+    if (!found) tryInject();
+  }, 4000);
 })();
