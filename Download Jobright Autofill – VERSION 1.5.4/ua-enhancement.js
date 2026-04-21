@@ -5000,20 +5000,32 @@
 // ============================================================================
 (function () {
   'use strict';
-  const ATS_HOSTS = /(^|\.)(jobright\.ai|greenhouse\.io|lever\.co|myworkdayjobs\.com|workday\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|taleo\.net|bamboohr\.com|successfactors\.com|avature\.net|recruitee\.com|workable\.com|personio\.com|rippling\.com|jobvite\.com|jazzhr\.com|applytojob\.com|brassring\.com|ukg\.com|oraclecloud\.com|paylocity\.com|gusto\.com|breezy\.hr|breezyhr\.com|teamtailor\.com|manatal\.com|pinpointhq\.com|eightfold\.ai|phenom\.com|phenompeople\.com|paradox\.ai|hirevue\.com|modernhire\.com|mya\.com|beamery\.com|joinhandshake\.com|governmentjobs\.com|usajobs\.gov|adp\.com|workforcenow\.adp\.com|indeed\.com|dover\.com|pinpoint\.dev|polymer\.co|jobscore\.com|recruiterflow\.com|zoho\.com|zohorecruit\.com)$/i;
-  const CAREER_PATH = /(^|\/)(apply|application|applications|careers|career|jobs?|job-application|submit-application|opportunities|positions?|vacancies|openings|employment|hiring|recruit|recruiting|candidate|applicant)(\/|\?|-|_|$)/i;
+  // Hosts that ARE an ATS end-to-end — safe to activate anywhere on the site.
+  const ATS_HOSTS = /(^|\.)(jobright\.ai|greenhouse\.io|lever\.co|myworkdayjobs\.com|workday\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|taleo\.net|bamboohr\.com|successfactors\.com|avature\.net|recruitee\.com|workable\.com|personio\.com|rippling\.com|jobvite\.com|jazzhr\.com|applytojob\.com|brassring\.com|ukg\.com|oraclecloud\.com|paylocity\.com|gusto\.com|breezy\.hr|breezyhr\.com|teamtailor\.com|manatal\.com|pinpointhq\.com|eightfold\.ai|phenom\.com|phenompeople\.com|paradox\.ai|hirevue\.com|modernhire\.com|mya\.com|beamery\.com|joinhandshake\.com|governmentjobs\.com|usajobs\.gov|adp\.com|workforcenow\.adp\.com|dover\.com|pinpoint\.dev|polymer\.co|jobscore\.com|recruiterflow\.com|zohorecruit\.com)$/i;
+  // Generic path pattern — only relevant OUTSIDE of mixed-use hosts like
+  // LinkedIn / Indeed where /jobs/ is primarily browsing.
+  const CAREER_PATH = /(^|\/)(apply|application|applications|careers|career|job-application|submit-application|opportunities|vacancies|openings|employment|hiring|recruit|recruiting|candidate|applicant)(\/|\?|-|_|$)/i;
+  // Mixed-use hosts: only activate when the apply UI is actually open
+  // (file input present). Pure browsing paths stay inert.
+  const MIXED_USE_HOSTS = /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|monster\.com|ziprecruiter\.com|dice\.com|simplyhired\.com|wellfound\.com|angel\.co|builtin\.com|otta\.com|welcometothejungle\.com)$/i;
   let cached = null;
+  function hasResumeFileInput() {
+    try {
+      return !!document.querySelector('input[type=file][accept*="pdf" i], input[type=file][accept*="doc" i], input[type=file][name*="resume" i], input[type=file][name*="cv" i], input[type=file][id*="resume" i], input[type=file][id*="cv" i], input[type=file][aria-label*="resume" i], input[type=file][aria-label*="cv" i]');
+    } catch (_) { return false; }
+  }
   window.__uaIsEligiblePage = function () {
     if (cached !== null) return cached;
     try {
       const h = (location.hostname || '').toLowerCase();
+      if (MIXED_USE_HOSTS.test(h)) {
+        // LinkedIn/Indeed/etc. — only eligible inside an Easy-Apply-style modal
+        cached = hasResumeFileInput();
+        return cached;
+      }
       if (ATS_HOSTS.test(h)) { cached = true; return true; }
       if (CAREER_PATH.test(location.pathname || '')) { cached = true; return true; }
-      // Strong signal: a file input labelled resume/cv present on the page
-      try {
-        const fi = document.querySelector('input[type=file][accept*="pdf" i], input[type=file][accept*="doc" i], input[type=file][name*="resume" i], input[type=file][name*="cv" i], input[type=file][id*="resume" i], input[type=file][id*="cv" i]');
-        if (fi) { cached = true; return true; }
-      } catch (_) {}
+      if (hasResumeFileInput()) { cached = true; return true; }
       cached = false;
       return false;
     } catch (_) { cached = false; return false; }
@@ -5399,15 +5411,10 @@ Result: Shipped my first production change in week three and my notes doc became
     return filled;
   }
 
-  // Expose for other modules + run on a gentle schedule (only when page is active)
+  // Exposed for manual invocation (Generate+Autofill button / auto-pilot).
+  // No automatic timers — autonomous scanning was filling textareas on
+  // LinkedIn feeds, messaging, and other non-application areas.
   window.__uaStarAnswer = scanAndAnswer;
-  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
-    setTimeout(scanAndAnswer, 2500);
-    setTimeout(scanAndAnswer, 6000);
-    setTimeout(scanAndAnswer, 12000);
-    let scanCount = 0;
-    const periodic = setInterval(() => { if (++scanCount > 20) { clearInterval(periodic); return; } scanAndAnswer(); }, 4000);
-  }
 })();
 
 // ============================================================================
@@ -5456,7 +5463,10 @@ Result: Shipped my first production change in week three and my notes doc became
   }
 
   window.__uaDeepQueryAll = deepQueryAll;
-  if (window.self === window.top) setTimeout(fillUnfilled, 3000);
+  // Autonomous autofill disabled: it was writing into search boxes and other
+  // inputs on non-application pages. Kept exposed on window.__uaFillUnfilled
+  // for the Generate+Autofill manual trigger.
+  window.__uaFillUnfilled = fillUnfilled;
 })();
 
 // ============================================================================
@@ -5570,11 +5580,10 @@ Result: Shipped my first production change in week three and my notes doc became
     return filled;
   }
 
+  // Exposed for manual invocation only. Autonomous cover-letter writing was
+  // scribbling into random textareas (e.g. LinkedIn post composer) — now
+  // only runs when triggered by the Generate+Autofill button.
   window.__uaAutoCoverLetter = autoFillCoverLetter;
-  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
-    setTimeout(autoFillCoverLetter, 4000);
-    setTimeout(autoFillCoverLetter, 10000);
-  }
 })();
 
 // ============================================================================
@@ -5698,7 +5707,9 @@ Result: Shipped my first production change in week three and my notes doc became
     } catch (_) {}
   }
 
-  if (window.self === window.top) setTimeout(liveScore, 5000);
+  // Expose for manual score queries. No auto-run — it was reading resumes
+  // from storage on every page load.
+  window.__uaLiveKeywordScore = liveScore;
 })();
 
 // ============================================================================
@@ -6000,25 +6011,11 @@ Result: Shipped my first production change in week three and my notes doc became
     } catch (e) { LOG('Auto-tailor error:', e.message); }
   }
 
-  // Expose for on-demand invocation & other modules
+  // Exposed for on-demand invocation (Generate+Autofill button). No staged
+  // auto-runs: autonomous resume-upload-and-tailor was attaching files to
+  // the wrong <input type=file> elements on non-application pages.
   window.__uaAutoTailorResume = runAutoTailor;
   window.__uaGetTailoredCache = () => storageGet(CACHE_KEY).then(d => d[CACHE_KEY] || {});
-  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
-
-  if (window.self === window.top) {
-    // Staged runs: allow the DOM to populate before we extract the JD
-    setTimeout(runAutoTailor, 3500);
-    setTimeout(runAutoTailor, 9000);
-    setTimeout(runAutoTailor, 18000);
-    // Re-run on SPA navigation
-    let lastUrl = location.href;
-    setInterval(() => {
-      if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        setTimeout(runAutoTailor, 2500);
-      }
-    }, 2000);
-  }
 })();
 
 // ============================================================================
@@ -6054,11 +6051,10 @@ Result: Shipped my first production change in week three and my notes doc became
     } catch (e) { LOG('pipeline error:', e.message); }
   }
 
+  // Exposed for manual invocation only — the Generate+Autofill button
+  // triggers this explicitly. Autonomous firing was cascading fills onto
+  // LinkedIn and other non-application pages.
   window.__uaAutoPilot = runPipeline;
-  if (window.self === window.top && typeof window.__uaIsEligiblePage === 'function' && window.__uaIsEligiblePage()) {
-    setTimeout(runPipeline, 5500);
-    setTimeout(runPipeline, 15000);
-  }
 })();
 
 // ============================================================================
