@@ -3073,132 +3073,235 @@
     await autoFillPage();
   }
 
-  /* ── v6.2: GoHire / Forhyre autofill ───────────────────────
-   * GoHire presents applications in a JS-rendered modal on the
-   * same page. The official OptimHire extension misses all fields
-   * because it scans too early (before the modal renders) and
-   * can't find labeled inputs in that context.
+  /* ── v6.2 → v6.3: GoHire / Forhyre autofill (rewritten) ────
+   * GoHire renders into a JS-injected modal with custom labels
+   * (often <div>/<span>, not <label>). My v6.2 modal-finder was
+   * too narrow and missed shadow-DOM-encapsulated custom questions.
    *
-   * Strategy:
-   *  1. Wait up to 6s for the modal / application form to appear.
-   *  2. Fill each field by matching visible label text, then
-   *     targeting the sibling/associated input inside the modal.
-   *  3. Handle "Full Name (As Par SSN)" — legal name.
-   *  4. Resume: trigger the "Attach CV/Resume" button to open
-   *     the hidden file picker, then attach the file.
-   *  5. Click Submit.
+   * v6.3 strategy: input-centric, shadow-aware, brute-force.
+   *  1. Poll up to 10s for ANY visible non-hidden inputs to appear.
+   *  2. Use queryAllWithShadow to scan ALL inputs/textareas/selects
+   *     across normal DOM AND every open shadow root.
+   *  3. For each input, derive label by:
+   *     - aria-label / aria-labelledby
+   *     - <label for=>
+   *     - placeholder / name / id
+   *     - walk up to 5 ancestors and grab any <div>/<span>/<p>
+   *       text that precedes the input
+   *  4. Match label against guessValue() with the full v6.0
+   *     pattern set (covers Primary email, Work Auth, Current
+   *     Location, Preferred Locations, LinkedIn URL, etc).
+   *  5. Handle radios/selects via existing handlers.
+   *  6. CV/Resume: click any button matching /attach|upload|resume|cv/,
+   *     wait for file input to appear, attach blob.
+   *  7. Submit.
    * ────────────────────────────────────────────────────────── */
+  function gohireDeriveLabel(el) {
+    // 1) aria-label
+    const aria = el.getAttribute('aria-label');
+    if (aria) return aria;
+    // 2) aria-labelledby
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby) {
+      const ref = document.getElementById(labelledby) ||
+                  el.getRootNode?.()?.getElementById?.(labelledby);
+      if (ref) return (ref.innerText || ref.textContent || '').trim();
+    }
+    // 3) <label for="">
+    if (el.id) {
+      const root = el.getRootNode();
+      const lbl = root.querySelector?.(`label[for="${CSS.escape(el.id)}"]`);
+      if (lbl) return (lbl.innerText || lbl.textContent || '').trim();
+    }
+    // 4) Walk up ancestors and find a label-like text node before this input
+    let node = el;
+    for (let depth = 0; depth < 6 && node; depth++) {
+      const parent = node.parentElement;
+      if (!parent) break;
+      // Look for a sibling above this node that contains label text
+      let prev = node.previousElementSibling;
+      while (prev) {
+        const txt = (prev.innerText || prev.textContent || '').trim();
+        if (txt && txt.length < 250 && !prev.querySelector?.('input, textarea, select')) {
+          return txt;
+        }
+        prev = prev.previousElementSibling;
+      }
+      // Also check parent's first label-like child
+      const lblChild = parent.querySelector?.('label, [class*="label" i], [class*="Label"]');
+      if (lblChild && !lblChild.contains(el)) {
+        const txt = (lblChild.innerText || lblChild.textContent || '').trim();
+        if (txt) return txt;
+      }
+      node = parent;
+    }
+    // 5) Fallbacks
+    return el.placeholder || el.name?.replace(/[_\-]/g, ' ') || el.id?.replace(/[_\-]/g, ' ') || '';
+  }
+
+  function gohireIsVisible(el) {
+    if (!el) return false;
+    if (el.disabled || el.readOnly) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    const cs = (el.ownerDocument || document).defaultView?.getComputedStyle?.(el);
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) return false;
+    return true;
+  }
+
   async function gohireAutofill() {
     if (CURRENT_ATS !== 'GoHire') return;
     const p = await getProfile();
-    LOG('GoHire: starting');
+    LOG('GoHire v6.3: starting');
 
-    // ── 1. Locate the application modal ───────────────────────
-    const MODAL_SELS = [
-      '[class*="apply" i][class*="modal" i]',
-      '[class*="application" i][class*="modal" i]',
-      '[class*="application-form" i]',
-      '[class*="apply-form" i]',
-      '[class*="job-application" i]',
-      '[role="dialog"]', '[role="alertdialog"]',
-      'dialog',
-      'form',   // fallback: any visible form on the page
-    ];
-    let modal = null;
-    for (let t = 0; t < 12; t++) {
-      for (const sel of MODAL_SELS) {
-        const el = document.querySelector(sel);
-        if (el && isVisible(el)) { modal = el; break; }
+    // ── 0. If modal isn't open, click "Apply Now" to open it
+    let inputCount = queryAllWithShadow(
+      'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea'
+    ).filter(gohireIsVisible).length;
+    if (inputCount < 2) {
+      const applyBtn = queryAllWithShadow('button, a, [role="button"]')
+        .filter(gohireIsVisible)
+        .find(el => /^apply now$|^apply$|^apply for this job$|^submit application$/i.test(
+          (el.innerText || el.textContent || '').trim()
+        ));
+      if (applyBtn) {
+        LOG('GoHire: clicking Apply Now to open modal');
+        realClick(applyBtn);
+        await sleep(800);
       }
-      if (modal) break;
+    }
+
+    // ── 1. Wait up to 10s for at least one visible form input to appear
+    let inputs = [];
+    for (let t = 0; t < 20; t++) {
+      inputs = queryAllWithShadow(
+        'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select'
+      ).filter(gohireIsVisible);
+      if (inputs.length >= 2) break;
       await sleep(500);
     }
-    const ctx = modal || document;
-    LOG(`GoHire: form context = ${modal ? modal.tagName + (modal.className ? '.' + [...modal.classList].join('.') : '') : 'document'}`);
+    LOG(`GoHire: found ${inputs.length} visible inputs after wait`);
+    if (!inputs.length) {
+      LOG('GoHire: no inputs found — bailing out, falling back to autoFillPage');
+      await autoFillPage();
+      return;
+    }
 
-    // ── 2. Label-to-input fill helper ─────────────────────────
-    async function fillByLabel(labelRe, value, tag = 'input') {
-      if (!value) return false;
-      // Find the label element inside context
-      const labels = Array.from(ctx.querySelectorAll('label, [class*="label" i], [class*="field-label" i]'))
-        .filter(el => labelRe.test(el.innerText || el.textContent || ''));
-      for (const lbl of labels) {
-        // 1) htmlFor
-        if (lbl.htmlFor) {
-          const inp = ctx.querySelector(`#${CSS.escape(lbl.htmlFor)}`);
-          if (inp && isVisible(inp) && !inp.value?.trim()) {
-            inp.focus(); nativeSet(inp, value); await sleep(50); return true;
-          }
+    // ── 2. Fill each input by deriving its label
+    let filled = 0;
+    const fullName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+
+    for (const el of inputs) {
+      try {
+        if (el.value && el.value.toString().trim()) continue; // already filled
+        if (el.tagName === 'SELECT') continue; // handled below
+        const tagType = (el.type || el.tagName || '').toLowerCase();
+        // Derive label
+        const label = gohireDeriveLabel(el);
+        const inputType = (el.type || '').toLowerCase();
+
+        // Direct type fills first
+        let val = '';
+        if (inputType === 'email') val = p.email || '';
+        else if (inputType === 'tel') val = p.phone || '';
+        else if (inputType === 'url') {
+          if (/linkedin/i.test(label)) val = p.linkedin_profile_url || '';
+          else if (/github/i.test(label)) val = p.github_url || '';
+          else if (/portfolio|website/i.test(label)) val = p.website_url || '';
+          else val = p.linkedin_profile_url || '';
         }
-        // 2) sibling or child input in the same container
-        const container = lbl.closest(
-          '[class*="field" i],[class*="form-group" i],[class*="input-group" i],[class*="row" i],.col,div'
-        ) || lbl.parentElement;
-        if (container) {
-          const inp = container.querySelector(`${tag}:not([type=hidden]):not([type=submit]):not([type=file])`);
-          if (inp && isVisible(inp) && !inp.value?.trim()) {
-            inp.focus(); nativeSet(inp, value); await sleep(50); return true;
-          }
+        if (!val) {
+          // Use guessValue (200+ patterns including custom GoHire questions)
+          val = guessValue(label, p, inputType) || '';
         }
-        // 3) next sibling
-        let sib = lbl.nextElementSibling;
-        while (sib) {
-          const inp = sib.matches?.(`${tag}`) ? sib : sib.querySelector?.(tag);
-          if (inp && isVisible(inp) && !inp.value?.trim()) {
-            inp.focus(); nativeSet(inp, value); await sleep(50); return true;
-          }
-          sib = sib.nextElementSibling;
+        // Special GoHire-specific labels
+        if (!val && label) {
+          const ll = label.toLowerCase();
+          if (/full.?name.*ssn|legal.?name|name.*social/i.test(ll)) val = fullName;
+          else if (/primary.*email/i.test(ll))    val = p.email || '';
+          else if (/primary.*phone/i.test(ll))    val = p.phone || '';
+          else if (/work.?auth/i.test(ll))         val = DEFAULTS.authorized;
+          else if (/current.*location/i.test(ll)) val = `${p.city || ''}, ${p.state || ''}, ${p.country || 'United States'}`.replace(/^,\s*|,\s*$/g, '').replace(/,\s*,/g, ',');
+          else if (/preferred.*location|open.*to.*work|other.*than.*current/i.test(ll))
+                                                  val = 'Open to relocation across major US cities including New York, San Francisco, Los Angeles, Chicago, Boston, Seattle, Austin, and Denver';
+          else if (/linkedin/i.test(ll))           val = p.linkedin_profile_url || '';
+        }
+        if (!val) continue;
+        el.focus();
+        nativeSet(el, String(val));
+        filled++;
+        await sleep(40);
+      } catch (e) {
+        LOG('GoHire: fill error', e?.message);
+      }
+    }
+    LOG(`GoHire: filled ${filled} inputs by label`);
+
+    // ── 3. Selects (Work Auth Status, etc.)
+    const selects = queryAllWithShadow('select').filter(gohireIsVisible);
+    for (const sel of selects) {
+      if (sel.value && sel.value !== '') continue;
+      const label = gohireDeriveLabel(sel);
+      const guess = guessValue(label, p) || '';
+      if (!guess) continue;
+      const opt = bestSelectOption(sel, guess, label);
+      if (opt) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        filled++;
+      }
+    }
+
+    // ── 4. Radios — work authorization, etc.
+    const radioGroups = {};
+    queryAllWithShadow('input[type="radio"]').filter(gohireIsVisible).forEach(r => {
+      if (!r.name) return;
+      (radioGroups[r.name] = radioGroups[r.name] || []).push(r);
+    });
+    for (const name in radioGroups) {
+      const group = radioGroups[name];
+      if (group.some(r => r.checked)) continue;
+      // Try to derive label from the group's container
+      const container = group[0].closest('[class*="field" i],[class*="form-group" i],[class*="question" i],fieldset,div');
+      const groupLabel = container ? (container.innerText || '').slice(0, 200) : name;
+      const desired = guessValue(groupLabel, p) || '';
+      if (!desired) continue;
+      // Find best matching radio by label text
+      let best = null;
+      for (const r of group) {
+        const lbl = gohireDeriveLabel(r) || r.value;
+        if (lbl.toLowerCase().includes(desired.toLowerCase()) ||
+            desired.toLowerCase().includes(lbl.toLowerCase())) {
+          best = r; break;
         }
       }
-      return false;
+      if (!best && /^yes$/i.test(desired)) best = group.find(r => /yes/i.test(gohireDeriveLabel(r) || r.value));
+      if (!best && /^no$/i.test(desired))  best = group.find(r => /^no$/i.test(gohireDeriveLabel(r) || r.value));
+      if (best) {
+        best.checked = true;
+        best.dispatchEvent(new Event('change', { bubbles: true }));
+        realClick(best);
+        filled++;
+      }
     }
 
-    // ── 3. Fill standard fields ────────────────────────────────
-    const fullName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
-    await fillByLabel(/first.?name/i,    p.first_name || '');
-    await fillByLabel(/last.?name/i,     p.last_name  || '');
-    await fillByLabel(/email/i,          p.email      || '');
-    await fillByLabel(/phone|mobile|tel/i, p.phone    || '');
-    // Cover letter — textarea
-    await fillByLabel(/cover.?letter|motivation|additional/i, generateCoverLetter(p), 'textarea');
-    // "Full Name (As Par SSN)" — legal name
-    await fillByLabel(/full.?name|legal.?name|ssn|social.?security/i, fullName);
-
-    // ── 4. Fallback: fill by placeholder / input type ─────────
-    const formInputs = Array.from(ctx.querySelectorAll(
-      'input:not([type=hidden]):not([type=submit]):not([type=file]):not([type=checkbox]):not([type=radio]),' +
-      'textarea'
-    )).filter(isVisible);
-    for (const inp of formInputs) {
-      if (inp.value?.trim()) continue;
-      const hint = [
-        inp.name || '', inp.id || '',
-        inp.placeholder || '',
-        inp.getAttribute('aria-label') || '',
-        getLabel(inp),
-      ].join(' ').toLowerCase();
-      const val = guessValue(hint, p, (inp.type || '').toLowerCase());
-      if (val) { inp.focus(); nativeSet(inp, val); await sleep(40); }
-    }
-
-    // Also try generic autoFillPage inside the modal context to catch
-    // any custom questions rendered below the standard fields.
+    // ── 5. Run autoFillPage once more to catch anything missed (custom checkboxes, agreement, etc.)
     await autoFillPage();
 
-    // ── 5. CV/Resume upload ────────────────────────────────────
-    // GoHire uses a styled button that triggers a hidden <input type="file">.
-    // Strategy: look for the file input, or click the button to create one.
+    // ── 6. CV/Resume upload
     const resumeUrl = p.resume_url || p.resumeUrl || p.resume;
     if (resumeUrl) {
-      let fileInput = ctx.querySelector('input[type="file"]');
+      let fileInput = queryAllWithShadow('input[type="file"]').find(gohireIsVisible) ||
+                      queryAllWithShadow('input[type="file"]')[0];
       if (!fileInput) {
-        // Click the "Attach CV/Resume" button to materialise the input
-        const attachBtn = Array.from(ctx.querySelectorAll('button,[role="button"],[class*="upload" i],[class*="attach" i]'))
-          .find(el => isVisible(el) && /attach|upload|resume|cv/i.test(el.innerText || el.textContent || ''));
+        // Click any "Attach" button to materialise the input
+        const attachBtn = queryAllWithShadow('button, [role="button"]')
+          .filter(gohireIsVisible)
+          .find(el => /attach.*resume|upload.*resume|cv.?\/?.?resume|attach.*cv|upload.*cv/i.test(el.innerText || el.textContent || ''));
         if (attachBtn) {
           realClick(attachBtn);
-          await sleep(300);
-          fileInput = ctx.querySelector('input[type="file"]') || document.querySelector('input[type="file"]');
+          await sleep(400);
+          fileInput = queryAllWithShadow('input[type="file"]')[0];
         }
       }
       if (fileInput) {
@@ -3212,21 +3315,30 @@
             fileInput.dispatchEvent(new Event('input',  { bubbles: true }));
             fileInput.dispatchEvent(new Event('change', { bubbles: true }));
             LOG('GoHire: resume attached');
-          } catch (_) {}
+          } catch (e) { LOG('GoHire: resume attach failed', e?.message); }
         }
       }
     }
 
-    // ── 6. Submit ──────────────────────────────────────────────
-    await sleep(400);
-    await detectAndFixValidationErrors();
-    await sleep(300);
+    // ── 7. Agreement checkboxes
+    queryAllWithShadow('input[type="checkbox"]').filter(gohireIsVisible).forEach(cb => {
+      if (cb.checked) return;
+      const lbl = gohireDeriveLabel(cb) || cb.parentElement?.innerText || '';
+      if (/agree|consent|accept|terms|privacy|certify|acknowledge/i.test(lbl)) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        realClick(cb);
+      }
+    });
 
-    // Find the Submit button (not Cancel)
-    const submitBtn = Array.from(ctx.querySelectorAll(
+    // ── 8. Validate + Submit
+    await sleep(500);
+    await detectAndFixValidationErrors();
+    await sleep(400);
+
+    const submitBtn = queryAllWithShadow(
       'button[type="submit"], input[type="submit"], button, [role="button"]'
-    )).find(el => {
-      if (!isVisible(el)) return false;
+    ).filter(gohireIsVisible).find(el => {
       const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
       return /^(submit|apply|send application|submit application|confirm)$/i.test(t);
     });
@@ -3235,9 +3347,11 @@
       markSubmitAttempted();
       realClick(submitBtn);
       LOG('GoHire: Submit clicked');
+    } else {
+      LOG('GoHire: Submit button not found or disabled');
     }
 
-    LOG('GoHire: autofill done');
+    LOG(`GoHire: autofill done (${filled} fields)`);
   }
 
   /* ── Shared ATS dispatch helper ─────────────────────────── */
@@ -3774,6 +3888,13 @@
       return url.includes('/apply') || url.includes('/requisition') ||
              !!document.querySelector('#OracleFusionApp,oracle-apply-flow') ||
              document.querySelectorAll('input:not([type=hidden])').length > 2;
+    }
+
+    /* ── GoHire / Forhyre ─────────────────────────────────────────
+     * Modal opens after Apply Now click — be permissive so the
+     * adapter runs and polls for inputs.                            */
+    if (CURRENT_ATS === 'GoHire') {
+      return true;
     }
 
     /* ── All other recognised ATS ─────────────────────────────────
