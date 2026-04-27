@@ -1,6 +1,14 @@
 /**
- * OptimHire Comprehensive Patch v6.1
+ * OptimHire Comprehensive Patch v6.4
  * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.4 (2026-04-27) — GoHire/Forhyre SKIP:
+ *   - GoHire/Forhyre (jobs.forhyre.com, gohire.io) jobs are now
+ *     immediately skipped: APPLICATION_FAILED + skipCurrent fired,
+ *     queue advances without stalling on the unsupported ATS.
+ *   - isApplicationPage() returns false for GoHire (no auto-trigger)
+ *   - MutationObserver GoHire special-cases removed (cleaner, no
+ *     re-arm on GoHire modal injection)
  *
  * v6.1 (2026-04-26) — STABILITY FIXES:
  *   - FIX: "Just give me a minute more to finish filling out the form"
@@ -22,14 +30,7 @@
  *   - T37: Dropzone resume upload — drag-drop file zones supported
  *   - T38: querySelectorWithShadow utility (v2.5.2 port)
  *
- * v6.2 (2026-04-26) — GoHire / Forhyre support:
- *   - T39: gohireAutofill() — full GoHire/Forhyre modal adapter:
- *     waits up to 6s for modal to appear, label-matched fills,
- *     "Full Name (As Par SSN)" legal field, CV/Resume file upload,
- *     detectAndFixValidationErrors, then Submit click
- *   - Domains: forhyre.com, jobs.forhyre.com, gohire.io, app.gohire.io
- *   - Mutation watcher re-arms on GoHire modal injection (fires
- *     on Apply Now click, not just page load)
+ * v6.2–v6.3 (2026-04-26) — GoHire/Forhyre autofill attempts (superseded by v6.4 skip)
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
  * T2  – Credits locked at 9999 forever
@@ -3073,285 +3074,23 @@
     await autoFillPage();
   }
 
-  /* ── v6.2 → v6.3: GoHire / Forhyre autofill (rewritten) ────
-   * GoHire renders into a JS-injected modal with custom labels
-   * (often <div>/<span>, not <label>). My v6.2 modal-finder was
-   * too narrow and missed shadow-DOM-encapsulated custom questions.
-   *
-   * v6.3 strategy: input-centric, shadow-aware, brute-force.
-   *  1. Poll up to 10s for ANY visible non-hidden inputs to appear.
-   *  2. Use queryAllWithShadow to scan ALL inputs/textareas/selects
-   *     across normal DOM AND every open shadow root.
-   *  3. For each input, derive label by:
-   *     - aria-label / aria-labelledby
-   *     - <label for=>
-   *     - placeholder / name / id
-   *     - walk up to 5 ancestors and grab any <div>/<span>/<p>
-   *       text that precedes the input
-   *  4. Match label against guessValue() with the full v6.0
-   *     pattern set (covers Primary email, Work Auth, Current
-   *     Location, Preferred Locations, LinkedIn URL, etc).
-   *  5. Handle radios/selects via existing handlers.
-   *  6. CV/Resume: click any button matching /attach|upload|resume|cv/,
-   *     wait for file input to appear, attach blob.
-   *  7. Submit.
-   * ────────────────────────────────────────────────────────── */
-  function gohireDeriveLabel(el) {
-    // 1) aria-label
-    const aria = el.getAttribute('aria-label');
-    if (aria) return aria;
-    // 2) aria-labelledby
-    const labelledby = el.getAttribute('aria-labelledby');
-    if (labelledby) {
-      const ref = document.getElementById(labelledby) ||
-                  el.getRootNode?.()?.getElementById?.(labelledby);
-      if (ref) return (ref.innerText || ref.textContent || '').trim();
-    }
-    // 3) <label for="">
-    if (el.id) {
-      const root = el.getRootNode();
-      const lbl = root.querySelector?.(`label[for="${CSS.escape(el.id)}"]`);
-      if (lbl) return (lbl.innerText || lbl.textContent || '').trim();
-    }
-    // 4) Walk up ancestors and find a label-like text node before this input
-    let node = el;
-    for (let depth = 0; depth < 6 && node; depth++) {
-      const parent = node.parentElement;
-      if (!parent) break;
-      // Look for a sibling above this node that contains label text
-      let prev = node.previousElementSibling;
-      while (prev) {
-        const txt = (prev.innerText || prev.textContent || '').trim();
-        if (txt && txt.length < 250 && !prev.querySelector?.('input, textarea, select')) {
-          return txt;
-        }
-        prev = prev.previousElementSibling;
-      }
-      // Also check parent's first label-like child
-      const lblChild = parent.querySelector?.('label, [class*="label" i], [class*="Label"]');
-      if (lblChild && !lblChild.contains(el)) {
-        const txt = (lblChild.innerText || lblChild.textContent || '').trim();
-        if (txt) return txt;
-      }
-      node = parent;
-    }
-    // 5) Fallbacks
-    return el.placeholder || el.name?.replace(/[_\-]/g, ' ') || el.id?.replace(/[_\-]/g, ' ') || '';
-  }
-
-  function gohireIsVisible(el) {
-    if (!el) return false;
-    if (el.disabled || el.readOnly) return false;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) return false;
-    const cs = (el.ownerDocument || document).defaultView?.getComputedStyle?.(el);
-    if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) return false;
-    return true;
-  }
-
+  /* ── v6.4: GoHire / Forhyre — SKIP (unsupported ATS) ───────
+   * The GoHire modal ATS cannot be reliably autofilled due to its
+   * JS-injected shadow-DOM modal. Skip these jobs immediately so
+   * the automation queue advances without stalling.               */
   async function gohireAutofill() {
-    if (CURRENT_ATS !== 'GoHire') return;
-    const p = await getProfile();
-    LOG('GoHire v6.3: starting');
-
-    // ── 0. If modal isn't open, click "Apply Now" to open it
-    let inputCount = queryAllWithShadow(
-      'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea'
-    ).filter(gohireIsVisible).length;
-    if (inputCount < 2) {
-      const applyBtn = queryAllWithShadow('button, a, [role="button"]')
-        .filter(gohireIsVisible)
-        .find(el => /^apply now$|^apply$|^apply for this job$|^submit application$/i.test(
-          (el.innerText || el.textContent || '').trim()
-        ));
-      if (applyBtn) {
-        LOG('GoHire: clicking Apply Now to open modal');
-        realClick(applyBtn);
-        await sleep(800);
-      }
-    }
-
-    // ── 1. Wait up to 10s for at least one visible form input to appear
-    let inputs = [];
-    for (let t = 0; t < 20; t++) {
-      inputs = queryAllWithShadow(
-        'input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select'
-      ).filter(gohireIsVisible);
-      if (inputs.length >= 2) break;
-      await sleep(500);
-    }
-    LOG(`GoHire: found ${inputs.length} visible inputs after wait`);
-    if (!inputs.length) {
-      LOG('GoHire: no inputs found — bailing out, falling back to autoFillPage');
-      await autoFillPage();
-      return;
-    }
-
-    // ── 2. Fill each input by deriving its label
-    let filled = 0;
-    const fullName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
-
-    for (const el of inputs) {
-      try {
-        if (el.value && el.value.toString().trim()) continue; // already filled
-        if (el.tagName === 'SELECT') continue; // handled below
-        const tagType = (el.type || el.tagName || '').toLowerCase();
-        // Derive label
-        const label = gohireDeriveLabel(el);
-        const inputType = (el.type || '').toLowerCase();
-
-        // Direct type fills first
-        let val = '';
-        if (inputType === 'email') val = p.email || '';
-        else if (inputType === 'tel') val = p.phone || '';
-        else if (inputType === 'url') {
-          if (/linkedin/i.test(label)) val = p.linkedin_profile_url || '';
-          else if (/github/i.test(label)) val = p.github_url || '';
-          else if (/portfolio|website/i.test(label)) val = p.website_url || '';
-          else val = p.linkedin_profile_url || '';
-        }
-        if (!val) {
-          // Use guessValue (200+ patterns including custom GoHire questions)
-          val = guessValue(label, p, inputType) || '';
-        }
-        // Special GoHire-specific labels
-        if (!val && label) {
-          const ll = label.toLowerCase();
-          if (/full.?name.*ssn|legal.?name|name.*social/i.test(ll)) val = fullName;
-          else if (/primary.*email/i.test(ll))    val = p.email || '';
-          else if (/primary.*phone/i.test(ll))    val = p.phone || '';
-          else if (/work.?auth/i.test(ll))         val = DEFAULTS.authorized;
-          else if (/current.*location/i.test(ll)) val = `${p.city || ''}, ${p.state || ''}, ${p.country || 'United States'}`.replace(/^,\s*|,\s*$/g, '').replace(/,\s*,/g, ',');
-          else if (/preferred.*location|open.*to.*work|other.*than.*current/i.test(ll))
-                                                  val = 'Open to relocation across major US cities including New York, San Francisco, Los Angeles, Chicago, Boston, Seattle, Austin, and Denver';
-          else if (/linkedin/i.test(ll))           val = p.linkedin_profile_url || '';
-        }
-        if (!val) continue;
-        el.focus();
-        nativeSet(el, String(val));
-        filled++;
-        await sleep(40);
-      } catch (e) {
-        LOG('GoHire: fill error', e?.message);
-      }
-    }
-    LOG(`GoHire: filled ${filled} inputs by label`);
-
-    // ── 3. Selects (Work Auth Status, etc.)
-    const selects = queryAllWithShadow('select').filter(gohireIsVisible);
-    for (const sel of selects) {
-      if (sel.value && sel.value !== '') continue;
-      const label = gohireDeriveLabel(sel);
-      const guess = guessValue(label, p) || '';
-      if (!guess) continue;
-      const opt = bestSelectOption(sel, guess, label);
-      if (opt) {
-        sel.value = opt.value;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        filled++;
-      }
-    }
-
-    // ── 4. Radios — work authorization, etc.
-    const radioGroups = {};
-    queryAllWithShadow('input[type="radio"]').filter(gohireIsVisible).forEach(r => {
-      if (!r.name) return;
-      (radioGroups[r.name] = radioGroups[r.name] || []).push(r);
-    });
-    for (const name in radioGroups) {
-      const group = radioGroups[name];
-      if (group.some(r => r.checked)) continue;
-      // Try to derive label from the group's container
-      const container = group[0].closest('[class*="field" i],[class*="form-group" i],[class*="question" i],fieldset,div');
-      const groupLabel = container ? (container.innerText || '').slice(0, 200) : name;
-      const desired = guessValue(groupLabel, p) || '';
-      if (!desired) continue;
-      // Find best matching radio by label text
-      let best = null;
-      for (const r of group) {
-        const lbl = gohireDeriveLabel(r) || r.value;
-        if (lbl.toLowerCase().includes(desired.toLowerCase()) ||
-            desired.toLowerCase().includes(lbl.toLowerCase())) {
-          best = r; break;
-        }
-      }
-      if (!best && /^yes$/i.test(desired)) best = group.find(r => /yes/i.test(gohireDeriveLabel(r) || r.value));
-      if (!best && /^no$/i.test(desired))  best = group.find(r => /^no$/i.test(gohireDeriveLabel(r) || r.value));
-      if (best) {
-        best.checked = true;
-        best.dispatchEvent(new Event('change', { bubbles: true }));
-        realClick(best);
-        filled++;
-      }
-    }
-
-    // ── 5. Run autoFillPage once more to catch anything missed (custom checkboxes, agreement, etc.)
-    await autoFillPage();
-
-    // ── 6. CV/Resume upload
-    const resumeUrl = p.resume_url || p.resumeUrl || p.resume;
-    if (resumeUrl) {
-      let fileInput = queryAllWithShadow('input[type="file"]').find(gohireIsVisible) ||
-                      queryAllWithShadow('input[type="file"]')[0];
-      if (!fileInput) {
-        // Click any "Attach" button to materialise the input
-        const attachBtn = queryAllWithShadow('button, [role="button"]')
-          .filter(gohireIsVisible)
-          .find(el => /attach.*resume|upload.*resume|cv.?\/?.?resume|attach.*cv|upload.*cv/i.test(el.innerText || el.textContent || ''));
-        if (attachBtn) {
-          realClick(attachBtn);
-          await sleep(400);
-          fileInput = queryAllWithShadow('input[type="file"]')[0];
-        }
-      }
-      if (fileInput) {
-        const fname = `${p.first_name || 'resume'}_${p.last_name || 'file'}.pdf`;
-        const file = await fetchResumeFile(resumeUrl, fname);
-        if (file) {
-          try {
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            fileInput.files = dt.files;
-            fileInput.dispatchEvent(new Event('input',  { bubbles: true }));
-            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-            LOG('GoHire: resume attached');
-          } catch (e) { LOG('GoHire: resume attach failed', e?.message); }
-        }
-      }
-    }
-
-    // ── 7. Agreement checkboxes
-    queryAllWithShadow('input[type="checkbox"]').filter(gohireIsVisible).forEach(cb => {
-      if (cb.checked) return;
-      const lbl = gohireDeriveLabel(cb) || cb.parentElement?.innerText || '';
-      if (/agree|consent|accept|terms|privacy|certify|acknowledge/i.test(lbl)) {
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-        realClick(cb);
-      }
-    });
-
-    // ── 8. Validate + Submit
-    await sleep(500);
-    await detectAndFixValidationErrors();
-    await sleep(400);
-
-    const submitBtn = queryAllWithShadow(
-      'button[type="submit"], input[type="submit"], button, [role="button"]'
-    ).filter(gohireIsVisible).find(el => {
-      const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
-      return /^(submit|apply|send application|submit application|confirm)$/i.test(t);
-    });
-    if (submitBtn && !submitBtn.disabled) {
-      await waitForSubmitReady(submitBtn, 4000);
-      markSubmitAttempted();
-      realClick(submitBtn);
-      LOG('GoHire: Submit clicked');
-    } else {
-      LOG('GoHire: Submit button not found or disabled');
-    }
-
-    LOG(`GoHire: autofill done (${filled} fields)`);
+    LOG('GoHire: unsupported ATS — skipping job');
+    try {
+      chrome.runtime.sendMessage({
+        type: 'APPLICATION_FAILED',
+        reason: 'unsupported_ats_gohire',
+        url: location.href,
+      }).catch(() => {});
+    } catch (_) {}
+    try {
+      chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
+    } catch (_) {}
+    _fillActive = false;
   }
 
   /* ── Shared ATS dispatch helper ─────────────────────────── */
@@ -3415,11 +3154,17 @@
         case 'SuccessFactors':   await successFactorsAutofill(); break;
         case 'UKG':              await ukgAutofill();          break;
         case 'Avature':          await avatureAutofill();      break;
-        case 'GoHire':           await gohireAutofill();       break;
+        case 'GoHire':
+          // v6.4: GoHire/Forhyre is unsupported — skip immediately
+          LOG('GoHire: unsupported ATS — skipping');
+          try { chrome.runtime.sendMessage({ type: 'APPLICATION_FAILED', reason: 'unsupported_ats_gohire', url: location.href }).catch(() => {}); } catch (_) {}
+          try { chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {}); } catch (_) {}
+          _fillActive = false;
+          return;
         default:                 await autoFillPage();         break;
       }
       // Generic pass after platform-specific (catches missed fields)
-      if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor','Recruitee','Pinpoint','SuccessFactors','UKG','Avature','GoHire'].includes(CURRENT_ATS)) {
+      if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor','Recruitee','Pinpoint','SuccessFactors','UKG','Avature'].includes(CURRENT_ATS)) {
         await autoFillPage();
       }
 
@@ -3891,10 +3636,10 @@
     }
 
     /* ── GoHire / Forhyre ─────────────────────────────────────────
-     * Modal opens after Apply Now click — be permissive so the
-     * adapter runs and polls for inputs.                            */
+     * v6.4: unsupported — never treat as application page so the
+     * skip fires immediately without stalling.                      */
     if (CURRENT_ATS === 'GoHire') {
-      return true;
+      return false;
     }
 
     /* ── All other recognised ATS ─────────────────────────────────
@@ -4040,20 +3785,17 @@
      * element actually being added AND (c) automation to be active
      * OR the page to be a known application URL (jobs/apply/career).
      *
-     * v6.2: GoHire modals are injected into the page after the user
-     * (or automation) clicks "Apply Now" — always re-arm on these. */
+     * Throttled to one evaluation every 4s; requires new form/input
+     * nodes AND active automation OR an apply-page URL.            */
     const APPLY_URL_RE = /\/(apply|application|jobs?|careers?|join)([\/?#]|$)/i;
     let _mutationDebounce = null;
     let _mutationFired = 0;
     new MutationObserver(mutations => {
       if (_autoTriggerRunning) return;
-      // Throttle: max 1 evaluation every 4s (except GoHire which must
-      // detect its modal quickly even when _autoTriggered is set)
-      const isGoHire = CURRENT_ATS === 'GoHire';
-      if (_autoTriggered && !isGoHire) return;
-      if (Date.now() - _mutationFired < (isGoHire ? 800 : 4000)) return;
+      if (_autoTriggered) return;
+      if (Date.now() - _mutationFired < 4000) return;
       const added = mutations.reduce((n, m) => n + m.addedNodes.length, 0);
-      if (added < (isGoHire ? 2 : 4)) return;
+      if (added < 4) return;
       // Only proceed if a form/input was actually added in this batch
       let hasForm = false;
       for (const m of mutations) {
@@ -4063,27 +3805,19 @@
               node.querySelector?.('form, input:not([type=hidden]), textarea, select')) {
             hasForm = true; break;
           }
-          // GoHire modal adds a large container div — catch that too
-          if (isGoHire && node.querySelector?.('button')) { hasForm = true; break; }
         }
         if (hasForm) break;
       }
       if (!hasForm) return;
       _mutationFired = Date.now();
-      // For GoHire: reset _autoTriggered so gohireAutofill can run again
-      // when the modal opens (user may apply to multiple jobs)
-      if (isGoHire) {
-        _autoTriggered = false;
-        _autoTriggerRunning = false;
-      }
       clearTimeout(_mutationDebounce);
       _mutationDebounce = setTimeout(async () => {
         // Final gate: require automation OR the URL itself looks like an apply page
         const looksApply = APPLY_URL_RE.test(location.pathname) || APPLY_URL_RE.test(location.href);
         const active = await isAutomationActive();
-        if (!active && !looksApply && !isGoHire) return;
+        if (!active && !looksApply) return;
         autoTriggerAutofill();
-      }, isGoHire ? 600 : 1500);
+      }, 1500);
     }).observe(document.body, { childList: true, subtree: true });
   }
 
