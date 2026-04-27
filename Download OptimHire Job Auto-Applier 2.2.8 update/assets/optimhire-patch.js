@@ -201,6 +201,43 @@
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
 
+  /* ── v6.4: GoHire/Forhyre EARLY SKIP ────────────────────────────────
+   * Fire skip the instant the content script loads on a GoHire page,
+   * before the OptimHire sidepanel can start its API-driven autofill.
+   * Repeats the broadcast a few times to beat any race with the
+   * sidepanel's "Filling application form..." flow.                    */
+  if (CURRENT_ATS === 'GoHire' ||
+      /\b(forhyre\.com|gohire\.io|hire\.li)\b/i.test(HOST)) {
+    LOG('GoHire/Forhyre detected — sending immediate skip (early)');
+    const _gohireSkip = () => {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'APPLICATION_FAILED',
+          reason: 'unsupported_ats_gohire',
+          url: location.href,
+        }).catch(() => {});
+      } catch (_) {}
+      try {
+        chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
+      } catch (_) {}
+      try {
+        chrome.runtime.sendMessage({ action: 'skip' }).catch(() => {});
+      } catch (_) {}
+      try {
+        chrome.runtime.sendMessage({ type: 'SKIP_JOB', reason: 'unsupported_ats_gohire' }).catch(() => {});
+      } catch (_) {}
+    };
+    // Fire immediately and then a few more times to beat any race
+    _gohireSkip();
+    setTimeout(_gohireSkip, 100);
+    setTimeout(_gohireSkip, 500);
+    setTimeout(_gohireSkip, 1500);
+    setTimeout(_gohireSkip, 3000);
+    // Mark autofill as already triggered + done so nothing else fires
+    try { window.__optimHireGoHireSkipped = true; } catch (_) {}
+    return; // STOP all further patch initialisation on this page
+  }
+
   /* ── v6.1: Automation-active guard ──────────────────────────────────
    * The patch was running on every ATS page and triggering autofills
    * even when the user was just browsing. This caused random refreshes,
