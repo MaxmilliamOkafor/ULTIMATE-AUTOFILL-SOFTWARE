@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptimHire — Profile Backup & Restore</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #1a1d24;
+      --panel-2: #232730;
+      --border: #2c313c;
+      --text: #e8eaef;
+      --muted: #9aa3b2;
+      --accent: #247fd9;
+      --accent-hover: #1b6cbd;
+      --danger: #d94747;
+      --danger-hover: #b73838;
+      --success: #2ea561;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 4px;
+    }
+    .subtitle {
+      color: var(--muted);
+      margin: 0 0 28px;
+      font-size: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+    .card p {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 14px;
+      line-height: 1.5;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button, .file-label {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover, .file-label:hover { background: var(--accent-hover); }
+    button.secondary {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    button.secondary:hover { background: #2c313c; }
+    button.danger { background: var(--danger); }
+    button.danger:hover { background: var(--danger-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type="file"] { display: none; }
+    .file-label {
+      display: inline-block;
+    }
+    .file-name {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .status {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      font-size: 13px;
+      display: none;
+    }
+    .status.show { display: block; }
+    .status.ok { background: rgba(46,165,97,0.15); color: var(--success); border: 1px solid rgba(46,165,97,0.4); }
+    .status.err { background: rgba(217,71,71,0.15); color: var(--danger); border: 1px solid rgba(217,71,71,0.4); }
+    .summary {
+      margin-top: 14px;
+      padding: 12px;
+      background: var(--panel-2);
+      border-radius: 7px;
+      font-size: 12px;
+      color: var(--muted);
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      display: none;
+    }
+    .summary.show { display: block; }
+    .footer-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 24px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Profile Backup &amp; Restore</h1>
+    <p class="subtitle">Save your auto-fill profile to a file so you never have to re-enter your information again.</p>
+
+    <div class="card">
+      <h2>Export profile</h2>
+      <p>Download all your saved candidate details, job preferences and settings as a single JSON file. Keep it somewhere safe — you can restore it on any machine where this extension is installed.</p>
+      <div class="row">
+        <button id="btn-export">Download backup</button>
+        <button id="btn-preview" class="secondary">Preview saved data</button>
+      </div>
+      <div id="export-status" class="status"></div>
+      <pre id="preview-box" class="summary"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Import profile</h2>
+      <p>Load a previously exported backup file. Existing values for the same fields will be overwritten.</p>
+      <div class="row">
+        <label class="file-label" for="file-input">Choose backup file</label>
+        <input type="file" id="file-input" accept="application/json,.json">
+        <span id="file-name" class="file-name">No file selected</span>
+      </div>
+      <div class="row" style="margin-top: 14px;">
+        <button id="btn-import" disabled>Import &amp; save</button>
+      </div>
+      <div id="import-status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Reset profile</h2>
+      <p>Wipe the saved candidate details and preferences from this browser. Your account login is not affected.</p>
+      <div class="row">
+        <button id="btn-reset" class="danger">Clear saved profile</button>
+      </div>
+      <div id="reset-status" class="status"></div>
+    </div>
+
+    <p class="footer-note">Backups include: candidate details, preferred jobsite, status update preference, manual application detail, applied counts and matching job count. Authentication tokens are intentionally excluded.</p>
+  </div>
+  <script src="profileBackup.js"></script>
+</body>
+</html>
