@@ -1,6 +1,15 @@
 /**
- * OptimHire Comprehensive Patch v6.5
+ * OptimHire Comprehensive Patch v6.6
  * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.6 (2026-04-28) — Work Auth autofill + popup fix:
+ *   - ADD: Work Authorization Status autofill — label condition:
+ *     (work+authorization) OR sponsorship OR visa OR permit → picks
+ *     option matching "authorized" first, then "yes" as fallback,
+ *     covering both "Authorized to work" and plain "Yes/No" dropdowns.
+ *   - FIX: "Just give me a minute more" popup ALWAYS removed (not just
+ *     on idle browsing). STOP_INJECT_POPUP=true at all times so the
+ *     popup is never injected and the user can manually edit freely.
  *
  * v6.5 (2026-04-28) — GoHire/Forhyre UNBLOCKED (OptimHire v2.5.3):
  *   - OptimHire v2.5.3 added native GoHire support via gh-widget-*
@@ -261,20 +270,15 @@
   ];
 
   async function dismissOhPopup() {
-    const popup   = document.getElementById('optimhire-html-click-notification');
+    const popup    = document.getElementById('optimhire-html-click-notification');
     const backdrop = document.getElementById('optimhire-html-click-notification-backdrop');
     if (!popup && !backdrop) return false;
-    // If we're in active automation, click OK so OptimHire keeps trying
-    // (acknowledges the user's permission to continue). Otherwise nuke it.
-    const active = await isAutomationActive();
-    if (active) {
-      const ok = document.getElementById('optimhire-html-ok-btn');
-      if (ok) { realClick(ok); LOG('OH popup: clicked OK (automation active)'); return true; }
-    }
+    // v6.6: always remove the popup so the user can manually edit at any time.
+    // OptimHire's autofill continues in the background regardless.
     try { popup?.remove(); } catch (_) {}
     try { backdrop?.remove(); } catch (_) {}
     document.body.style.overflow = '';
-    LOG('OH popup: removed (idle browsing)');
+    LOG('OH popup: removed (manual editing allowed)');
     return true;
   }
 
@@ -315,11 +319,9 @@
       s.remove();
     } catch (_) {}
   }
-  // On idle browsing: stop popup. In automation: allow it (may carry useful info).
-  setInterval(async () => {
-    const active = await isAutomationActive();
-    setStopInjectPopup(!active);
-  }, 5000);
+  // v6.6: always suppress the popup so the user can edit freely at any time.
+  // OptimHire's autofill continues in the background regardless of the popup.
+  setInterval(() => { setStopInjectPopup(true); }, 5000);
   setStopInjectPopup(true);
 
   /* ── Auto-skip cap: patch any global OPTIMHIRE_CONFIG object ───────────
@@ -1082,6 +1084,17 @@
     if (/notice.?period|period.?of.?notice/.test(l))       return p.notice_period || DEFAULTS.notice;
     if (/availab|start.?date|when.*start|when.*begin|earliest.*start/.test(l))
                                                           return p.availability || DEFAULTS.availability;
+
+    // ── Work Authorization Status ─────────────────────────────────────────
+    // Label: (work AND authorization) OR sponsorship OR visa OR permit
+    // Returns 'authorized' so bestSelectOption finds "Authorized to work",
+    // "Yes - authorized", "Yes, I am authorized", etc.
+    if ((/work/i.test(l) && /authoriz/i.test(l)) ||
+        /\bwork.?auth\b/i.test(l) ||
+        /\bsponsorship\b/i.test(l) ||
+        /\bvisa\b/i.test(l) ||
+        /\bpermit\b/i.test(l))                            return 'authorized';
+
     if (/authoriz|eligible|work.*right|right.*work|legally.*work|permit.*work|legally.*authoriz|entitled.*work/.test(l))
                                                           return DEFAULTS.authorized;
     if (/us.*citizen|citizen.*us|citizen.*united.?states/.test(l))  return p.is_us_citizen || 'Yes';
@@ -1532,6 +1545,14 @@
 
       // 1) Direct label → value match via bestSelectOption
       if (val) chosen = bestSelectOption(sel, val);
+
+      // 1b) Work Authorization Status: if val is 'authorized', also try 'yes'
+      //     so simple Yes/No dropdowns still get the right answer.
+      if (!chosen && val === 'authorized') {
+        chosen = bestSelectOption(sel, 'yes') ||
+                 bestSelectOption(sel, 'eligible') ||
+                 bestSelectOption(sel, 'citizen');
+      }
 
       // 2) Yes/No fallback: if it's a small option set with yes/no options,
       //    pick the appropriate answer based on question polarity
