@@ -3877,7 +3877,13 @@
   }
 
   // ===================== CREDIT HIDE =====================
+  // Only the hosts that actually display credit/coin UI need this run. On
+  // huge listing pages (e.g. hiring.cafe with thousands of cards) the
+  // previous unconditional `$$('*')` sweep on every DOM mutation hung the
+  // page. Strict host gate + cheap-precheck keep it free everywhere else.
+  const _CREDIT_HOSTS = /(^|\.)(jobright\.ai|simplify\.jobs)$/i;
   function hideCredits() {
+    if (!_CREDIT_HOSTS.test(location.hostname || '')) return;
     $$('.autofill-credit-row,.payment-entry,.plugin-setting-credits-tip').forEach(e => e.style.display = 'none');
     $$('.ant-modal-root').forEach(m => {
       const txt = m.textContent || '';
@@ -3895,10 +3901,15 @@
     // Hide review-related elements by class
     $$('.good-reviews-popup-text,.good-reviews-popup-title,.leave-review-button,.leave-review-text,[class*="GoodReviewsModel"],[class*="CriticizeReviewsModal"],[class*="review-popup"],[class*="review-modal"],[class*="feedback-modal"]')
       .forEach(e => e.style.display = 'none');
-    // Replace credit text
-    $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
-    // Simplify+ coin/token bypass display
-    $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
+    // Replace credit text — cheap precheck before the $$('*') sweep so we
+    // don't traverse the full DOM unless a credit/coin label is on the page.
+    const probe = document.body && (document.body.textContent || '');
+    if (probe && /\d+\s*credits?\s*available/i.test(probe)) {
+      $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
+    }
+    if (probe && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(probe)) {
+      $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
+    }
   }
 
   // ===================== CSS =====================
@@ -4508,7 +4519,17 @@
       updateFormAnalysis();
     });
     document.getElementById('ua-analyze')?.addEventListener('click', updateFormAnalysis);
-    setInterval(updateFormAnalysis, 5000);
+    // Only poll the DOM when the extension's form-analysis panel is actually
+    // visible — otherwise we were running expensive querySelectorAll('input,
+    // textarea, select') sweeps every 5s on every page (e.g. hiring.cafe with
+    // thousands of cards), causing tab freezes.
+    setInterval(() => {
+      const pills = document.getElementById('ua-form-pills');
+      if (!pills) return;
+      const rect = pills.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+      updateFormAnalysis();
+    }, 5000);
     setTimeout(updateFormAnalysis, 1500);
 
     // ---- Application History ----
@@ -4813,7 +4834,17 @@
   function showATSBadge() { const a = detectATS(); if (a) { document.getElementById('ua-ats-n').textContent = a + ' Detected'; document.getElementById('ua-ats').classList.add('show'); } }
 
   // ===================== OBSERVER =====================
-  function observe() { const o = new MutationObserver(() => hideCredits()); o.observe(document.body || document.documentElement, { childList: true, subtree: true }); }
+  // Debounced + host-gated — running an unbounded MutationObserver on every
+  // page (hiring.cafe / google / etc.) was causing tab freezes.
+  function observe() {
+    if (!/(^|\.)(jobright\.ai|simplify\.jobs)$/i.test(location.hostname || '')) return;
+    let t = null;
+    const o = new MutationObserver(() => {
+      if (t) return;
+      t = setTimeout(() => { t = null; try { hideCredits(); } catch (_) {} }, 600);
+    });
+    o.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
 
   // ===================== ATS DISPATCHER =====================
   async function dispatchATSAutomation() {
