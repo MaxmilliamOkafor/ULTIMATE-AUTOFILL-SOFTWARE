@@ -1,14 +1,16 @@
 /**
- * OptimHire Comprehensive Patch v6.4
+ * OptimHire Comprehensive Patch v6.5
  * Covers ALL 38 tasks — runs as a content script on every page
  *
- * v6.4 (2026-04-27) — GoHire/Forhyre SKIP:
- *   - GoHire/Forhyre (jobs.forhyre.com, gohire.io) jobs are now
- *     immediately skipped: APPLICATION_FAILED + skipCurrent fired,
- *     queue advances without stalling on the unsupported ATS.
- *   - isApplicationPage() returns false for GoHire (no auto-trigger)
- *   - MutationObserver GoHire special-cases removed (cleaner, no
- *     re-arm on GoHire modal injection)
+ * v6.5 (2026-04-28) — GoHire/Forhyre UNBLOCKED (OptimHire v2.5.3):
+ *   - OptimHire v2.5.3 added native GoHire support via gh-widget-*
+ *     CSS classes (gh-widget-checkbox-wrapper, gh-widget-checkbox,
+ *     gh-custom-question) in their Universal FieldConfig system.
+ *   - Removed all GoHire skip logic; GoHire now falls through to
+ *     autoFillPage() as a catch-up pass after the native API fill.
+ *   - isApplicationPage() returns true for GoHire (permissive).
+ *
+ * v6.4 (2026-04-27) — GoHire/Forhyre skip (superseded by v6.5)
  *
  * v6.1 (2026-04-26) — STABILITY FIXES:
  *   - FIX: "Just give me a minute more to finish filling out the form"
@@ -200,43 +202,6 @@
     : _rawATS;
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
-
-  /* ── v6.4: GoHire/Forhyre EARLY SKIP ────────────────────────────────
-   * Fire skip the instant the content script loads on a GoHire page,
-   * before the OptimHire sidepanel can start its API-driven autofill.
-   * Repeats the broadcast a few times to beat any race with the
-   * sidepanel's "Filling application form..." flow.                    */
-  if (CURRENT_ATS === 'GoHire' ||
-      /\b(forhyre\.com|gohire\.io|hire\.li)\b/i.test(HOST)) {
-    LOG('GoHire/Forhyre detected — sending immediate skip (early)');
-    const _gohireSkip = () => {
-      try {
-        chrome.runtime.sendMessage({
-          type: 'APPLICATION_FAILED',
-          reason: 'unsupported_ats_gohire',
-          url: location.href,
-        }).catch(() => {});
-      } catch (_) {}
-      try {
-        chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
-      } catch (_) {}
-      try {
-        chrome.runtime.sendMessage({ action: 'skip' }).catch(() => {});
-      } catch (_) {}
-      try {
-        chrome.runtime.sendMessage({ type: 'SKIP_JOB', reason: 'unsupported_ats_gohire' }).catch(() => {});
-      } catch (_) {}
-    };
-    // Fire immediately and then a few more times to beat any race
-    _gohireSkip();
-    setTimeout(_gohireSkip, 100);
-    setTimeout(_gohireSkip, 500);
-    setTimeout(_gohireSkip, 1500);
-    setTimeout(_gohireSkip, 3000);
-    // Mark autofill as already triggered + done so nothing else fires
-    try { window.__optimHireGoHireSkipped = true; } catch (_) {}
-    return; // STOP all further patch initialisation on this page
-  }
 
   /* ── v6.1: Automation-active guard ──────────────────────────────────
    * The patch was running on every ATS page and triggering autofills
@@ -3111,24 +3076,11 @@
     await autoFillPage();
   }
 
-  /* ── v6.4: GoHire / Forhyre — SKIP (unsupported ATS) ───────
-   * The GoHire modal ATS cannot be reliably autofilled due to its
-   * JS-injected shadow-DOM modal. Skip these jobs immediately so
-   * the automation queue advances without stalling.               */
-  async function gohireAutofill() {
-    LOG('GoHire: unsupported ATS — skipping job');
-    try {
-      chrome.runtime.sendMessage({
-        type: 'APPLICATION_FAILED',
-        reason: 'unsupported_ats_gohire',
-        url: location.href,
-      }).catch(() => {});
-    } catch (_) {}
-    try {
-      chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {});
-    } catch (_) {}
-    _fillActive = false;
-  }
+  /* ── v6.5: GoHire / Forhyre ────────────────────────────────────
+   * OptimHire v2.5.3 added native gh-widget support (gh-widget-
+   * checkbox-wrapper, gh-custom-question, etc). Their API-driven
+   * fill now handles GoHire forms. We rely on their native fill +
+   * a generic autoFillPage() catch-up pass (no custom adapter).   */
 
   /* ── Shared ATS dispatch helper ─────────────────────────── */
   async function runAtsAutofill() {
@@ -3191,16 +3143,11 @@
         case 'SuccessFactors':   await successFactorsAutofill(); break;
         case 'UKG':              await ukgAutofill();          break;
         case 'Avature':          await avatureAutofill();      break;
-        case 'GoHire':
-          // v6.4: GoHire/Forhyre is unsupported — skip immediately
-          LOG('GoHire: unsupported ATS — skipping');
-          try { chrome.runtime.sendMessage({ type: 'APPLICATION_FAILED', reason: 'unsupported_ats_gohire', url: location.href }).catch(() => {}); } catch (_) {}
-          try { chrome.runtime.sendMessage({ action: 'skipCurrent' }).catch(() => {}); } catch (_) {}
-          _fillActive = false;
-          return;
         default:                 await autoFillPage();         break;
       }
       // Generic pass after platform-specific (catches missed fields)
+      // v6.5: GoHire removed from exclusion list — autoFillPage runs as a
+      // catch-up pass after OptimHire's native v2.5.3 gh-widget fill.
       if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor','Recruitee','Pinpoint','SuccessFactors','UKG','Avature'].includes(CURRENT_ATS)) {
         await autoFillPage();
       }
@@ -3673,10 +3620,10 @@
     }
 
     /* ── GoHire / Forhyre ─────────────────────────────────────────
-     * v6.4: unsupported — never treat as application page so the
-     * skip fires immediately without stalling.                      */
+     * v6.5: OptimHire v2.5.3 added native gh-widget support — be
+     * permissive so the auto-trigger runs on the application modal. */
     if (CURRENT_ATS === 'GoHire') {
-      return false;
+      return true;
     }
 
     /* ── All other recognised ATS ─────────────────────────────────
