@@ -104,7 +104,7 @@ var e,t;"function"==typeof(e=globalThis.define)&&(t=e,e=null),function(t,i,o,n,r
       <div>
         <div style="position:absolute; right:-17px; top:35px; width:0; height:0;
           border-top:11px solid transparent; border-bottom:11px solid transparent; border-left:18px solid #383C42; pointer-events:none;"></div>
-        <div id="optimhire-html-msg">Just give me a minute more to finish filling out the form.</div>
+        <div id="optimhire-html-msg">Auto-fill is running — you can keep editing the form manually too.</div>
         <button id="optimhire-html-ok-btn"
                 class="ignore-one-minute-backdrop"
                 type="button">
