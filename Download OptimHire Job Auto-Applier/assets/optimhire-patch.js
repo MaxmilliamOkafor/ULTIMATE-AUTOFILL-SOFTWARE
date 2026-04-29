@@ -1,6 +1,47 @@
 /**
- * OptimHire Comprehensive Patch v6.0
- * Covers ALL 35 tasks — runs as a content script on every page
+ * OptimHire Comprehensive Patch v6.6
+ * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.6 (2026-04-28) — Work Auth autofill + popup fix:
+ *   - ADD: Work Authorization Status autofill — label condition:
+ *     (work+authorization) OR sponsorship OR visa OR permit → picks
+ *     option matching "authorized" first, then "yes" as fallback,
+ *     covering both "Authorized to work" and plain "Yes/No" dropdowns.
+ *   - FIX: "Just give me a minute more" popup ALWAYS removed (not just
+ *     on idle browsing). STOP_INJECT_POPUP=true at all times so the
+ *     popup is never injected and the user can manually edit freely.
+ *
+ * v6.5 (2026-04-28) — GoHire/Forhyre UNBLOCKED (OptimHire v2.5.3):
+ *   - OptimHire v2.5.3 added native GoHire support via gh-widget-*
+ *     CSS classes (gh-widget-checkbox-wrapper, gh-widget-checkbox,
+ *     gh-custom-question) in their Universal FieldConfig system.
+ *   - Removed all GoHire skip logic; GoHire now falls through to
+ *     autoFillPage() as a catch-up pass after the native API fill.
+ *   - isApplicationPage() returns true for GoHire (permissive).
+ *
+ * v6.4 (2026-04-27) — GoHire/Forhyre skip (superseded by v6.5)
+ *
+ * v6.1 (2026-04-26) — STABILITY FIXES:
+ *   - FIX: "Just give me a minute more to finish filling out the form"
+ *     popup auto-dismissed (DOM observer + STOP_INJECT_POPUP config)
+ *   - FIX: Random refreshes on LinkedIn/ATS/etc. while just browsing —
+ *     auto-trigger now requires active automation (csvActiveJobId,
+ *     isAutoProcessStartJob, autoApplyStateUpdate.isRunning) OR explicit
+ *     manual click OR ohAutoTrigger === true (default OFF)
+ *   - FIX: MutationObservers now require new form/input nodes AND active
+ *     automation OR an apply-page URL pattern before reacting; throttled
+ *     to one fire per 4s
+ *   - FIX: Captcha solver no longer scans every DOM mutation; runs only
+ *     when active automation OR _fillActive is true
+ *   - FIX: Cookie banner only auto-dismissed during automation
+ *   - FIX: Blocking iframes only force-skipped during automation; idle
+ *     browsing just removes them silently
+ *   - T36: Cloudflare bot-challenge detection — bail out instead of
+ *     looping
+ *   - T37: Dropzone resume upload — drag-drop file zones supported
+ *   - T38: querySelectorWithShadow utility (v2.5.2 port)
+ *
+ * v6.2–v6.3 (2026-04-26) — GoHire/Forhyre autofill attempts (superseded by v6.4 skip)
  *
  * T1  – ATS auto-detection + auto-trigger on supported domains
  * T2  – Credits locked at 9999 forever
@@ -153,6 +194,12 @@
     'ultipro.com':         'UKG',
     'recruiting2.ultipro.com': 'UKG',
     'avature.net':          'Avature',
+    // v6.2: GoHire / Forhyre (same platform, different domains)
+    'forhyre.com':          'GoHire',
+    'jobs.forhyre.com':     'GoHire',
+    'gohire.io':            'GoHire',
+    'app.gohire.io':        'GoHire',
+    'hire.li':              'GoHire',   // GoHire short-link domain
   };
 
   const HOST = location.hostname.toLowerCase().replace(/^www\./, '');
@@ -164,6 +211,118 @@
     : _rawATS;
 
   LOG(`Page: ${HOST} | ATS: ${CURRENT_ATS || 'unknown'}`);
+
+  /* ── v6.1: Automation-active guard ──────────────────────────────────
+   * The patch was running on every ATS page and triggering autofills
+   * even when the user was just browsing. This caused random refreshes,
+   * stuck "Just give me a minute" popups on irrelevant tabs, and pages
+   * mutating under the user.
+   *
+   * Now: most active behaviours (auto-trigger, mutation observer fills,
+   * captcha solver, blocking-iframe handling) are gated on the user
+   * being in an *actual* automation session:
+   *   - csvActiveJobId is set (CSV auto-apply running), OR
+   *   - isAutoProcessStartJob is true (background auto-apply running), OR
+   *   - ohManualTrigger was set in the last 30s (user clicked the
+   *     extension's Autofill button on this page)
+   * Otherwise the patch stays mostly dormant — only credit-locking,
+   * popup-dismissal and freshness-badges keep running.
+   * ────────────────────────────────────────────────────────────────── */
+  let _manualTriggerTs = 0;
+  let _automationCache = { active: false, ts: 0 };
+  const AUTOMATION_CACHE_MS = 1500; // re-check storage at most every 1.5s
+
+  async function isAutomationActive() {
+    if (Date.now() - _automationCache.ts < AUTOMATION_CACHE_MS) {
+      return _automationCache.active;
+    }
+    try {
+      const { csvActiveJobId, isAutoProcessStartJob, autoApplyStateUpdate } =
+        await ST.get(['csvActiveJobId', 'isAutoProcessStartJob', 'autoApplyStateUpdate']);
+      const isRunning = !!(autoApplyStateUpdate && autoApplyStateUpdate.isRunning);
+      const active = !!csvActiveJobId || !!isAutoProcessStartJob || isRunning ||
+                     (Date.now() - _manualTriggerTs < 30_000);
+      _automationCache = { active, ts: Date.now() };
+      return active;
+    } catch (_) {
+      return Date.now() - _manualTriggerTs < 30_000;
+    }
+  }
+
+  /* User explicitly clicked Autofill on this tab → arm manual mode for 30s */
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg) return;
+    if (msg.type === 'TRIGGER_AUTOFILL' || msg.type === 'MANUAL_AUTOFILL' ||
+        msg.action === 'autofill' || msg.action === 'startAutofill') {
+      _manualTriggerTs = Date.now();
+      _automationCache = { active: true, ts: Date.now() };
+    }
+  });
+
+  /* ── v6.1: Auto-dismiss OptimHire "give me a minute" popup ──────────
+   * The official extension injects #optimhire-html-click-notification
+   * on every ATS page asking the user to wait. On idle browsing this
+   * is just visual noise — auto-click OK to close.
+   * ────────────────────────────────────────────────────────────────── */
+  const OH_POPUP_IDS = [
+    'optimhire-html-click-notification',
+    'optimhire-html-click-notification-backdrop',
+  ];
+
+  async function dismissOhPopup() {
+    const popup    = document.getElementById('optimhire-html-click-notification');
+    const backdrop = document.getElementById('optimhire-html-click-notification-backdrop');
+    if (!popup && !backdrop) return false;
+    // v6.6: always remove the popup so the user can manually edit at any time.
+    // OptimHire's autofill continues in the background regardless.
+    try { popup?.remove(); } catch (_) {}
+    try { backdrop?.remove(); } catch (_) {}
+    document.body.style.overflow = '';
+    LOG('OH popup: removed (manual editing allowed)');
+    return true;
+  }
+
+  /* Watch for the popup being injected and dismiss immediately */
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (OH_POPUP_IDS.includes(node.id)) {
+          dismissOhPopup();
+          return;
+        }
+        // Also catch wrappers that might add the popup as a descendant
+        if (node.querySelector && node.querySelector('#optimhire-html-click-notification')) {
+          dismissOhPopup();
+          return;
+        }
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  /* Periodic sweep — covers cases where the popup re-appears */
+  setInterval(() => { dismissOhPopup().catch(() => {}); }, 3000);
+
+  /* v6.1 / v2.5.2 port: set OPTIMHIRE_CONFIG.STOP_INJECT_POPUP = true on
+   * the page world so the popup is never injected when user is just
+   * browsing. Re-applied periodically since the official module may
+   * reset its config. */
+  function setStopInjectPopup(stop) {
+    try {
+      const s = document.createElement('script');
+      s.textContent = `;(function(){try{
+        if(!window.__OH_STOP_INJECT_POPUP_ORIG){window.__OH_STOP_INJECT_POPUP_ORIG=true;}
+        window.OPTIMHIRE_STOP_INJECT_POPUP=${stop?'true':'false'};
+        if(window.OPTIMHIRE_CONFIG){window.OPTIMHIRE_CONFIG.STOP_INJECT_POPUP=${stop?'true':'false'};}
+      }catch(e){}})();`;
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+    } catch (_) {}
+  }
+  // v6.6: always suppress the popup so the user can edit freely at any time.
+  // OptimHire's autofill continues in the background regardless of the popup.
+  setInterval(() => { setStopInjectPopup(true); }, 5000);
+  setStopInjectPopup(true);
 
   /* ── Auto-skip cap: patch any global OPTIMHIRE_CONFIG object ───────────
    * The autofill script (autofill.73df3a6d.js) exposes its config as a
@@ -506,6 +665,71 @@
     } catch (_) {}
     return out;
   }
+  function querySelectorWithShadow(selector, root = document) {
+    return queryAllWithShadow(selector, root)[0] || null;
+  }
+
+  /* ── v6.1 / v2.5.2 port: Cloudflare bot-challenge detection ─────────
+   * If a Cloudflare "verify you are human" challenge is on the page,
+   * any autofill we do will fail and may trip the page into a refresh
+   * loop. Detect and bail out cleanly so the user can solve manually.
+   * ────────────────────────────────────────────────────────────────── */
+  function isCloudflareChallenge() {
+    try {
+      // Iframe-based challenge
+      if (document.querySelector('iframe[src*="challenges.cloudflare.com"]')) return true;
+      // Turnstile widget
+      if (document.querySelector('div.cf-turnstile, [class*="cf-challenge"], #cf-challenge-stage')) return true;
+      // Title-based heuristic
+      if (/just a moment|attention required|cloudflare/i.test(document.title)) {
+        if (document.querySelector('input[type="hidden"][name="cf_chl"]') ||
+            document.querySelector('[id*="cf-"]')) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /* ── v6.1 / v2.5.2 port: Dropzone resume upload ─────────────────────
+   * Many ATS use drag-drop dropzones (no plain file input). When the
+   * dropzone wraps a hidden file input, we can target it via shadow-aware
+   * search. When the input is created on click, we simulate a click on
+   * the dropzone first so the input materialises, then attach the file.
+   * ────────────────────────────────────────────────────────────────── */
+  const DROPZONE_SEL =
+    '[class*="dropzone" i], [class*="drop-zone" i], [class*="drop_zone" i],' +
+    '[class*="upload-area" i], [class*="upload_area" i], [data-testid*="dropzone" i]';
+
+  async function tryDropzoneResume(p) {
+    const url = p?.resume_url || p?.resumeUrl || p?.resume;
+    if (!url) return 0;
+    const zones = queryAllWithShadow(DROPZONE_SEL);
+    if (!zones.length) return 0;
+    let attached = 0;
+    const fname = (p.first_name || 'resume') + '_' + (p.last_name || 'file') + '.pdf';
+    for (const zone of zones) {
+      let inp = zone.querySelector('input[type="file"]');
+      if (!inp) {
+        // Try clicking once to materialise the input
+        try { realClick(zone); } catch (_) {}
+        await sleep(120);
+        inp = zone.querySelector('input[type="file"]') ||
+              querySelectorWithShadow('input[type="file"]', zone);
+      }
+      if (!inp || (inp.files && inp.files.length > 0)) continue;
+      const file = await fetchResumeFile(url, fname);
+      if (!file) break;
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        attached++;
+      } catch (_) {}
+    }
+    if (attached) LOG(`Resume attached via dropzone to ${attached} input(s)`);
+    return attached;
+  }
 
   /* ── T33: Apply-on-company-site auto-skip (ported from v2.5.0) ──────
    * On Indeed/LinkedIn job pages the only action is "Apply on company
@@ -654,10 +878,12 @@
     return false;
   }
 
-  // Run at load and periodically — banners often appear after DOM ready
-  setTimeout(dismissCookieBanner, 600);
-  setTimeout(dismissCookieBanner, 2000);
-  setInterval(dismissCookieBanner, 8000);
+  // Run at load and periodically — banners often appear after DOM ready.
+  // v6.1: only auto-dismiss when in active automation; users browsing
+  // normally may want to make their own consent choice.
+  setTimeout(async () => { if (await isAutomationActive()) dismissCookieBanner(); }, 600);
+  setTimeout(async () => { if (await isAutomationActive()) dismissCookieBanner(); }, 2000);
+  setInterval(async () => { if (await isAutomationActive()) dismissCookieBanner(); }, 12000);
 
   /* ── T27: Review-page detector + auto-submit ─────────────────────────
    * Many multi-step ATS flows end with a "Review your application" step
@@ -858,6 +1084,17 @@
     if (/notice.?period|period.?of.?notice/.test(l))       return p.notice_period || DEFAULTS.notice;
     if (/availab|start.?date|when.*start|when.*begin|earliest.*start/.test(l))
                                                           return p.availability || DEFAULTS.availability;
+
+    // ── Work Authorization Status ─────────────────────────────────────────
+    // Label: (work AND authorization) OR sponsorship OR visa OR permit
+    // Returns 'authorized' so bestSelectOption finds "Authorized to work",
+    // "Yes - authorized", "Yes, I am authorized", etc.
+    if ((/work/i.test(l) && /authoriz/i.test(l)) ||
+        /\bwork.?auth\b/i.test(l) ||
+        /\bsponsorship\b/i.test(l) ||
+        /\bvisa\b/i.test(l) ||
+        /\bpermit\b/i.test(l))                            return 'authorized';
+
     if (/authoriz|eligible|work.*right|right.*work|legally.*work|permit.*work|legally.*authoriz|entitled.*work/.test(l))
                                                           return DEFAULTS.authorized;
     if (/us.*citizen|citizen.*us|citizen.*united.?states/.test(l))  return p.is_us_citizen || 'Yes';
@@ -1309,6 +1546,14 @@
       // 1) Direct label → value match via bestSelectOption
       if (val) chosen = bestSelectOption(sel, val);
 
+      // 1b) Work Authorization Status: if val is 'authorized', also try 'yes'
+      //     so simple Yes/No dropdowns still get the right answer.
+      if (!chosen && val === 'authorized') {
+        chosen = bestSelectOption(sel, 'yes') ||
+                 bestSelectOption(sel, 'eligible') ||
+                 bestSelectOption(sel, 'citizen');
+      }
+
       // 2) Yes/No fallback: if it's a small option set with yes/no options,
       //    pick the appropriate answer based on question polarity
       if (!chosen && opts.length <= 6) {
@@ -1639,6 +1884,14 @@
 
     async function handleMissingDetailsIframe(iframe) {
       if (_skipScheduled) return;
+      // v6.1: only intervene when actually in an automation session.
+      // Otherwise just remove the iframe so the user can browse.
+      const active = await isAutomationActive();
+      if (!active) {
+        try { iframe.remove(); document.body.style.overflow = ''; } catch (_) {}
+        LOG('Missing-details iframe removed (idle browsing)');
+        return;
+      }
       _skipScheduled = true;
       LOG('Missing-details iframe detected — scheduling force-skip in 5s');
 
@@ -1799,9 +2052,24 @@
       .filter(el => !el.checked).forEach(cb => realClick(cb));
   }
 
-  new MutationObserver(() => solveCaptcha())
+  /* v6.1: only run captcha solver when automation is active. Constantly
+   * re-scanning every DOM change on every page caused CPU spikes and
+   * slowed down regular browsing. Now: scan once on page load, plus
+   * a debounced 6-second re-check while automation is active. */
+  let _captchaTick = null;
+  function scheduleCaptchaScan() {
+    if (_captchaTick) return;
+    _captchaTick = setTimeout(async () => {
+      _captchaTick = null;
+      const active = await isAutomationActive();
+      if (!active && !_fillActive) return;
+      try { solveCaptcha(); } catch (_) {}
+    }, 6000);
+  }
+  new MutationObserver(scheduleCaptchaScan)
     .observe(document.body, { childList: true, subtree: true });
-  solveCaptcha();
+  // One-shot scan at load for pages that have a captcha already rendered
+  isAutomationActive().then((active) => { if (active) solveCaptcha(); });
 
   /* ── T8: Workday comprehensive autofill (v4.0) ───────────── */
   /*
@@ -2829,8 +3097,27 @@
     await autoFillPage();
   }
 
+  /* ── v6.5: GoHire / Forhyre ────────────────────────────────────
+   * OptimHire v2.5.3 added native gh-widget support (gh-widget-
+   * checkbox-wrapper, gh-custom-question, etc). Their API-driven
+   * fill now handles GoHire forms. We rely on their native fill +
+   * a generic autoFillPage() catch-up pass (no custom adapter).   */
+
   /* ── Shared ATS dispatch helper ─────────────────────────── */
   async function runAtsAutofill() {
+    // v6.1: bail out cleanly if a Cloudflare bot-challenge is showing,
+    // so we don't trip a refresh loop while it's in progress.
+    if (isCloudflareChallenge()) {
+      LOG('Cloudflare challenge detected — skipping autofill');
+      try {
+        chrome.runtime.sendMessage({
+          type: 'APPLICATION_FAILED',
+          reason: 'cloudflare_challenge',
+          url: location.href,
+        }).catch(() => {});
+      } catch (_) {}
+      return;
+    }
     _fillActive = true;
     try {
       // T26: Dismiss cookie banners before filling so buttons aren't obscured
@@ -2880,6 +3167,8 @@
         default:                 await autoFillPage();         break;
       }
       // Generic pass after platform-specific (catches missed fields)
+      // v6.5: GoHire removed from exclusion list — autoFillPage runs as a
+      // catch-up pass after OptimHire's native v2.5.3 gh-widget fill.
       if (!['Ashby','BambooHR','Jobvite','Lever','Workable','iCIMS','Paylocity','JazzHR','Teamtailor','Recruitee','Pinpoint','SuccessFactors','UKG','Avature'].includes(CURRENT_ATS)) {
         await autoFillPage();
       }
@@ -2888,6 +3177,8 @@
       try {
         const p = await getProfile();
         await tryResumeUpload(p);
+        // v6.1: also try drag-drop zones (Greenhouse/Workday style)
+        await tryDropzoneResume(p);
       } catch (_) {}
 
       // T27: After fill, check if we've landed on a review step
@@ -3349,6 +3640,13 @@
              document.querySelectorAll('input:not([type=hidden])').length > 2;
     }
 
+    /* ── GoHire / Forhyre ─────────────────────────────────────────
+     * v6.5: OptimHire v2.5.3 added native gh-widget support — be
+     * permissive so the auto-trigger runs on the application modal. */
+    if (CURRENT_ATS === 'GoHire') {
+      return true;
+    }
+
     /* ── All other recognised ATS ─────────────────────────────────
      * If we're on a known ATS domain, be permissive:
      * 2+ non-hidden inputs anywhere in the DOM is enough.             */
@@ -3402,8 +3700,17 @@
     const { csvActiveJobId } = await ST.get('csvActiveJobId');
     if (csvActiveJobId) return; /* CSV bridge handles it */
 
+    /* v6.1: Default OFF — only auto-trigger when the user is in an
+     * automation session (background auto-apply running, or they just
+     * clicked Autofill). This prevents random refills on every ATS
+     * page the user happens to browse. */
     const { ohAutoTrigger } = await ST.get('ohAutoTrigger');
-    if (ohAutoTrigger === false) return; /* user disabled */
+    if (ohAutoTrigger === false) return; /* user explicitly disabled */
+    if (ohAutoTrigger !== true) {
+      // Setting unset or any non-true value → require active automation
+      const active = await isAutomationActive();
+      if (!active) return;
+    }
 
     /* URL-dedup: don't fill same page twice */
     const norm = normalizeUrl(location.href);
@@ -3474,17 +3781,48 @@
         _autoTriggerRunning = false;
         sleep(2000).then(() => autoTriggerAutofill());
       }
-    }, 1000);
+    }, 2000); // v6.1: 1s → 2s, less CPU overhead on idle pages
 
-    /* ── DOM mutation watcher: fires when modal/form appears ─────── */
+    /* ── DOM mutation watcher: fires when modal/form appears ──────
+     * v6.1: heavily gated to avoid the patch reacting to every layout
+     * change on LinkedIn / company sites the user is just browsing.
+     * Requires (a) significant new node count AND (b) a form-like
+     * element actually being added AND (c) automation to be active
+     * OR the page to be a known application URL (jobs/apply/career).
+     *
+     * Throttled to one evaluation every 4s; requires new form/input
+     * nodes AND active automation OR an apply-page URL.            */
+    const APPLY_URL_RE = /\/(apply|application|jobs?|careers?|join)([\/?#]|$)/i;
     let _mutationDebounce = null;
+    let _mutationFired = 0;
     new MutationObserver(mutations => {
-      if (_autoTriggered || _autoTriggerRunning) return;
-      /* Only care if significant new nodes were added */
+      if (_autoTriggerRunning) return;
+      if (_autoTriggered) return;
+      if (Date.now() - _mutationFired < 4000) return;
       const added = mutations.reduce((n, m) => n + m.addedNodes.length, 0);
-      if (added < 2) return;
+      if (added < 4) return;
+      // Only proceed if a form/input was actually added in this batch
+      let hasForm = false;
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.matches?.('form, input, textarea, select, dialog, [role="dialog"]') ||
+              node.querySelector?.('form, input:not([type=hidden]), textarea, select')) {
+            hasForm = true; break;
+          }
+        }
+        if (hasForm) break;
+      }
+      if (!hasForm) return;
+      _mutationFired = Date.now();
       clearTimeout(_mutationDebounce);
-      _mutationDebounce = setTimeout(() => autoTriggerAutofill(), 1500);
+      _mutationDebounce = setTimeout(async () => {
+        // Final gate: require automation OR the URL itself looks like an apply page
+        const looksApply = APPLY_URL_RE.test(location.pathname) || APPLY_URL_RE.test(location.href);
+        const active = await isAutomationActive();
+        if (!active && !looksApply) return;
+        autoTriggerAutofill();
+      }, 1500);
     }).observe(document.body, { childList: true, subtree: true });
   }
 
