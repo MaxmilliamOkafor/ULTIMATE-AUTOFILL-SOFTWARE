@@ -6101,8 +6101,6 @@ Result: Shipped my first production change in week three and my notes doc became
   'use strict';
   if (window.self !== window.top) return;
   if (window.__uaDualButtonsMounted) return;
-  // Master gate: never attach observers/timers on non-job pages.
-  if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
   window.__uaDualButtonsMounted = true;
   const LOG = (...a) => console.log('[UA-Buttons]', ...a);
 
@@ -6385,8 +6383,17 @@ Result: Shipped my first production change in week three and my notes doc became
     }
   }
 
+  function plasmoSidebarPresent() {
+    // Cheap precheck — avoid the deep shadow-DOM walk on pages where
+    // Jobright's Plasmo sidebar isn't even mounted (most browsing pages).
+    try {
+      return !!document.querySelector('plasmo-csui, [id^="plasmo-"], [class*="plasmo"], [id*="jobright" i], [class*="jobright" i]');
+    } catch (_) { return false; }
+  }
+
   function tryInject() {
     try {
+      if (!plasmoSidebarPresent()) return;
       removeStrayInjections();
       injectUnderNative();
     } catch (e) { LOG('inject err:', e.message); }
@@ -6420,4 +6427,149 @@ Result: Shipped my first production change in week three and my notes doc became
     const found = deepQueryAll('#' + INJECT_ID).some(e => isInsidePlasmoSidebar(e));
     if (!found) tryInject();
   }, 4000);
+})();
+
+// ============================================================================
+// === v1.5.4 SHADOW-DOM CREDIT / UPGRADE / BANNER HIDER (Jobright sidebar) ===
+// The Jobright sidebar is a Plasmo CSUI mounted in a shadow root. Page-level
+// CSS doesn't pierce shadow DOM, and document.querySelectorAll can't see in
+// either, so the credit row, "Get Unlimited" link, and "Upgrade to Turbo"
+// banner stayed visible. This hider walks shadow roots and removes them.
+// ============================================================================
+(function () {
+  'use strict';
+  if (window.self !== window.top) return;
+  if (window.__uaShadowCreditHiderMounted) return;
+  window.__uaShadowCreditHiderMounted = true;
+
+  const HIDE_TEXT_PATTERNS = [
+    /\d+\s*credits?\s*left/i,
+    /\d+\s*credits?\s*remaining/i,
+    /\d+\s*credits?\s*available/i,
+    /get\s*unlimited/i,
+    /upgrade\s*to\s*turbo/i,
+    /upgrade\s*now/i,
+    /get\s*hired\s*faster/i,
+    /\d+\s*%\s*off/i,
+    /upgrade\s*to\s*premium/i,
+    /upgrade\s*to\s*plus/i,
+    /unlock\s*unlimited/i,
+    /\d+\s*coins?\s*(left|remaining)/i,
+    /\d+\s*tokens?\s*(left|remaining)/i,
+    /go\s*premium/i,
+    /try\s*turbo/i,
+    /\bbuy\s*credits?/i,
+    /out\s*of\s*credits?/i
+  ];
+  const REPLACE_NUM = [
+    { rx: /\d+\s*(credits?\s*(left|remaining|available))/i, with: 'Unlimited $1' },
+    { rx: /\d+\s*(coins?|tokens?)\s*(left|remaining)/i, with: '∞ $1 $2' }
+  ];
+
+  function findPlasmoHosts() {
+    // Find ONLY the top-level Plasmo / Jobright host elements; we then walk
+    // their shadow roots specifically instead of scanning the whole document.
+    try {
+      return Array.from(document.querySelectorAll('plasmo-csui, [id^="plasmo-"], [class*="plasmo"], [id*="jobright" i], [class*="jobright" i]'));
+    } catch (_) { return []; }
+  }
+
+  function* walkPlasmo(host, depth) {
+    if (!host || depth > 8) return;
+    const root = host.shadowRoot || host;
+    let kids = [];
+    try { kids = Array.from(root.querySelectorAll('*')); } catch (_) { return; }
+    for (const el of kids) {
+      yield el;
+      if (el.shadowRoot) yield* walkPlasmo(el, depth + 1);
+    }
+  }
+
+  function bestRowAncestor(el) {
+    // Walk up to a reasonable container: the row/banner element to hide.
+    let n = el;
+    let hops = 0;
+    while (n && hops++ < 6 && n.parentElement) {
+      const parent = n.parentElement;
+      // Stop at the first ancestor with substantially more text — that means
+      // we'd be hiding something larger than just this row.
+      const myLen = (n.textContent || '').length;
+      const pLen = (parent.textContent || '').length;
+      if (pLen > myLen * 3 && myLen > 0) break;
+      n = parent;
+    }
+    return n;
+  }
+
+  function nukePromos() {
+    const hosts = findPlasmoHosts();
+    if (!hosts.length) return 0;
+    let hits = 0;
+    for (const host of hosts) {
+      try {
+        for (const el of walkPlasmo(host, 0)) {
+          if (!el || el.nodeType !== 1) continue;
+          const txt = (el.textContent || '').trim();
+          if (!txt || txt.length > 200) continue;
+          if (HIDE_TEXT_PATTERNS.some(rx => rx.test(txt))) {
+            const target = bestRowAncestor(el);
+            if (target && target.style && target.style.display !== 'none') {
+              target.style.setProperty('display', 'none', 'important');
+              hits++;
+            }
+          }
+          // Inline replace credit/coin counters on leaf nodes.
+          if (!el.children || !el.children.length) {
+            for (const r of REPLACE_NUM) {
+              if (r.rx.test(txt)) { el.textContent = txt.replace(r.rx, r.with); break; }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return hits;
+  }
+
+  let nukeTimer = null;
+  function scheduleNuke() {
+    if (nukeTimer) return;
+    nukeTimer = setTimeout(() => {
+      nukeTimer = null;
+      // Bail cheaply if no Plasmo host exists yet — saves walking nothing
+      // and keeps this hider free on regular browsing pages.
+      if (!findPlasmoHosts().length) return;
+      try { nukePromos(); } catch (_) {}
+    }, 600);
+  }
+
+  // Run on a few staged timers — the Plasmo sidebar mounts asynchronously.
+  [800, 2000, 4500, 9000].forEach(ms => setTimeout(scheduleNuke, ms));
+
+  // Watch for DOM mutations to re-nuke when the sidebar re-renders. Heavy
+  // debounce (600ms) plus the cheap host-presence precheck means this
+  // contributes effectively zero cost on non-Jobright pages.
+  try {
+    const mo = new MutationObserver(() => scheduleNuke());
+    mo.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  } catch (_) {}
+
+  // Also inject a CSS rule into each Plasmo shadow root for permanent hiding.
+  function injectShadowCSS() {
+    const css = `
+      [class*="credit-row" i], [class*="creditRow" i], [class*="upgrade-banner" i],
+      [class*="upgradeBanner" i], [class*="paywall" i], [class*="upsell" i],
+      [class*="turbo-promo" i], [class*="pricing-banner" i], [class*="get-unlimited" i] { display: none !important; }
+    `;
+    for (const host of findPlasmoHosts()) {
+      const root = host.shadowRoot;
+      if (!root || root.querySelector('style[data-ua-credit-hide]')) continue;
+      try {
+        const s = document.createElement('style');
+        s.setAttribute('data-ua-credit-hide', '1');
+        s.textContent = css;
+        root.appendChild(s);
+      } catch (_) {}
+    }
+  }
+  [1200, 3000, 6000].forEach(ms => setTimeout(injectShadowCSS, ms));
 })();
