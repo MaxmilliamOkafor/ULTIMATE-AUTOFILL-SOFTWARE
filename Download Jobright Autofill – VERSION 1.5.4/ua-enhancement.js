@@ -1,4 +1,7 @@
 // === ULTIMATE AUTOFILL ENHANCEMENT v11.0 (Jobright v1.5.4) ===
+// Build: 2026-04-29.b — shadow-DOM credit/upgrade banner hider, sidebar
+// Generate Custom Resume + Autofill button, glitch fixes for hiring.cafe /
+// LinkedIn / and other browsing pages.
 // Ultimate Edition: AI-level knockout intelligence, 500+ pre-seeded ATS responses,
 // STAR-format behavioral answers, resume keyword optimizer, smart cover-letter generator,
 // 150+ ATS platforms (Paradox/Olivia, Phenom chatbot, Beamery, HireVue chat, ModernHire),
