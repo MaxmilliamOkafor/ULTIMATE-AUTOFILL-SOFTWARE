@@ -1,6 +1,19 @@
 /**
- * OptimHire Comprehensive Patch v6.6
+ * OptimHire Comprehensive Patch v6.7
  * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.7 (2026-04-28) — HiringCafe crash fix:
+ *   - FIX: hiring.cafe "Page Unresponsive" / browser crash. The T10
+ *     handler installed a MutationObserver on document.body with
+ *     childList+subtree and ran $$('a,button').find(...) on every
+ *     mutation. On the search/listings page (thousands of job cards
+ *     lazy-loaded on scroll) this triggered a full DOM scan per
+ *     mutation and froze the tab.
+ *   - Now: bail out entirely on the listings/home page (only run on a
+ *     job-detail path), bail out unless automation is active
+ *     (_fillActive), throttle the observer callback to one fire per
+ *     1.5s, disconnect on first successful click, and apply a 30s
+ *     hard-stop disconnect regardless of outcome.
  *
  * v6.6 (2026-04-28) — Work Auth autofill + popup fix:
  *   - ADD: Work Authorization Status autofill — label condition:
@@ -2539,6 +2552,17 @@
   function handleHiringCafe() {
     if (!HOST.includes('hiring.cafe')) return;
 
+    // FIX (hiring.cafe crashes): the listings/search page renders thousands
+    // of job cards via lazy scroll, so an unthrottled MutationObserver that
+    // scans every <a>/<button> on each mutation makes the page unresponsive.
+    // Only run on a single job's detail view, and only when automation is
+    // active. Bail out on the search/home page entirely.
+    const path = location.pathname || '/';
+    const isJobDetail = /\/job\//i.test(path) || /\/jobs?\//i.test(path);
+    if (!isJobDetail) return;
+    // idle browsing — do nothing (avoid scanning/observing during plain browsing)
+    if (!_fillActive) return;
+
     const sizeEl = $$('[class*="size"],[class*="employees"],[data-field*="size"]')
       .find(el => /\d/.test(el.textContent));
     if (sizeEl) {
@@ -2551,14 +2575,30 @@
       }
     }
 
+    let clicked = false;
+    let observer = null;
+    let throttleTimer = null;
     const tryClick = () => {
+      if (clicked) return;
       const btn = $$('a,button').find(el =>
         /apply directly|apply now|apply for this/i.test(el.textContent)
       );
-      if (btn) { LOG('HiringCafe: Apply Directly'); realClick(btn); }
+      if (btn) {
+        clicked = true;
+        LOG('HiringCafe: Apply Directly');
+        realClick(btn);
+        if (observer) { observer.disconnect(); observer = null; }
+      }
+    };
+    const scheduled = () => {
+      if (clicked || throttleTimer) return;
+      throttleTimer = setTimeout(() => { throttleTimer = null; tryClick(); }, 1500);
     };
     setTimeout(tryClick, 2000);
-    new MutationObserver(tryClick).observe(document.body, { childList: true, subtree: true });
+    observer = new MutationObserver(scheduled);
+    observer.observe(document.body, { childList: true, subtree: true });
+    // hard stop: never run longer than 30s, regardless of outcome
+    setTimeout(() => { if (observer) { observer.disconnect(); observer = null; } }, 30000);
   }
   handleHiringCafe();
 
