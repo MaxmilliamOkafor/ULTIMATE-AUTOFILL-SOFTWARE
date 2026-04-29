@@ -145,6 +145,94 @@
     return _xhrSend.apply(this, arguments);
   };
 
+  // ===================== STORAGE + RUNTIME-MESSAGE BYPASS =====================
+  // Plasmo content scripts share our isolated world, so patching
+  // chrome.storage and chrome.runtime.sendMessage here intercepts the
+  // Jobright sidebar's reads/writes of credit/coin/token state.
+  // This is where '3 Credits Left' actually comes from — not the fetch
+  // endpoints alone.
+  const _CREDIT_KEY_RE = /credit|coin|token|usage|quota|limit|remaining|dailyFill|balance|subscription|tier|plan|premium|pro|paywall|upgrade/i;
+  function inflateCreditObj(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(inflateCreditObj);
+    const out = {};
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      // Numeric credit-like value -> 99999
+      if (typeof v === 'number' && _CREDIT_KEY_RE.test(k) && !/used|consumed|spent/i.test(k)) {
+        out[k] = 99999;
+        continue;
+      }
+      // 'used' / 'consumed' counters -> 0
+      if (typeof v === 'number' && /used|consumed|spent/i.test(k)) { out[k] = 0; continue; }
+      // String tier indicators -> premium
+      if (typeof v === 'string' && /tier|plan/i.test(k) && /free|basic|trial|standard/i.test(v)) {
+        out[k] = 'premium'; continue;
+      }
+      if (typeof v === 'boolean' && /isPremium|isPaid|isPro|hasSubscription|unlimited|isUnlimited|premium|pro/i.test(k)) {
+        out[k] = true; continue;
+      }
+      // Recurse
+      out[k] = (v && typeof v === 'object') ? inflateCreditObj(v) : v;
+    }
+    return out;
+  }
+
+  try {
+    if (chrome && chrome.storage && chrome.storage.local) {
+      const _origGet = chrome.storage.local.get.bind(chrome.storage.local);
+      chrome.storage.local.get = function (keys, cb) {
+        // Promise form
+        if (typeof cb !== 'function') {
+          return _origGet(keys).then(inflateCreditObj);
+        }
+        return _origGet(keys, (data) => { try { cb(inflateCreditObj(data)); } catch (_) { cb(data); } });
+      };
+      const _origSet = chrome.storage.local.set.bind(chrome.storage.local);
+      chrome.storage.local.set = function (items, cb) {
+        // Inflate credit-like values when Jobright tries to DECREMENT them.
+        try { items = inflateCreditObj(items); } catch (_) {}
+        if (typeof cb !== 'function') return _origSet(items);
+        return _origSet(items, cb);
+      };
+    }
+  } catch (_) {}
+
+  // chrome.runtime.sendMessage — Plasmo sidebar often asks the background
+  // for current credit state via a message. Inflate the response.
+  try {
+    if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      const _send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = function (...args) {
+        const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+        const wrappedCb = cb ? (resp) => {
+          try { cb(inflateCreditObj(resp)); } catch (_) { cb(resp); }
+        } : null;
+        if (cb) args[args.length - 1] = wrappedCb;
+        const result = _send(...args);
+        if (result && typeof result.then === 'function') {
+          return result.then(inflateCreditObj).catch(e => { throw e; });
+        }
+        return result;
+      };
+    }
+  } catch (_) {}
+
+  // Pre-seed credit/subscription keys in storage so any cold read picks up
+  // unlimited values immediately rather than the cached '3 credits' from
+  // before the user installed this enhancement.
+  try {
+    chrome.storage.local.set({
+      credit: 99999, credits: 99999, dailyFill: 99999, autofill_credits: 99999,
+      tailorResume_credits: 99999, coverLetter_credits: 99999,
+      jobMatch_credits: 99999, customResume_credits: 99999,
+      coins: 99999, tokens: 99999, balance: 99999, remaining: 99999,
+      subscription: { status: 'ACTIVE', plan: 'turbo_plus', tier: 'premium' },
+      tier: 'premium', plan: 'turbo_plus', isPremium: true, isPaid: true, isPro: true,
+      unlimited: true
+    });
+  } catch (_) {}
+
   // ===================== CONFIG =====================
   const SK = { AA: 'ua_aa', Q: 'ua_q', QA: 'ua_qa', QP: 'ua_qp', POS: 'ua_pos', ANS: 'ua_answers', PROF: 'ua_profile' };
   const ATS = [
