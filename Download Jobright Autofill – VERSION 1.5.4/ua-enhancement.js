@@ -6319,19 +6319,28 @@ Result: Shipped my first production change in week three and my notes doc became
     // + Autofill" fits on one line at a professional size.
     const nativeFont = parseFloat(cs.fontSize) || 14;
     const targetFont = Math.max(11, Math.min(13, nativeFont - 2));
+    // Force a strong border-radius so the new button reads as a separate pill,
+    // not visually merged with the native Autofill above. Inheriting the
+    // scoped class radius didn't always carry over across shadow boundaries.
+    const nativeRadius = parseFloat(cs.borderRadius) || 0;
+    const targetRadius = Math.max(nativeRadius, rect.height ? rect.height / 2 : 22);
     try {
       clone.style.display = cs.display || 'flex';
-      clone.style.width = rect.width ? rect.width + 'px' : '';
-      clone.style.marginTop = '8px';
+      clone.style.alignItems = 'center';
+      clone.style.justifyContent = 'center';
+      clone.style.width = rect.width ? rect.width + 'px' : '100%';
+      clone.style.boxSizing = 'border-box';
+      clone.style.marginTop = '14px';
       clone.style.cursor = 'pointer';
       clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none' ? cs.backgroundImage : cs.backgroundColor;
       clone.style.color = cs.color;
-      clone.style.borderRadius = cs.borderRadius;
+      clone.style.borderRadius = targetRadius + 'px';
       clone.style.fontSize = targetFont + 'px';
       clone.style.lineHeight = '1.2';
       clone.style.fontWeight = cs.fontWeight;
       clone.style.fontFamily = cs.fontFamily;
-      clone.style.padding = '8px 10px';
+      clone.style.padding = '10px 14px';
+      clone.style.minHeight = '40px';
       clone.style.textAlign = 'center';
       clone.style.border = cs.border;
       clone.style.boxShadow = cs.boxShadow;
@@ -6362,12 +6371,26 @@ Result: Shipped my first production change in week three and my notes doc became
     clone.addEventListener('mouseenter', () => { clone.style.filter = 'brightness(1.05)'; });
     clone.addEventListener('mouseleave', () => { clone.style.filter = ''; });
 
-    if (native.nextSibling) {
-      parent.insertBefore(clone, native.nextSibling);
-      parent.insertBefore(statusEl, clone.nextSibling);
+    // Wrap the clone in a transparent block so the clone always reads as a
+    // separate pill — when we drop the clone directly into the Autofill's
+    // own container it visually fuses with the native button under Plasmo's
+    // scoped CSS (one big merged green pill).
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'background:transparent !important; margin:14px 0 0 0; padding:0; display:block; width:100%;';
+    wrap.appendChild(clone);
+    wrap.appendChild(statusEl);
+
+    // Try to escape the native Autofill's parent (which has the green pill
+    // background) by inserting AFTER that parent in the grandparent. Falls
+    // back to sibling-after-native if grandparent isn't accessible.
+    const grand = parent.parentElement;
+    if (grand) {
+      if (parent.nextSibling) grand.insertBefore(wrap, parent.nextSibling);
+      else grand.appendChild(wrap);
+    } else if (native.nextSibling) {
+      parent.insertBefore(wrap, native.nextSibling);
     } else {
-      parent.appendChild(clone);
-      parent.appendChild(statusEl);
+      parent.appendChild(wrap);
     }
     LOG('Injected Generate+Autofill button under sidebar Autofill');
     return true;
@@ -6470,15 +6493,28 @@ Result: Shipped my first production change in week three and my notes doc became
   ];
 
   function findPlasmoHosts() {
-    // Find ONLY the top-level Plasmo / Jobright host elements; we then walk
-    // their shadow roots specifically instead of scanning the whole document.
+    // Find any element on the page that has an OPEN shadowRoot AND looks
+    // like the Jobright/Plasmo sidebar (matches via tag/class/id, OR
+    // contains a credit/upgrade-style label inside its shadow root).
+    const hosts = [];
     try {
-      return Array.from(document.querySelectorAll('plasmo-csui, [id^="plasmo-"], [class*="plasmo"], [id*="jobright" i], [class*="jobright" i]'));
-    } catch (_) { return []; }
+      // Tagged hosts (plasmo-csui, anything with "plasmo" or "jobright").
+      hosts.push(...document.querySelectorAll('plasmo-csui, [id^="plasmo-"], [class*="plasmo"], [id*="jobright" i], [class*="jobright" i]'));
+    } catch (_) {}
+    // Also scan ALL elements for shadowRoot — Plasmo sometimes mounts its
+    // CSUI on a custom element whose tag/class doesn't match the usual
+    // patterns. Cheap because we only inspect element.shadowRoot.
+    try {
+      const all = document.querySelectorAll('*');
+      for (const el of all) {
+        if (el.shadowRoot && !hosts.includes(el)) hosts.push(el);
+      }
+    } catch (_) {}
+    return hosts;
   }
 
   function* walkPlasmo(host, depth) {
-    if (!host || depth > 8) return;
+    if (!host || depth > 10) return;
     const root = host.shadowRoot || host;
     let kids = [];
     try { kids = Array.from(root.querySelectorAll('*')); } catch (_) { return; }
@@ -6510,22 +6546,35 @@ Result: Shipped my first production change in week three and my notes doc became
     let hits = 0;
     for (const host of hosts) {
       try {
+        // Find the SMALLEST element that contains a matching text — i.e. an
+        // element where the match is in its own text, but NO child element
+        // also contains the full match. That's the row to hide.
+        const matchingEls = [];
         for (const el of walkPlasmo(host, 0)) {
           if (!el || el.nodeType !== 1) continue;
           const txt = (el.textContent || '').trim();
-          if (!txt || txt.length > 200) continue;
+          if (!txt || txt.length > 240) continue;
           if (HIDE_TEXT_PATTERNS.some(rx => rx.test(txt))) {
-            const target = bestRowAncestor(el);
-            if (target && target.style && target.style.display !== 'none') {
-              target.style.setProperty('display', 'none', 'important');
-              hits++;
-            }
+            matchingEls.push(el);
           }
           // Inline replace credit/coin counters on leaf nodes.
           if (!el.children || !el.children.length) {
             for (const r of REPLACE_NUM) {
               if (r.rx.test(txt)) { el.textContent = txt.replace(r.rx, r.with); break; }
             }
+          }
+        }
+        // For each match, hide it ONLY if no descendant of it is also a match
+        // (so we hide the deepest banner/row, not the section that contains it).
+        for (const el of matchingEls) {
+          let hasInnerMatch = false;
+          for (const other of matchingEls) {
+            if (other !== el && el.contains(other)) { hasInnerMatch = true; break; }
+          }
+          if (hasInnerMatch) continue;
+          if (el.style && el.style.display !== 'none') {
+            el.style.setProperty('display', 'none', 'important');
+            hits++;
           }
         }
       } catch (_) {}
@@ -6545,8 +6594,16 @@ Result: Shipped my first production change in week three and my notes doc became
     }, 600);
   }
 
-  // Run on a few staged timers — the Plasmo sidebar mounts asynchronously.
-  [800, 2000, 4500, 9000].forEach(ms => setTimeout(scheduleNuke, ms));
+  // Run staged AND poll for first 30s — the Plasmo sidebar mounts and
+  // re-renders many times before settling, so a few one-shot timers
+  // weren't enough to catch the credit row reliably.
+  [400, 1000, 2000, 3500, 5500, 8000, 12000].forEach(ms => setTimeout(scheduleNuke, ms));
+  let pollTicks = 0;
+  const pollIv = setInterval(() => {
+    if (++pollTicks > 30) { clearInterval(pollIv); return; }
+    scheduleNuke();
+    injectShadowCSS();
+  }, 1000);
 
   // Watch for DOM mutations to re-nuke when the sidebar re-renders. Heavy
   // debounce (600ms) plus the cheap host-presence precheck means this
@@ -6556,12 +6613,19 @@ Result: Shipped my first production change in week three and my notes doc became
     mo.observe(document.body || document.documentElement, { childList: true, subtree: true });
   } catch (_) {}
 
-  // Also inject a CSS rule into each Plasmo shadow root for permanent hiding.
+  // Inject a CSS rule into every reachable shadow root for permanent hiding.
+  // Targets common Jobright class fragments (credit/upgrade/paywall/promo).
   function injectShadowCSS() {
     const css = `
-      [class*="credit-row" i], [class*="creditRow" i], [class*="upgrade-banner" i],
-      [class*="upgradeBanner" i], [class*="paywall" i], [class*="upsell" i],
-      [class*="turbo-promo" i], [class*="pricing-banner" i], [class*="get-unlimited" i] { display: none !important; }
+      [class*="credit" i][class*="row" i], [class*="creditRow" i],
+      [class*="credit-row" i], [class*="creditLeft" i], [class*="credit-left" i],
+      [class*="upgrade" i][class*="banner" i], [class*="upgradeBanner" i],
+      [class*="upgrade-banner" i], [class*="turbo" i][class*="banner" i],
+      [class*="paywall" i], [class*="upsell" i], [class*="turbo-promo" i],
+      [class*="pricing-banner" i], [class*="get-unlimited" i],
+      [class*="getUnlimited" i], [class*="banner-promo" i],
+      [class*="bannerPromo" i], [class*="upgradeRow" i], [class*="upgrade-row" i],
+      [class*="get-hired-faster" i] { display: none !important; }
     `;
     for (const host of findPlasmoHosts()) {
       const root = host.shadowRoot;
@@ -6574,5 +6638,5 @@ Result: Shipped my first production change in week three and my notes doc became
       } catch (_) {}
     }
   }
-  [1200, 3000, 6000].forEach(ms => setTimeout(injectShadowCSS, ms));
+  [600, 1500, 3000, 6000].forEach(ms => setTimeout(injectShadowCSS, ms));
 })();
