@@ -4980,6 +4980,79 @@
   else document.addEventListener('DOMContentLoaded', startWatch, { once: true });
 })();
 
+// === HIDE "Apply with Jobright! / Quick-Start Checklist" ONBOARDING PROMPT ===
+// The native sidebar shows a setup checklist ("Set Up a Jobright Account",
+// "Complete Your Profile Details", greyed-out "Start Applying") whenever the
+// user isn't signed into Jobright. The credit-bypass already fakes a premium
+// session, so this onboarding card is redundant and intrusive. Walk the
+// Plasmo shadow root, find the smallest element that wraps the whole prompt,
+// and hide it. Re-runs periodically to catch the prompt re-rendering.
+(function () {
+  function eligible() {
+    try { return typeof window.__uaIsEligiblePage === 'function' ? window.__uaIsEligiblePage() : true; }
+    catch (_) { return false; }
+  }
+
+  // Returns the deepest descendant of `el` whose subtree still contains all
+  // three onboarding markers — the heading, the checklist label, and the
+  // disabled call-to-action. Hiding that node removes the card without
+  // touching surrounding sidebar UI.
+  function smallestOnboardingContainer(el) {
+    if (!el || el.nodeType !== 1) return null;
+    var t = el.textContent || '';
+    if (!/Apply with Jobright/i.test(t)) return null;
+    if (!/Quick-?Start Checklist/i.test(t)) return null;
+    if (!/Start Applying/i.test(t)) return null;
+    for (var i = 0; i < el.children.length; i++) {
+      var deeper = smallestOnboardingContainer(el.children[i]);
+      if (deeper) return deeper;
+    }
+    return el;
+  }
+
+  function sweep(root) {
+    if (!root) return false;
+    var hostChildren = root.children || [];
+    for (var i = 0; i < hostChildren.length; i++) {
+      var hit = smallestOnboardingContainer(hostChildren[i]);
+      if (hit && hit.style && hit.style.display !== 'none') {
+        hit.style.setProperty('display', 'none', 'important');
+        console.log('[UA] Hid Jobright Quick-Start onboarding prompt');
+        return true;
+      }
+    }
+    // Recurse into nested shadow roots
+    var all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (var j = 0; j < all.length; j++) {
+      if (all[j].shadowRoot) {
+        if (sweep(all[j].shadowRoot)) return true;
+      }
+    }
+    return false;
+  }
+
+  function tick() { try { sweep(document); } catch (_) {} }
+
+  function start() {
+    if (!eligible()) return;
+    tick();
+    // Light periodic sweep — the prompt only appears inside the Plasmo
+    // sidebar, which lives in a shadow root that document-level
+    // MutationObservers cannot see. 3s cadence is enough for an onboarding
+    // card that the user is actively trying to dismiss.
+    var ticks = 0;
+    var iv = setInterval(function () {
+      // Auto-stop after 10 minutes — past that the user has either dismissed
+      // the panel or the sidebar isn't going to show the prompt this session.
+      if (++ticks > 200) { clearInterval(iv); return; }
+      tick();
+    }, 3000);
+  }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
+})();
+
 // === SMARTRECRUITERS MULTI-PAGE AUTOFILL SUPPORT ===
 // Re-enables autofill button on page navigation within SmartRecruiters
 (function () {
