@@ -549,40 +549,169 @@
       /ever.*work.*for/, /ever.*employ/, /accommodation.*require/,
       /restriction/, /pending.*charges/, /terminated|fired|dismissed/
     ];
-    // Questions that should be "Yes"
+    // Questions that should be "Yes" — comprehensive knockout-pass coverage.
+    // Organised by category so future edits are obvious. The function returns
+    // "yes" the moment ANY of these match, so we cast a wide net for screening
+    // questions where a "No" would auto-reject the application.
     const yesPatterns = [
-      /authorized|eligible|right.*work|legally|lawfully/, /proficien/, /experience.*have/,
-      /comfortable/, /familiar/, /willing/, /\bable\b/, /available/, /can.*start/,
-      /can.*commute/, /relocat/, /consent|agree|acknowledge|certify|confirm|attest/,
-      /background.*check/, /drug.*test|screening/, /over.*18|18.*years|at.*least.*18/,
-      /driving|license|licence/, /speak.*english|english.*proficien/, /reside/, /based.*in/,
-      /commit/, /right.*work/, /work.*right/, /passport|citizen/,
-      /docker|terraform|kubernetes|python|java|react|node|aws|azure|gcp|sql|typescript/,
-      /debugging|network|linux|backend|developer|devops|sre|programming|rust|code|golang/,
-      /production.*environment/, /hands.?on.*experience/, /do you have experience/,
-      /have you.*experience/, /are you.*proficient/, /are you.*experienced/,
-      /are you.*comfortable/, /can you/, /will you/, /would you be willing/,
-      /reliable.*transport/, /work.*(night|weekend|holiday|overtime|shift|flexible)/,
-      /travel.*up.*to/, /submit.*to/, /complete.*assessment/,
-      // Knockout patterns the radio handler used to miss — screening questions
-      // phrased as positive presence/capability that the candidate must answer
-      // "Yes" to in order to clear the gate.
-      /currently.*located|are.you.*located|located.*in.*(uk|us|usa|united|canada|ireland|eu|emea|apac|country|region|city|state)/,
-      /proven.*track|track.?record/,
-      /selling.*(cloud|service|software|saas|product|enterprise)/,
-      /co.?selling|co.?sell/,
-      /\bsales\b.*(experience|background)|experience.*\bsales\b/,
-      /work.*(from|in).*(uk|us|usa|united|ireland|canada|emea|country)/
+      // ---- Authorization / right to work / citizenship ----
+      /authoriz|authoris/, /eligible.*work|eligible.*employ/, /right.*work|work.*right/,
+      /legally|lawfully/, /work.*permit|permit.*work/, /unrestricted.*work/,
+      /citizen|permanent.*resident|green.?card|indefinite.*leave/,
+      /passport|nationality/, /(eu|uk|us|usa|canad|ireland|irish|british|american).*(citizen|national|residen)/,
+
+      // ---- Location / residence / commute / travel / relocate ----
+      // ALL location-style questions should pass with "Yes" per user request.
+      /\blocated\b|\blocation\b|\bresid(e|ing|ence|ency|ent)\b|\bdomicile/,
+      /currently.*(located|residing|living|based|in)/, /are.you.*(located|based|residing|living|in)/,
+      /\bbased.?in\b|\blive.?in\b|\bliving.?in\b|home.*(country|address|location)/,
+      /current.*(city|country|location|state|region|address)/,
+      /near.*(city|office|location|hq)/, /within.*(miles|km|kilomet|commuting|distance)/,
+      /\bcommut(e|ing|able)/, /\btravel\b|willing.*travel|travel.*up.*to|travel.*\d+/,
+      /willing.*commute|able.*commute|can.*commute/,
+      /\brelocat/, /willing.*(move|relocate)|able.*(move|relocate)|open.*(relocat|move)/,
+      /report.*to.*(office|location|hq)/, /\bonsite\b|\bon.?site\b|\bin.?office\b|\bhybrid\b|\bremote\b/,
+      /work.*(from|in).*(office|home|hybrid|country|uk|us|usa|united|ireland|canada|emea|apac)/,
+      /located.*in.*(uk|us|usa|united|canada|ireland|eu|emea|apac|country|region|city|state)/,
+      /proximity|reasonable.*distance|catchment.*area/,
+
+      // ---- Experience / skills / proficiency / track record (broad) ----
+      /\bexperience\b/, /\byears.*(experience|exp)\b/, /years.*of.*experience/,
+      /experience.*(with|in|using|of|as)/, /experience.*have|have.*experience/,
+      /have.you.*(experience|worked|used|built|developed|deployed|managed|led|delivered|shipped|coded|written|designed|architected|implemented|owned|maintained|operated|configured|deployed|integrated|migrated|scaled|optimized)/,
+      /do.you.*(have|possess).*(experience|knowledge|background|skill|expertise|exposure|familiarity)/,
+      /are.you.*(proficient|experienced|skilled|familiar|comfortable|knowledgeable|competent|capable|qualified|fluent|expert)/,
+      /can.you.*(use|work|code|write|build|develop|design|deploy|debug|operate|configure|manage|lead|deliver|support)/,
+      /will.you.*(use|work|build|deploy|develop|deliver|support)/,
+      /do.you.*(know|understand|use|work)/, /have.you.*(led|managed|mentored|architected|owned|run|driven|launched|scaled)/,
+      /\btrack.?record\b|proven.*record|proven.*experience|demonstrated.*(experience|ability|track|skill)/,
+      /\bhands.?on\b/, /production.*(experience|environment|grade|workload|system|deployment)/,
+      /enterprise.*(experience|customer|deployment|sale|deal)/,
+      /\bskill(.?level|.?set)?\b|technical.?skill|core.?skill|key.?skill|relevant.?skill/,
+      /\bproficien|fluent.*in|expert.*in|advanced.*level|advanced.*(knowledge|skill|user|practitioner)/,
+      /familiar.*with|comfortable.*with|experienced.*with|conversant.*with|adept.*with/,
+      /background.*in|expertise.*in|specialis|specializ|deep.*knowledge|strong.*(grasp|background|knowledge)/,
+      /knowledge.*(of|in)|understanding.*of|grasp.*of|familiarity.*with|exposure.*to/,
+      /work(ed|ing).*with|worked.*on|working.*on/,
+      /capable.*of|able.*to.*(use|work|code|build|develop|deploy|deliver|design)/,
+      /comfortable.*(working|using|with|in)/,
+
+      // ---- Tech stacks (any of these in a question → "Yes") ----
+      /docker|terraform|kubernetes|\bk8s\b|helm|ansible|puppet|chef|jenkins|gitlab|circleci|travis|github.*actions|argo.?cd|spinnaker/,
+      /python|java(script)?|typescript|ruby|rust|golang|\bgo\b|kotlin|scala|swift|c\+\+|c#|\.net|php|perl|elixir|erlang|haskell|clojure|\br\b/,
+      /react|vue|angular|svelte|node|next\.?js|nest\.?js|express|django|flask|spring|rails|laravel|fastapi|gin|echo|fastify/,
+      /\baws\b|\bazure\b|\bgcp\b|google.*cloud|cloud.*platform|oracle.*cloud|alibaba.*cloud|ibm.*cloud|digital.?ocean|linode|heroku/,
+      /sql|nosql|postgres|mysql|mariadb|sqlite|mongo|dynamo|cassandra|redis|memcached|elasticsearch|opensearch|snowflake|bigquery|redshift|databricks|clickhouse/,
+      /kafka|rabbitmq|pulsar|nats|sns|sqs|kinesis|eventbridge|pub.?sub|service.?bus/,
+      /spark|airflow|hadoop|dbt\b|fivetran|segment|stitch|matillion|prefect|dagster/,
+      /linux|unix|bsd|bash|shell|powershell|zsh|windows.*server/,
+      /\bgit\b|version.?control|branching|merging|pull.?request|code.?review/,
+      /agile|scrum|kanban|safe\b|lean|waterfall/,
+      /ci.?cd|continuous.*(integration|deploy|delivery)|devops|sre|platform.*engineer/,
+      /microservice|monolith|serverless|lambda|cloud.?function|api.*gateway|service.?mesh|istio|envoy/,
+      /\brest\b|graphql|grpc|websocket|webhook|event.?driven|message.?queue/,
+      /oauth|saml|oidc|jwt|sso|iam|kms|vault|secrets.*management|tls|ssl|encryption|pki/,
+      /etl|elt|data.*(pipeline|warehouse|lake|lakehouse|mesh|engineer)/,
+      /machine.?learning|deep.?learning|\bml\b|\bllm\b|\bnlp\b|\bai\b|artificial.*intelligence|generative.*ai|gen.?ai/,
+      /pytorch|tensorflow|keras|hugging.?face|sklearn|xgboost|lightgbm|pandas|numpy|jupyter/,
+      /salesforce|hubspot|marketo|pardot|outreach|salesloft|gong|chorus|zoominfo|apollo|6sense/,
+      /jira|confluence|notion|asana|trello|monday|clickup|linear|shortcut|slack|teams|discord/,
+      /tableau|power.?bi|looker|metabase|sigma|grafana|kibana|datadog|new.?relic|splunk|sumo.?logic|sentry|honeycomb/,
+      /sap\b|workday|netsuite|peoplesoft|coupa|oracle.*ebs|microsoft.*dynamics/,
+      /android|\bios\b|react.*native|flutter|xamarin|kotlin.*multiplatform/,
+      /unity|unreal|godot|game.*engine/,
+      /figma|sketch|adobe|invision|miro/,
+
+      // ---- Sales / GTM / customer-facing experience ----
+      /\bsales\b.*experience|experience.*\bsales\b|sales.*background/,
+      /sold.*(to|into)|selling.*(to|into|cloud|service|software|saas|product|enterprise|smb|mid.?market|fortune|global|public)/,
+      /co.?sell|co.?selling|partner.*sell|channel.*sell|alliance|reseller/,
+      /\bquota\b|attain|exceed.*(quota|target|goal)|hit.*(quota|target|goal|number)/,
+      /\bpipeline\b|prospect|outbound|inbound|lead.*(gen|qualif)|sql\b|\bsdr\b|\bbdr\b|\bae\b|\bcsm\b/,
+      /closed.*(deal|won|lost|business)|deal.*size|\bacv\b|\barr\b|\bmrr\b|\btcv\b|\bnrr\b|\bcac\b|ltv\b/,
+      /negotiat|contract.*negotiat|proposal|rfp|rfi/,
+      /account.*(manag|executive|develop)|customer.*(success|manag|advoc|relations)/,
+      /cold.*(call|email|outreach)|outreach.*sequence|cadence|drip.*campaign/,
+      /linkedin.*sales|navigator|social.*selling|prospecting/,
+      /forecast|forecasting|crm.*hygiene|salesforce.*hygiene|deal.*review/,
+      /demo|presentation|pitch|discovery.*call|qualification|meddpicc|bant|spin|challenger/,
+      /territory|book.*of.*business|named.*account/,
+
+      // ---- Domain / industry / vertical experience ----
+      /industry.*experience|domain.*experience|vertical.*experience|sector.*experience/,
+      /healthcare|fintech|finance|banking|insurance|retail|e.?commerce|b2b|b2c|saas|paas|iaas/,
+      /media|telecom|manufacturing|logistics|supply.?chain|public.?sector|government|education|edtech|biotech|pharma/,
+      /regulated.*industry|compliance.*requirement|hipaa|sox|pci|gdpr|fedramp|iso.?27001|soc.?2/,
+
+      // ---- Education / certifications ----
+      /\bbachelor|\bmaster|\bphd|\bdoctorate|\bdegree\b|graduat|alma.?mater/,
+      /high.?school|secondary.*school|completed.*school|finished.*school/,
+      /certification|certif(ied|icate)|credential|accredit|license[ds]?\b|licence[ds]?\b/,
+      /aws.*certif|azure.*certif|gcp.*certif|google.*certif|cissp|comptia|pmp|cpa|cfa|six.?sigma|itil|prince2/,
+
+      // ---- Availability / willingness / commitment ----
+      /\bavailable\b|availability|when.*can.*start|can.*start|able.*start|earliest.*start/,
+      /\bable\b|\bwilling\b|\bwilling.to\b|will.you\b|would.you/,
+      /\bcommit\b|commitment|committed|dedicat|engaged/,
+      /immediately|notice.*period|two.*weeks|join.*date|start.*date/,
+      /\bjoin\b|\bonboard\b/,
+      /work.*(night|weekend|holiday|overtime|shift|flexible|extended.?hour|after.?hour|on.?call|rotation)/,
+      /full.?time|part.?time|contract|temporary|permanent|fixed.?term/,
+      /reliable.*transport|own.*(car|vehicle)|driver|driving|driver.?licen|licence/,
+      /relocate|move.*for|move.*to/,
+
+      // ---- Consent / agreements / acknowledgements ----
+      /consent|agree|acknowledge|certify|confirm|attest|declar|affirm/,
+      /understand.*polic|abide.*by|follow.*polic|adhere.*to/,
+      /privacy.*polic|data.*polic|terms.*condition|terms.*service|code.*of.*conduct/,
+      /provide.*reference|references.*availab|professional.*reference/,
+
+      // ---- Checks / assessments / interviews ----
+      /background.*check|reference.*check|credit.*check|right.?to.?work.*check|identity.*check/,
+      /drug.*test|drug.*screen|substance.*test|alcohol.*test/, /screening/,
+      /assessment|technical.*(test|interview|round|assessment)|coding.*(test|challenge)|take.?home/,
+      /complete.*(assessment|test|evaluation|interview|screening|exercise|challenge)/,
+      /submit.*to.*(check|screening|assessment|reference|background|drug)/,
+
+      // ---- Age / identity / legal capacity ----
+      /over.*18|18.*years|at.*least.*18|of.*legal.*age|legal.*age|adult/,
+
+      // ---- Language / communication ----
+      /speak.*english|english.*proficien|fluent.*english|business.*english/,
+      /\bfluent\b|fluency|native.?speaker|professional.*proficiency|working.*proficiency/,
+      /communication.*skill|presentation.*skill|written.*communication|verbal.*communication/,
+
+      // ---- Soft skills / leadership ----
+      /leadership.*experience|management.*experience|mentor|coach|develop.*team/,
+      /people.*(management|leader)|team.*(lead|manag)|tech.*lead|engineering.*manager/,
+      /cross.*functional|stakeholder.*(management|engagement)|partner.*with/,
+      /problem.*solv|critical.*think|analytical.*(skill|thinking)|attention.*detail|detail.?oriented/,
+      /self.?(starter|motivated|driven|directed|managed)|proactive|ownership/,
+      /collaborat|team.?player|work.*independent|work.*remotely/,
+
+      // ---- Interest / motivation / fit ----
+      /interested.*in|interest.*(role|position|company|opportunity)/,
+      /\bcomfortable\b/, /\bopen.*to\b/, /\bok.*with\b|okay.*with/, /\bfine.*with\b/,
+      /excited.*(about|to|by)|passion|enthusiastic|enthusi/,
+      /aligned.*with|share.*values|believe.*in|mission.*driven/,
+
+      // ---- Misc passing answers ----
+      /complete.*assessment/, /submit.*to/, /\bopen\b.*(role|position|opportunity|to)/,
+      /can.*provide|able.*provide|willing.*provide/,
+      /portfolio|work.*sample|writing.*sample|case.*study/
     ];
     // EEO/Diversity — prefer "Prefer not to say/answer"
     const eeoPatterns = [/gender|sex\b|disability|veteran|military|ethnic|race|racial|heritage|hispanic|latino/];
     const isEEO = eeoPatterns.some(r => r.test(q));
     if (isEEO) return 'eeo';
-    const shouldNo = noPatterns.some(r => r.test(q));
-    const shouldYes = yesPatterns.some(r => r.test(q));
-    if (shouldNo && !shouldYes) return 'no';
-    if (shouldYes) return 'yes';
-    return 'yes'; // Default to yes for unknown
+    // noPatterns are deal-breakers (sponsorship, criminal, family-at-company,
+    // ever-worked-here). They must win when matched, even if a broad yesPattern
+    // also fires on incidental keywords like "work" or "experience" in the
+    // same sentence — otherwise the broader yesPatterns would flip a "Do you
+    // require sponsorship to work in the UK?" question to Yes.
+    if (noPatterns.some(r => r.test(q))) return 'no';
+    if (yesPatterns.some(r => r.test(q))) return 'yes';
+    return 'yes'; // Default to yes for unknown — pass screening unless explicitly disqualifying
   }
 
   // Experience range scoring (7+, 5-7, 3-5, 0-3)
