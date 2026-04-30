@@ -563,7 +563,16 @@
       /have you.*experience/, /are you.*proficient/, /are you.*experienced/,
       /are you.*comfortable/, /can you/, /will you/, /would you be willing/,
       /reliable.*transport/, /work.*(night|weekend|holiday|overtime|shift|flexible)/,
-      /travel.*up.*to/, /submit.*to/, /complete.*assessment/
+      /travel.*up.*to/, /submit.*to/, /complete.*assessment/,
+      // Knockout patterns the radio handler used to miss — screening questions
+      // phrased as positive presence/capability that the candidate must answer
+      // "Yes" to in order to clear the gate.
+      /currently.*located|are.you.*located|located.*in.*(uk|us|usa|united|canada|ireland|eu|emea|apac|country|region|city|state)/,
+      /proven.*track|track.?record/,
+      /selling.*(cloud|service|software|saas|product|enterprise)/,
+      /co.?selling|co.?sell/,
+      /\bsales\b.*(experience|background)|experience.*\bsales\b/,
+      /work.*(from|in).*(uk|us|usa|united|ireland|canada|emea|country)/
     ];
     // EEO/Diversity — prefer "Prefer not to say/answer"
     const eeoPatterns = [/gender|sex\b|disability|veteran|military|ethnic|race|racial|heritage|hispanic|latino/];
@@ -1072,11 +1081,73 @@
     }
     if (refilled > 0) LOG(`Verification pass: re-filled ${refilled} fields that were cleared`);
 
+    // Knockout-safe correction pass — flip Yes/No selects + radios that ended
+    // up on "No" when determineYesNo() says the question is positive screening
+    // (located in <country>?, willing to commute?, track record?, etc.). These
+    // are gating questions where "No" auto-rejects the application.
+    const corrected = correctScreeningAnswers();
+    if (corrected > 0) LOG(`Knockout correction: flipped ${corrected} screening answers from No to Yes`);
+
     // Learn from all filled fields for future use
     learnFromFilledFields();
 
-    LOG(`Fallback fill done: ${filled} fields filled, ${refilled} re-verified`);
-    return filled + refilled;
+    LOG(`Fallback fill done: ${filled} fields filled, ${refilled} re-verified, ${corrected} knockout corrections`);
+    return filled + refilled + corrected;
+  }
+
+  // Find the human-readable question text for a control by walking up to the
+  // nearest label/fieldset/question container. Falls back to getLabel().
+  function getScreeningQuestionText(el) {
+    let txt = '';
+    const container = el.closest && el.closest('fieldset, .field, .question, [class*="question"], [class*="Question"], [class*="field"], [class*="Field"], li, .form-group');
+    if (container) txt = (container.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!txt) txt = getLabel(el) || '';
+    return txt.toLowerCase();
+  }
+
+  function correctScreeningAnswers() {
+    let corrected = 0;
+    // --- Yes/No SELECT dropdowns ---
+    for (const sel of $$('select').filter(isVisible)) {
+      const opts = $$('option', sel).filter(o => o.value);
+      if (opts.length < 2) continue;
+      const labels = opts.map(o => (o.textContent || '').trim().toLowerCase());
+      const hasYes = labels.some(l => /^yes$/.test(l));
+      const hasNo = labels.some(l => /^no$/.test(l));
+      if (!hasYes || !hasNo) continue;
+      const cur = (sel.options[sel.selectedIndex]?.textContent || '').trim().toLowerCase();
+      // EEO/diversity selects retain their existing answer.
+      const qText = getScreeningQuestionText(sel);
+      if (/gender|sex\b|disability|veteran|military|ethnic|race|racial|heritage|hispanic|latino/.test(qText)) continue;
+      const decision = determineYesNo(qText);
+      if (decision !== 'yes') continue;
+      if (cur === 'yes') continue;
+      const yesOpt = opts.find(o => /^yes$/i.test((o.textContent || '').trim()));
+      if (!yesOpt) continue;
+      sel.value = yesOpt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
+      corrected++;
+    }
+    // --- Yes/No radio groups ---
+    const groups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => { (groups[r.name || r.id] ||= []).push(r); });
+    for (const radios of Object.values(groups)) {
+      const labelOf = (r) => ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').trim().toLowerCase();
+      const lbls = radios.map(labelOf);
+      const hasYes = lbls.some(l => /^yes$/.test(l));
+      const hasNo = lbls.some(l => /^no$/.test(l));
+      if (!hasYes || !hasNo) continue;
+      const checkedIsNo = radios.some(r => r.checked && /^no$/i.test(labelOf(r)));
+      if (!checkedIsNo) continue;
+      const parent = radios[0].closest('fieldset, .question, [class*="question"], .form-group, [class*="field"]');
+      const qText = (parent?.textContent || '').toLowerCase();
+      if (/gender|sex\b|disability|veteran|military|ethnic|race|racial|heritage|hispanic|latino/.test(qText)) continue;
+      if (determineYesNo(qText) !== 'yes') continue;
+      const yes = radios.find(r => /^yes$/i.test(labelOf(r)));
+      if (yes) { realClick(yes); corrected++; }
+    }
+    return corrected;
   }
 
   // ===================== LEARN FROM PAGE (capture filled answers) =====================
