@@ -6288,29 +6288,38 @@ Result: Shipped my first production change in week three and my notes doc became
     clone.removeAttribute('name');
     clone.className = native.className;
 
-    const rect = native.getBoundingClientRect();
     const cs = getComputedStyle(native);
-    // Slightly smaller font than the native button so "Generate Custom Resume
-    // + Autofill" fits on one line at a professional size.
+    // Sit at the same width as the parent column rather than pixel-pinning to
+    // the native button — narrow Workday/Greenhouse sidebars were clipping the
+    // "Generate" prefix and visually distorting the panel. Allow wrapping so
+    // long ATS labels never overflow horizontally.
     const nativeFont = parseFloat(cs.fontSize) || 14;
     const targetFont = Math.max(11, Math.min(13, nativeFont - 2));
     try {
       clone.style.display = cs.display || 'flex';
-      clone.style.width = rect.width ? rect.width + 'px' : '';
+      clone.style.boxSizing = 'border-box';
+      clone.style.width = '100%';
+      clone.style.maxWidth = '100%';
       clone.style.marginTop = '8px';
       clone.style.cursor = 'pointer';
       clone.style.background = cs.backgroundImage && cs.backgroundImage !== 'none' ? cs.backgroundImage : cs.backgroundColor;
       clone.style.color = cs.color;
       clone.style.borderRadius = cs.borderRadius;
       clone.style.fontSize = targetFont + 'px';
-      clone.style.lineHeight = '1.2';
+      clone.style.lineHeight = '1.25';
       clone.style.fontWeight = cs.fontWeight;
       clone.style.fontFamily = cs.fontFamily;
       clone.style.padding = '8px 10px';
       clone.style.textAlign = 'center';
+      clone.style.alignItems = 'center';
+      clone.style.justifyContent = 'center';
       clone.style.border = cs.border;
       clone.style.boxShadow = cs.boxShadow;
-      clone.style.whiteSpace = 'nowrap';
+      // normal (not nowrap) — short labels stay one line, long labels wrap
+      // gracefully instead of overflowing/clipping the sidebar layout.
+      clone.style.whiteSpace = 'normal';
+      clone.style.wordBreak = 'normal';
+      clone.style.overflowWrap = 'anywhere';
       clone.style.letterSpacing = '0.1px';
     } catch (_) {}
 
