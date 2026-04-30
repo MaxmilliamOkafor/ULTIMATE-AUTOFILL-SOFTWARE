@@ -4844,6 +4844,13 @@
   // ===================== INIT =====================
   async function init() {
     if (window.self !== window.top) return;
+    // Master gate: don't mount the sidebar UI, MutationObserver, or 5s
+    // form-analysis interval on non-application pages. Without this, sites like
+    // hiring.cafe that re-render thousands of DOM nodes per second freeze
+    // because `hideCredits()` walks `document.querySelectorAll('*')` twice on
+    // every mutation. The gate is defined in a later IIFE; if it isn't loaded
+    // yet, default to running (matches prior behaviour).
+    if (typeof window.__uaIsEligiblePage === 'function' && !window.__uaIsEligiblePage()) return;
     await load(); await loadAnswerBank(); await loadSavedResponses(); await loadAppHistory(); await loadResumes(); await loadCustomDefaults(); await loadRateLimitDelay(); injectCSS(); buildUI(); setupKeyboardShortcuts();
     [500, 1500, 3000, 5000, 8000, 12000].forEach(ms => setTimeout(hideCredits, ms));
     observe(); showATSBadge(); renderQ(); updateStat(); updateCtrl();
