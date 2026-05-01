@@ -1,6 +1,30 @@
 /**
- * OptimHire Comprehensive Patch v6.7
+ * OptimHire Comprehensive Patch v6.8
  * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.8 (2026-05-01) — GoHire/Forhyre submit + Workday account flow +
+ * realClick hardening:
+ *   - FIX: After autofill, submit was never clicked on GoHire / Forhyre
+ *     forms. Two root causes:
+ *       1) waitForSubmitReady() treated aria-disabled="false" as
+ *          disabled (because !"false" === false in JS), so the wait
+ *          always timed out on GoHire buttons that explicitly set
+ *          aria-disabled="false" once the form was valid. Now only
+ *          aria-disabled="true" (or empty string) counts as disabled.
+ *       2) tryClickSubmit Priority-1 selectors had no GoHire /
+ *          Forhyre patterns. Added .gh-form-submit, .gh-widget-submit,
+ *          .gh-widget-button-submit button, button.gh-button
+ *          [type="submit"], [data-gh="submit"], and common
+ *          data-testid variants.
+ *   - ADD: workdayAccountFlow now first clicks "Create Account" on the
+ *     landing chooser page, then "Create Manually" / "Continue with
+ *     email" to skip Apple/Google/LinkedIn SSO, before proceeding to
+ *     fill the email/password form. Matches both data-automation-id
+ *     selectors and visible-button text.
+ *   - FIX: realClick now also dispatches PointerEvents (pointerover,
+ *     pointerdown, pointerup) and focuses the element before clicking.
+ *     React/Vue handlers (GoHire, Workday, Lever) often listen on
+ *     pointer events, not mouse events.
  *
  * v6.7 (2026-04-28) — HiringCafe crash fix:
  *   - FIX: hiring.cafe "Page Unresponsive" / browser crash. The T10
@@ -143,9 +167,17 @@
   /** Real pointer-events click sequence */
   function realClick(el) {
     if (!el) return;
-    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true }));
+    // Fire pointer + mouse events so React/Vue handlers (GoHire, Workday,
+    // Lever, etc.) that listen on pointerdown/pointerup actually trigger.
+    try { el.scrollIntoView?.({ block: 'center', behavior: 'instant' }); } catch (_) {}
+    try { el.focus?.(); } catch (_) {}
+    const opts = { bubbles: true, cancelable: true, composed: true };
+    try { el.dispatchEvent(new PointerEvent('pointerover', opts)); } catch (_) {}
+    el.dispatchEvent(new MouseEvent('mouseover', opts));
+    try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (_) {}
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (_) {}
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
     el.click();
   }
 
@@ -1416,8 +1448,13 @@
     if (!btn) return false;
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
-      if (!btn.disabled && !btn.getAttribute('aria-disabled') &&
-          btn.getAttribute('aria-disabled') !== 'true' &&
+      // FIX: previous check `!btn.getAttribute('aria-disabled')` treated
+      // aria-disabled="false" as disabled (because !"false" === false),
+      // so GoHire/Forhyre/etc. forms that explicitly set aria-disabled="false"
+      // never became "ready" and submit was never clicked.
+      const ariaDisabled = btn.getAttribute('aria-disabled');
+      const isAriaDisabled = ariaDisabled === 'true' || ariaDisabled === '';
+      if (!btn.disabled && !isAriaDisabled &&
           !btn.classList.contains('disabled') &&
           isVisible(btn)) {
         return true;
@@ -2313,6 +2350,46 @@
   }
 
   async function workdayAccountFlow(p, acct) {
+    /* Step 0a: Landing page chooser — click "Create Account" if we're on
+     * the Sign-In / Create-Account selector page (no email field yet). */
+    const hasEmailField = !!(
+      $('[data-automation-id="createAccountEmail"] input') ||
+      $('[data-automation-id="accountCreationEmail"] input') ||
+      $('input[data-automation-id="email"]')
+    );
+    if (!hasEmailField) {
+      const createAcctBtn =
+        $('[data-automation-id="createAccountLink"]') ||
+        $('[data-automation-id="createAccountButton"]') ||
+        $('button[data-automation-id="createAccount"]') ||
+        $$('a,button').filter(isVisible).find(el =>
+          /^(create\s+account|create\s+an\s+account|sign\s+up|register)\s*$/i
+            .test((el.textContent || '').trim())
+        );
+      if (createAcctBtn && isVisible(createAcctBtn)) {
+        LOG('Workday: clicking "Create Account"');
+        realClick(createAcctBtn);
+        await sleep(1200);
+      }
+    }
+
+    /* Step 0b: SSO/Manual chooser — pick "Create Manually" / email path
+     * over Apple/Google/LinkedIn SSO buttons. */
+    const manualBtn =
+      $('[data-automation-id="createAccountManually"]') ||
+      $('[data-automation-id="manualCreateAccount"]') ||
+      $('[data-automation-id="signInWithEmail"]') ||
+      $('[data-automation-id="continueWithEmail"]') ||
+      $$('a,button').filter(isVisible).find(el => {
+        const t = (el.textContent || '').trim();
+        return /create\s+(account\s+)?manually|sign\s*up\s+manually|continue\s+with\s+email|sign\s*in\s+with\s+email|use\s+email/i.test(t);
+      });
+    if (manualBtn && isVisible(manualBtn)) {
+      LOG('Workday: clicking "Create Manually" / email path');
+      realClick(manualBtn);
+      await sleep(1200);
+    }
+
     /* Create Account checkbox */
     const createCb = $('[data-automation-id="createAccountCheckbox"] input[type=checkbox]') ||
                      $('input[data-automation-id="createAccountCheckbox"]');
@@ -3377,6 +3454,15 @@
       'button[data-automation-id="pageFooterSubmitButton"]',            // Workday
       'button[data-automation-id="bottom-navigation-submit-button"]',   // Workday
       'button[data-automation-id="btnSubmit"]',                         // Workday
+      // GoHire / Forhyre (same platform, gh-widget-* classes)
+      '.gh-form-submit',
+      '.gh-widget-submit',
+      '.gh-widget-button-submit button',
+      'button.gh-button[type="submit"]',
+      'button.gh-button--primary[type="submit"]',
+      '[data-gh="submit"]',
+      'button[data-testid="apply-submit"]',
+      'button[data-testid="submit-application"]',
       'button[aria-label*="Submit application"]',
       'button[aria-label*="submit application"]',
       'input[type="submit"]',
