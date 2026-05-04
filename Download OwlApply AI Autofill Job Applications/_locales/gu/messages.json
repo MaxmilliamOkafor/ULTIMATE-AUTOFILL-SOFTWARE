@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI નોકરી અરજી ऑટોફિલ. રિઝ્યૂ સૈદ્ધ કરો, કવર લેટર બનાવો, ATS સ્કોર ચકાસો."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI જોબ એપ્લિકેશન ઓટોફિલ"
+  },
+  "actionTitle": {
+    "message": "વિન્ડો ખોલો"
+  }
+}

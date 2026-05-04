@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI job application autofill. Tailor resumes, generate cover letters, check ATS score, track & find similar jobs."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Autofill Job Applications"
+  },
+  "actionTitle": {
+    "message": "Open Window"
+  }
+}

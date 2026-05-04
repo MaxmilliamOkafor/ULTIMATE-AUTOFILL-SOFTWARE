@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Αυτόματη συμπλήρωση αιτήσεων εργασίας με AI. Προσαρμογή βιογραφικού, γράμματα, έλεγχος ATS."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Αυτόματη Συμπλήρωση Αιτήσεων"
+  },
+  "actionTitle": {
+    "message": "Άνοιγμα παραθύρου"
+  }
+}

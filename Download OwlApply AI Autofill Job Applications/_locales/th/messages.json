@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "ยื่นใบสมัครงานอัตโนมัติด้วย AI ปรับ Resume สร้าง Cover Letter ตรวจสอบ ATS ติดตามงาน"
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI กรอกใบสมัครงานอัตโนมัติ"
+  },
+  "actionTitle": {
+    "message": "เปิดหน้าต่าง"
+  }
+}

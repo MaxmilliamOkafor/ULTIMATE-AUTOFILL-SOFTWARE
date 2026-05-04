@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI ስራ ማምወኘና ምልያ። ዳግም ጸፍ፣ የሽፋን ደብዳበወችን ፍጠ፣ ATS ተረጋግጡ፣ ስራ዆ችን ክትተት አድርግ።"
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI የስራ ማመልከቻ ራስ-ሙሌት"
+  },
+  "actionTitle": {
+    "message": "መስኮት ክፈት"
+  }
+}

@@ -1,0 +1,1719 @@
+/* Start Root CSS */
+.autofill_detail_bg {
+  z-index: 9999999999;
+  box-sizing: border-box;
+  position: relative;
+}
+
+#autofill_detail {
+  height: 100%;
+  width: 420px;
+  min-width: 420px;
+  box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.25);
+  position: fixed;
+  top: 0px;
+  right: 0px;
+  background-color: #ffffff;
+
+  font-size: 20px;
+  color: black;
+  display: flex;
+  transition: transform 0.4s, backdrop-filter 0.2s ease-out, padding-right .3s ease-out;
+  z-index: 9999;
+}
+
+#autofill_detail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(0);
+  transition: backdrop-filter 0.2s ease-out;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* End Root CSS */
+#autofill_detail .sidebar_warp {
+  width: 66px;
+  height: 100%;
+  background: #fafafa;
+  position: relative;
+}
+/* #autofill_detail .sidebar_small_menu {
+  width: 100%;
+  opacity: 0.4;
+}
+#autofill_detail .sidebar_small_menu.hidden{
+  display: none;
+}
+#autofill_detail .sidebar_small_menu:hover{
+  background-color: #e7e7e7;
+  opacity: 1;
+}
+#autofill_detail .sidebar_small_menu.selected{
+  background-color: #e7e7e7;
+  opacity: 1;
+}
+#autofill_detail .sidebar_small_menu .small_li {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 10px 10px 10px;
+}
+#autofill_detail .sidebar_small_menu img {
+  width: 24px;
+} */
+#autofill_detail .sidebar_top {
+  padding: 20px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+#autofill_detail .sidebar_top > img {
+  width: 18px;
+}
+
+/* #autofill_detail .sidebar_menu.small {
+  position: absolute;
+  left: -107px;
+  top: 55px;
+  z-index: 9999;
+  background-color: #f7f7f7;
+  padding: 5px 10px 5px 10px;
+  border-radius: 20px;
+} */
+
+#autofill_detail .sidebar_menu.hidden {
+  display: none;
+}
+
+#autofill_detail .sidebar_item {  
+  padding: 0.8vh 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #3a3a3a;
+  font-family: var(--jobwizard-font-family);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.12s ease-in;
+}
+#autofill_detail .sidebar_item .imgBg{
+  position: relative;
+  width: 86%;
+  height: 40px;
+}
+#autofill_detail .sidebar_menu > .sidebar_item:hover {
+  transform: scale(1.1);
+}
+
+#autofill_detail .sidebar_menu > .sidebar_item.more-button {
+  overflow: visible;
+}
+
+#autofill_detail .sidebar_menu > .sidebar_item.more-button:hover {
+  transform: none;
+  color: #202223;
+  font-weight: 400;
+}
+
+#autofill_detail .sidebar_menu > .sidebar_item.more-button:hover > :not(.more_popup_container) {
+  transform: scale(1.1); 
+  /* color: #0066FF;
+  font-weight: 500; */
+}
+
+#autofill_detail .sidebar_item.active{
+  transform: scale(1.1);
+}
+
+#autofill_detail .sidebar_item.hidden {
+  display: none;
+}
+
+#autofill_detail .sidebar_item.more-button {
+  display: none;
+  position: relative;
+  cursor: pointer;
+}
+
+#autofill_detail .sidebar_item.more-button.show {
+  display: flex;
+}
+
+#autofill_detail .sidebar_menu > .sidebar_item.more-button:hover .more_popup_container {
+  transform: none;
+}
+
+#autofill_detail .sidebar_menu > .sidebar_item.more-button .more_popup_container {
+  position: absolute;
+  right: 110%;
+  top: 0;
+  z-index: 1000;
+  transform: none !important;
+  transition: none !important;
+}
+/* mid sidebar menu */
+#autofill_detail .mid_sidebar_menu{
+  display: none;
+  position: relative;
+  margin-top: 10px;
+}
+#autofill_detail .mid_sidebar_menu .menu_icon{
+  height: 24px;
+  width: 24px;
+  margin: 0 auto;
+  cursor: pointer;
+  background:url("../icons/menu.svg") center/24px no-repeat;
+}
+#autofill_detail .mid_sidebar_menu .menu_icon.active{
+  background:url("../icons/menu_active.svg") center/24px no-repeat;
+}
+#autofill_detail .mid_sidebar_menu .menu_popup{
+  top: -20px;
+  position: absolute;
+  right: 80px;
+  background: #fff;
+  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.12);
+  z-index: 999;
+  width: max-content;
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: none;
+}
+#autofill_detail .mid_sidebar_menu .menu_popup .sidebar_item{
+  flex-direction: row;
+  justify-content: center;
+  display: flex;
+  flex-direction: row;
+  padding: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-wrap: nowrap;
+  gap: 8px;
+}
+#autofill_detail .mid_sidebar_menu .menu_popup .sidebar_item .imgBg{
+  width: 22px;
+  height: 22px;
+}
+#autofill_detail .mid_sidebar_menu .menu_popup .sidebar_item .sidebar-text{
+  flex: 1;
+  text-align: left;
+}
+/* mid sidebar menu end*/
+#autofill_detail .more_popup {
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  background: white;
+  box-shadow: 0 2px 15px rgba(0,0,0,0.12);
+  z-index: 1000;
+  width: max-content;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+#autofill_detail .more_popup .sidebar_item {
+  transform: none !important;
+  transition: none !important;
+  background-color: white;
+  display: flex;
+  flex-direction: row;
+  padding: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-wrap: nowrap;
+  gap: 8px;
+}
+
+#autofill_detail .more_popup .sidebar_item:hover {
+  background-color: #f0f0f0;
+  color: #202223;
+  font-weight: 400;
+  transform: none !important;
+}
+
+#autofill_detail .more_popup .sidebar_item .imgBg {
+  height: 22px;
+  width: 22px;
+}
+
+#autofill_detail .sidebar_item.active .imgBg{
+  border-top-right-radius: 50%;
+  border-bottom-right-radius: 50%;
+  /*background: #ffffff;*/
+  position: relative;
+  /* width: 90%;
+  height: 40px; */
+}
+
+#autofill_detail .sidebar_icon {
+  position: absolute;
+  left: 50%;
+  top:50%;
+  transform: translate(-50%, -50%); 
+  margin-bottom: 6px;
+  width: 22px;
+  height: 22px;
+  opacity: 1;
+  visibility: visible;
+}
+#autofill_detail .sidebar_active_icon{
+  position: absolute;
+  left: 50%;
+  top:50%;
+  transform: translate(-50%, -50%); 
+  margin-bottom: 6px;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+  visibility: hidden;
+}
+
+#autofill_detail .sidebar_beta_tag{
+  font-size: 10px;
+  line-height: 12px;
+  padding: 1px 6px;
+  margin-top: 3px;
+  color: #0066FF;
+  background-color: #0066FF1A;
+  border-radius: 4px;
+}
+
+#autofill_detail .sidebar-text {
+  text-align: center;
+  /* disable text selection to look better even when user accidently selects */
+  -webkit-user-select: none; /* Safari */
+  -ms-user-select: none; /* IE 10 and IE 11 */
+  user-select: none; /* Standard syntax */
+}
+
+#autofill_detail .sidebar_item.active .sidebar-text {
+  color: #06f;
+  transition: all 0.12s ease-in;
+  font-weight: 500;
+}
+/* #autofill_detail .sidebar_item:hover > :not(.more_popup_container) .sidebar-text{
+  color: #06f;
+  transition: all 0.12s ease-in;
+  font-weight: 500;
+} */
+/* #autofill_detail .sidebar_item:hover > :not(.more_popup_container) .sidebar_active_icon{
+  opacity: 1;
+  visibility: visible;
+  transition: all 0.12s ease-in;
+} */
+/* #autofill_detail .sidebar_item:hover > :not(.more_popup_container) .sidebar_icon{
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.12s ease-in;
+} */
+#autofill_detail .sidebar_item.active:hover .sidebar_active_icon {
+  opacity: 1;
+  visibility: visible;
+}
+
+#autofill_detail .sidebar_item.active:hover .sidebar_icon {
+  opacity: 0;
+  visibility: hidden;
+}
+
+#autofill_detail .sidebar_alert {
+  display: none;
+  position: absolute;
+  bottom: 1vh;
+  width: 100%;
+  text-align: center;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#autofill_detail .personal_menu {
+  position: absolute;
+  bottom: 3.2vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fafafa;
+  /* padding-bottom: 2vh; */
+}
+
+#autofill_detail .personal_menu .personal_menu_item {
+  height: 32px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#autofill_detail .personal_menu .personal_menu_item .update_icon,
+#autofill_detail .personal_menu .personal_menu_item .feedback_icon,
+#autofill_detail .personal_menu .personal_menu_item .personal_icon{
+  opacity: 0.4;
+  transition: opacity 0.1s ease;
+}
+
+#autofill_detail .personal_menu .personal_menu_item .update_icon:hover,
+#autofill_detail .personal_menu .personal_menu_item .feedback_icon:hover,
+#autofill_detail .personal_menu .personal_menu_item .personal_icon:hover {
+  opacity: 0.5;
+  cursor: pointer;
+}
+#autofill_detail .personal_menu .update .update_icon {
+  display: inline-block;
+  width: 100%;
+  height: 100%;
+  background: url("../icons/what's\_new.svg") center/24px no-repeat;
+}
+#autofill_detail .personal_menu .feedback .feedback_icon {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  background: url("../icons/feedback.svg") center/24px no-repeat;
+}
+#autofill_detail .personal_menu .report .report_icon {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  background: url("../icons/report_icon.svg") center/24px no-repeat;
+}
+#autofill_detail .personal_menu .personal .personal_icon {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  background: url("../icons/person_icon.svg") center/24px no-repeat;
+}
+
+#autofill_detail .sidebar_warp .version {
+  position: absolute;
+  bottom: 1.2vh;
+  font-size: 12px;
+  color: #a8a8a8;
+  width: 100%;
+  text-align: center;
+}
+
+/* personal html */
+#autofill_detail .personal_card_warp {
+  cursor: auto;
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s linear 200ms, opacity 200ms;
+  width: 340px;
+  max-height: 700px;
+  display: inline-flex;
+  padding: 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: #ffffff;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+  position: absolute;
+  right: 80%;
+  bottom: 60%;
+  overflow: hidden;
+  transform-origin: bottom right;
+  z-index: 99999;
+}
+
+#autofill_detail .personal_card_warp .personal_card_main {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  width: 100%;
+}
+#autofill_detail .personal_card_warp.mid{
+  height: 300px;
+  overflow-y: scroll;
+}
+
+#autofill_detail:has(.personal_card_warp.showing)::before {
+  backdrop-filter: blur(2px);
+  z-index: 10000;
+}
+
+#autofill_detail .personal_menu .personal .personal_card_warp.showing {
+  visibility: visible;
+  opacity: 1;
+  min-height: 420px;
+  transition: visibility 0s, opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: magicDrawer 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+#autofill_detail .personal_card_warp.hiding {
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s linear 200ms, opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: magicDrawerHide 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+#autofill_detail .personal_card_warp .personal_info {
+  display: flex;
+  padding: 10px 0px;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .personal_info > img {
+  width: 48px;
+  height: 48px;
+  border-radius: 32px;
+}
+#autofill_detail .personal_card_warp .personal_info .personal_info_meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1 0 0;
+}
+#autofill_detail .personal_card_warp .personal_info .flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+  color: #3c3c3c;
+  font-family: var(--jobwizard-font-family);
+  font-size: 18px;
+  font-weight: 700;
+}
+#autofill_detail .personal_card_warp .personal_info .identity {
+  display: none;
+  padding: 4px 9px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 3px;
+  background: rgba(0, 102, 255, 0.05);
+  color: #06f;
+  font-family: var(--jobwizard-font-family);
+  font-size: 14px;
+  font-weight: 400;
+}
+#autofill_detail .personal_card_warp .personal_info .job_expect {
+  display: none;
+}
+#autofill_detail .personal_card_warp .personal_info .job_expect > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #a8a8a8;
+  font-family: var(--jobwizard-font-family);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* User Profile Summary */
+#autofill_detail .personal_card_warp .user_profile_summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+#autofill_detail .personal_card_warp .user_profile_avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+#autofill_detail .personal_card_warp .user_profile_avatar .avatar_img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 6px;
+}
+
+#autofill_detail .personal_card_warp .user_profile_info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+#autofill_detail .personal_card_warp .user_profile_name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  font-family: var(--jobwizard-font-family);
+  line-height: 16px;
+}
+
+#autofill_detail .personal_card_warp .user_profile_email {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+  font-family: var(--jobwizard-font-family);
+  line-height: 16px;
+}
+
+/* Skeleton Loading States */
+#autofill_detail .personal_card_warp .user_profile_summary.loading .user_profile_avatar {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+#autofill_detail .personal_card_warp .user_profile_summary.loading .user_name_text,
+#autofill_detail .personal_card_warp .user_profile_summary.loading .user_email_text {
+  display: inline-block;
+  height: 1em;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+  color: transparent;
+}
+
+#autofill_detail .personal_card_warp .user_profile_summary.loading .user_name_text {
+  width: 120px;
+}
+
+#autofill_detail .personal_card_warp .user_profile_summary.loading .user_email_text {
+  width: 160px;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+#autofill_detail .personal_card_warp .plan_info {
+  display: flex;
+  width: 100%;
+  padding: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  margin-bottom: 12px;
+}
+#autofill_detail .personal_card_warp .plan_info .title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+  margin-bottom: 12px;
+}
+#autofill_detail .personal_card_warp .plan_info .plan_title_text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  font-family: var(--jobwizard-font-family);
+}
+#autofill_detail .personal_card_warp .plan_info .pro {
+  display: inline-flex;
+  padding: 2px 8px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 6px;
+  background: linear-gradient(to right, #0066ff 0%, #0088ff 100%);
+  color: #ffffff;
+  font-family: var(--jobwizard-font-family);
+  font-size: 12px;
+  font-weight: 500;
+  height: 20px;
+  box-shadow: 0 1px 2px rgba(0, 102, 255, 0.2);
+}
+#autofill_detail .personal_card_warp .plan_info .credits_info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .plan_info .details {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  align-self: stretch;
+  margin-bottom: 0;
+}
+#autofill_detail .personal_card_warp .plan_info .credits_usage_label {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+  font-family: var(--jobwizard-font-family);
+}
+#autofill_detail .personal_card_warp .plan_info .per_day_label {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+  font-family: var(--jobwizard-font-family);
+}
+#autofill_detail .personal_card_warp .plan_info .data_ratio_wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--jobwizard-font-family);
+}
+#autofill_detail .personal_card_warp .plan_info .data_ratio_main {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1;
+}
+#autofill_detail .personal_card_warp .plan_info .data_ratio_slash {
+  font-size: 14px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+#autofill_detail .personal_card_warp .plan_info .data_ratio_limit {
+  font-size: 14px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+.runout {
+  color: #9c0000 !important;
+}
+#autofill_detail .personal_card_warp .plan_info .usage_prog_bk {
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  margin-bottom: 8px;
+}
+#autofill_detail .personal_card_warp .plan_info .usage_prog_fr {
+  width: 0%;
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #0066ff 0%, #0088ff 100%);
+  transition: width 0.3s ease;
+}
+#autofill_detail .personal_card_warp .plan_info .manage_tag {
+  display: flex;
+  padding: 8px 16px;
+  margin-top: 8px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 6px;
+  background: #0066ff;
+  color: #ffffff;
+  font-family: var(--jobwizard-font-family);
+  font-size: 12px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: none;
+  height: 32px;
+  width: 100%;
+  box-shadow: 0 1px 2px rgba(0, 102, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+#autofill_detail .personal_card_warp .plan_info .manage_tag::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s ease;
+}
+
+#autofill_detail .personal_card_warp .plan_info .manage_tag:hover {
+  background: #0052cc;
+  box-shadow: 0 2px 4px rgba(0, 102, 255, 0.25);
+}
+
+#autofill_detail .personal_card_warp .plan_info .manage_tag:hover::before {
+  left: 100%;
+}
+
+#autofill_detail .personal_card_warp .plan_info .limit_reset_time {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+  font-family: var(--jobwizard-font-family);
+}
+#autofill_detail .personal_card_warp .plan_info #limit_reset {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0;
+}
+#autofill_detail .personal_card_warp .profile_info {
+  display: flex;
+  padding: 8px 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  align-self: stretch;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-top: 1px solid #f3f4f6;
+  color: #374151;
+  font-family: var(--jobwizard-font-family);
+  font-size: 12px;
+  font-weight: 400;
+}
+#autofill_detail .personal_card_warp .profile_info a {
+  text-decoration: none;
+  color: #374151;
+}
+#autofill_detail .personal_card_warp .profile_info > p,
+#autofill_detail .personal_card_warp .profile_info a,
+#autofill_detail .personal_card_warp .profile_info > div {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 10px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  gap: 8px;
+  color: #374151;
+}
+#autofill_detail .personal_card_warp .profile_info a:hover,
+#autofill_detail .personal_card_warp .profile_info p:hover,
+#autofill_detail .personal_card_warp .profile_info > div:hover {
+  background: #f9fafb;
+  cursor: pointer;
+}
+
+#autofill_detail .personal_card_warp .profile_info a[href*="Delete"] p,
+#autofill_detail .personal_card_warp .profile_info a[href*="delete"] p {
+  color: #dc2626 !important;
+  font-weight: 400;
+}
+
+#autofill_detail .personal_card_warp .profile_info a[href*="Delete"]:hover,
+#autofill_detail .personal_card_warp .profile_info a[href*="delete"]:hover {
+  background: #fef2f2;
+}
+
+#autofill_detail .personal_card_warp .profile_info a[href*="Delete"]:hover p,
+#autofill_detail .personal_card_warp .profile_info a[href*="delete"]:hover p {
+  color: #dc2626 !important;
+}
+
+/* Profile setting */
+#autofill_detail .personal_card_warp .profile_setting {
+  /* Temporary hide the personal card */
+  display: flex;
+  /* display: none; */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  align-self: stretch;
+}
+/* Profile setting -- General part */
+#autofill_detail .personal_card_warp .profile_setting .setting_divider {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 1px;
+  width: 100%;
+  background: #F2F2F2;
+}
+#autofill_detail .personal_card_warp .profile_setting .profile_setting_container {
+  display: flex;
+  padding: 10px 10px;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  border-radius: 8px;
+  background: #fff;
+  color: #202223;
+  font-family: var(--jobwizard-font-family);
+  font-size: 14px;
+  font-weight: 400;
+}
+#autofill_detail .personal_card_warp .profile_setting .container_description {
+  color: #A8A8A8;
+  font-family: var(--jobwizard-font-family);
+  font-size: 10px;
+  font-weight: 400;
+}
+#autofill_detail .personal_card_warp .profile_setting .setting_content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  align-self: stretch;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #202223;
+}
+#autofill_detail .personal_card_warp .profile_setting .setting_content .setting_tips {
+  width: 210px;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #bbbbbb;
+}
+#autofill_detail .personal_card_warp .profile_setting .toggle_switch {
+  display: flex;
+  position: relative;
+  padding: 6px;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  border-radius: 30px;
+  background: #ccc;
+  width: 28px;
+  height: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .toggle_switch.active {
+  background: #0066FF;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .toggle_switch .toggle_switch_circle {
+  position: absolute;
+  left: 18%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.3s;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .toggle_switch.active .toggle_switch_circle {
+  left: 56%;
+}
+/* Profile setting -- PDF part */
+#autofill_detail .personal_card_warp .profile_setting .pdf_setting {
+  /* display: none; */
+  /* Hide for now */
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  position: relative;
+  padding: 12px 10px;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+  cursor: pointer;
+}
+#autofill_detail .personal_card_warp .profile_setting .pdf_setting_content {
+  width: 192px;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  align-self: stretch;
+  gap: 10px;
+  cursor: pointer;
+}
+#autofill_detail .personal_card_warp .profile_setting .pdf_setting_content .pdf_name {
+  max-width: 150px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #A8A8A8;
+}
+#autofill_detail .personal_card_warp .profile_setting:not(.loading) .pdf_setting_content .pdf_name:empty::before {
+  content: attr(data-placeholder);
+  color: #A8A8A8;
+  font-weight: 300;
+}
+#autofill_detail .personal_card_warp .profile_setting.loading .pdf_setting_content .pdf_name {
+  background-color: #e1e1e1;
+  width: 128px;
+  height: 8px;
+  border-radius: 30px;
+}
+/* Profile setting -- LinkedIn part */
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting {
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  padding: 12px 10px;
+  justify-content: space-between;
+  align-items: flex-start;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit {
+  display: flex;
+  padding: 6px 2px;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_data_container {
+  width: 220px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  background-color: transparent;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_data {
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; 
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #A8A8A8;
+}
+
+#autofill_detail .personal_card_warp .profile_setting:not(.loading) .linkedin_setting_edit .linkedin_setting_edit_data:empty::before {
+  content: attr(data-placeholder);
+  color: #A8A8A8;
+  font-weight: 300;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_data.editing {
+  outline: none;
+  color: #202223;
+  overflow-x: auto;
+  scrollbar-width: none;
+  text-overflow: clip;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_data_container:has(.linkedin_setting_edit_data.editing) {
+  background-color: #f2f2f2;
+}
+
+#autofill_detail .personal_card_warp .profile_setting.loading .linkedin_setting_edit .linkedin_setting_edit_data {
+  background-color: #e1e1e1;
+  width: 128px;
+  height: 8px;
+  border-radius: 30px;
+}
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_btn {
+  width: 16px;
+  height: 16px;
+  opacity: 0.3;
+  cursor: pointer;
+}
+#autofill_detail .personal_card_warp .profile_setting .linkedin_setting_edit .linkedin_setting_edit_btn:hover {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+/* Profile setting -- Active Learning part */
+#autofill_detail .personal_card_warp .profile_setting .activeLearning_setting_container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .profile_setting .activeLearning_setting {
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  padding: 12px 10px;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+}
+#autofill_detail .personal_card_warp .profile_setting .activeLearning_setting_manage {
+  display: none;
+  /* Hide for now */
+  /* display: block; */
+  width: 100%;
+  padding: 12px 10px;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #202223;
+  cursor: pointer;
+}
+
+/* Profile setting -- Export Application part */
+#autofill_detail .personal_card_warp .profile_setting .export_application_setting_container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .export_application_setting {
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  padding: 12px 10px;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .export_application_setting_manage {
+  width: 100%;
+  padding: 12px 10px;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--jobwizard-font-family);
+  color: #202223;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+#autofill_detail .personal_card_warp .profile_setting .export_application_setting_manage:hover {
+  background-color: #f2f2f2;
+}
+
+
+/* feedback */
+#autofill_detail .personal_menu .feedback_list_wrap {
+  /* display: none; */
+  display: inline-flex;
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s linear 200ms, opacity 200ms;
+  padding: 10px 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0px 2px 15px 0px rgba(0, 0, 0, 0.12);
+  position: absolute;
+  z-index: 1000;
+  right: 80%;
+  bottom: 60%;
+  transform-origin: bottom right;
+}
+
+/* Mark as styles moved to track.css */
+/* Mark as styles moved to track.css */
+
+#autofill_detail .feedback_list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+  gap: 6px;
+}
+#autofill_detail .personal_menu .feedback_list_wrap.showing {
+  visibility: visible;
+  opacity: 1;
+  transition: visibility 0s, opacity 200ms;
+  animation: magicDrawer 0.2s ease-out forwards;
+}
+#autofill_detail .feedback_list_wrap.hiding {
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s linear 200ms, opacity 200ms;
+  animation: magicDrawerHide 0.2s ease-in forwards;
+}
+#autofill_detail .feedback_list_wrap a {
+  display: flex;
+  padding: 10px 10px;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
+  border-radius: 4px;
+  color: #202223;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  width: 160px;
+  text-decoration: none;
+}
+#autofill_detail .feedback_list_wrap a img {
+  width: 24px;
+  height: 24px;
+}
+#autofill_detail .feedback_list_wrap a:hover {
+  background: #efefef;
+}
+#autofill_detail .feedback_list_wrap .feedback_wechat {
+  width: 160px;
+  color: #202223;
+  border-radius: 4px;
+  font-size: 14px;
+  padding: 10px 10px;
+  gap: 12px;
+  cursor: pointer;
+  display: none;
+  position: relative;
+  text-decoration: none;
+}
+#autofill_detail .feedback_list_wrap .feedback_wechat .feedback_wechat_qrcode {
+  display: none;
+  position: absolute;
+  right: 110%;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px;
+  background-color: white;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+}
+#autofill_detail .feedback_list_wrap .feedback_wechat:hover {
+  background: #efefef;
+}
+#autofill_detail .feedback_list_wrap .feedback_wechat:hover .feedback_wechat_qrcode {
+  display: block;
+}
+
+/* 内容 */
+#autofill_detail .main_content_warp {
+  width: calc(100% - 70px);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+#autofill_detail .main_content_header {
+  display: none;
+  align-items: center;
+  padding: 16px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+#autofill_detail .main_content_header img {
+  user-select: none;
+}
+#autofill_detail .main_content_body {
+  height: 100%;
+  overflow: hidden;
+}
+#autofill_detail .main_content_warp .page_content {
+  display: none;
+  height: 100%;
+  /* padding: 0 20px; */
+  overflow: auto;
+  position: relative;
+}
+#autofill_detail .main_content_warp .page_content#chat_content {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+#autofill_detail .main_content_warp .page_content#chat_content .chatbox_header {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+#autofill_detail .main_content_warp .page_content#chat_content .chatbox_related_container {
+  min-width: 0;
+  max-width: 100%;
+  position: sticky;
+  top: 76px; /* main_symbol height: 24px padding + ~28px title + 24px padding */
+  z-index: 1000;
+  flex-shrink: 0;
+}
+#autofill_detail .main_content_warp .page_content#chat_content .chatbox_main_container {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+  overflow-x: hidden;
+}
+#autofill_detail .main_content_warp .page_content .chatbox_header > :not(.main_symbol) {
+  padding: 0 20px;
+}
+#autofill_detail .main_content_warp .page_content.active {
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes magicDrawer {
+  0% {
+      transform: translate(5%, 5%) scale(0);
+      opacity: 0;
+  }
+  100% {
+      transform: translate(0, 0) scale(1);
+      opacity: 1;
+  }
+}
+
+@keyframes magicDrawerHide {
+  0% {
+      transform: translate(0, 0) scale(1);
+      opacity: 1;
+  }
+  100% {
+      transform: translate(5%, 5%) scale(0);
+      opacity: 0;
+  }
+}
+
+/* Email Input Popup */
+#autofill_detail .email_input_popup {
+  display: none;
+  position: absolute;
+  right: 110%;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 15px;
+  background: white;
+  box-shadow: 0 2px 15px rgba(0,0,0,0.12);
+  border-radius: 10px;
+  width: 250px;
+  z-index: 999999;
+}
+
+#autofill_detail .email_input_popup.show {
+  display: block !important; /* Force display with !important */
+  animation: magicDrawer 0.2s ease-out forwards;
+  border: 2px solid red; /* Temporary debug style */
+}
+
+#autofill_detail .email_input_popup .popup_title {
+  color: #202223;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+
+#autofill_detail .email_input_popup input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e1e1e1;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+#autofill_detail .email_input_popup input:focus {
+  outline: none;
+  border-color: #0066FF;
+}
+
+#autofill_detail .email_input_popup .popup_buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#autofill_detail .email_input_popup button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  transition: background-color 0.2s ease;
+}
+
+#autofill_detail .email_input_popup .cancel_button {
+  background: #f2f2f2;
+  color: #202223;
+}
+
+#autofill_detail .email_input_popup .cancel_button:hover {
+  background: #e5e5e5;
+}
+
+#autofill_detail .email_input_popup .save_button {
+  background: #0066FF;
+  color: white;
+}
+
+#autofill_detail .email_input_popup .save_button:hover {
+  background: #0052cc;
+}
+
+/* --- My Resume List (secondary view, same card layout / height) --- */
+#autofill_detail .personal_card_warp .personal_card_resume_list {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  background: #ffffff;
+  border-radius: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(8px);
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+  overflow: hidden;
+}
+
+#autofill_detail .personal_card_warp.showing-resume-list .personal_card_main {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+#autofill_detail .personal_card_warp.showing-resume-list .personal_card_resume_list {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  display: flex;
+}
+
+/* Inner wrapper: matches personal_card_main padding (16px) */
+#autofill_detail .personal_card_resume_list .resume_list_inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 20px;
+  overflow: visible;
+}
+
+/* Header: back + title */
+#autofill_detail .personal_card_resume_list .resume_list_header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 16px;
+  flex-shrink: 0;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_back:hover {
+  background: #f5f5f7;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_back_arrow {
+  width: 8px;
+  height: 8px;
+  border-left: 1.5px solid #86868b;
+  border-bottom: 1.5px solid #86868b;
+  transform: rotate(-45deg);
+  margin-left: 2px;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1d1f;
+  font-family: var(--jobwizard-font-family);
+}
+
+/* Config section: sync toggle + tooltip (Apple Settings style) */
+#autofill_detail .personal_card_resume_list .resume_list_config {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 16px 0;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 400;
+  color: #1d1d1f;
+  font-family: var(--jobwizard-font-family);
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_label .resume_list_sync_tooltip {
+  margin-left: 6px;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_tooltip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 500;
+  color: #86868b;
+  background: #e8e8ed;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_tooltip:hover {
+  color: #1d1d1f;
+  background: #d2d2d7;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_divider {
+  height: 1px;
+  background: #f3f4f6;
+  flex-shrink: 0;
+  margin: 5px 0;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_toggle {
+  display: flex;
+  position: relative;
+  padding: 4px;
+  border-radius: 10px;
+  background: #e8e8ed;
+  width: 34px;
+  height: 20px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_toggle.active {
+  background: #007aff;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_toggle .toggle_switch_circle {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: left 0.2s ease;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_sync_toggle.active .toggle_switch_circle {
+  left: 16px;
+}
+
+/* 列表区域：在卡片高度内滚动 */
+#autofill_detail .personal_card_resume_list .resume_list_list_wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 16px 0;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_pdf_list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: #5f6368;
+  font-size: 12px;
+  font-weight: 400;
+  gap: 8px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .pdf_meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .pdf_meta .pdf_meta_extra {
+  font-size: 10px;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .pdf_card_content {
+  flex: 1;
+  padding: 8px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  word-break: break-word;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card.active .pdf_card_content,
+#autofill_detail .personal_card_resume_list .pdf_card.selected .pdf_card_content {
+  border-radius: 8px;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  font-weight: 500;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .action_buttons {
+  display: flex;
+  gap: 2px;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .check,
+#autofill_detail .personal_card_resume_list .pdf_card .delete,
+#autofill_detail .personal_card_resume_list .pdf_card .download {
+  display: none;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  border-radius: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card:hover .check,
+#autofill_detail .personal_card_resume_list .pdf_card:hover .delete,
+#autofill_detail .personal_card_resume_list .pdf_card:hover .download {
+  display: flex;
+}
+
+#autofill_detail .personal_card_resume_list .pdf_card .check img,
+#autofill_detail .personal_card_resume_list .pdf_card .delete img,
+#autofill_detail .personal_card_resume_list .pdf_card .download img {
+  opacity: 0.5;
+}
+
+/* --- Resume list upload: 简约大气 --- */
+#autofill_detail .personal_card_resume_list .resume_list_upload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px dashed #d2d2d7;
+  border-radius: 10px;
+  background: #fafafa;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  overflow: hidden;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload:hover {
+  border-color: #b8b8bd;
+  background: #f5f5f7;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload:active {
+  background: #ebebed;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload.uploading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload_inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload_icon_wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload:hover .resume_list_upload_icon_wrap {
+  opacity: 0.85;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload .upload_icon {
+  width: 14px;
+  height: 14px;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload_label {
+  font-size: 13px;
+  font-weight: 400;
+  color: #86868b;
+  font-family: var(--jobwizard-font-family);
+  transition: color 0.2s ease;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload:hover .resume_list_upload_label {
+  color: #1d1d1f;
+}
+
+/* Progress bar */
+#autofill_detail .personal_card_resume_list .resume_list_upload_progress_wrap {
+  flex-shrink: 0;
+  margin-top: 6px;
+  width: 100%;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload_progress_track {
+  height: 3px;
+  border-radius: 2px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+#autofill_detail .personal_card_resume_list .resume_list_upload_progress_fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: #0066ff;
+  transition: width 0.3s ease;
+}

@@ -1,0 +1,114 @@
+{
+  "manifest_version": 3,
+  "name": "JobWizard AI - Ultimate Autofill Job Applications & LinkedIn Referrals",
+  "version": "3.0.0",
+  "description": "AI-powered job application autofill with unlimited Quick Answer, CSV import, job queue automation, CTRL+Click queue, and advanced form filling for all ATS platforms.",
+  "minimum_chrome_version": "108",
+  "icons": {
+    "16": "images/16x.png",
+    "32": "images/32x.png",
+    "48": "images/48x.png",
+    "128": "images/128x.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "images/16x.png",
+      "32": "images/32x.png",
+      "48": "images/48x.png",
+      "128": "images/128x.png"
+    },
+    "default_title": "JobWizard AI Autofill"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "cookies",
+    "contextMenus",
+    "scripting",
+    "webNavigation",
+    "webRequest",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js"
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "name": "JobWizard: AI Autofill Job Applications & LinkedIn Referrals",
+  "version": "1.0.81",
+  "description": "Autofill job applications, find referrals, track applications, and generate ATS-optimized resumes with AI — apply 10x faster.",
+  "minimum_chrome_version": "108",
+  "host_permissions": [
+    "https://*.jobwizard.ai/*",
+    "https://*/*",
+    "https://api.jobwizard.ai/*"
+  ],
+  "permissions": [
+    "background",
+    "storage",
+    "cookies",
+    "scripting",
+    "activeTab",
+    "tabs"
+  ],
+  "manifest_version": 3,
+  "action": {
+    "default_icon": {
+      "16": "icons/thumbnails_16.png",
+      "32": "icons/thumbnails_32.png",
+      "48": "icons/thumbnails_48.png",
+      "128": "icons/thumbnails_128.png"
+    },
+    "default_title": "Auto Form Filler"
+  },
+  "icons": {
+    "16": "icons/thumbnails_16.png",
+    "32": "icons/thumbnails_32.png",
+    "48": "icons/thumbnails_48.png",
+    "128": "icons/thumbnails_128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  },
+  "commands": {
+    "shortcut_autofill": {
+      "suggested_key": {
+        "default": "Alt+Shift+D",
+        "mac": "Alt+Shift+D"
+      },
+      "description": "Autofill"
+    },
+    "shortcut_popup": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "Popup/Minimize"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["js/jobwizard-autofill.js"],
+      "css": ["css/jobwizard.css"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icon/*", "images/*", "css/*", "js/*", "popup/*", "fonts/*"],
+      "matches": ["*://*/*"],
+      "use_dynamic_url": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src * data:; img-src 'self' data: https:"
+  }
+}

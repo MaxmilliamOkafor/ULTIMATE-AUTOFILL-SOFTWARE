@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Isi borang permohonan kerja dengan AI. Sesuaikan resume, hasilkan surat lamaran, semak skor ATS dan jejak pekerjaan."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Isi Auto Permohonan Kerja"
+  },
+  "actionTitle": {
+    "message": "Buka tetingkap"
+  }
+}

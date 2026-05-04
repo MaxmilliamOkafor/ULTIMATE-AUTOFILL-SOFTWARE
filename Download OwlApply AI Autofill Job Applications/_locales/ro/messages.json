@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Completare automată candidaturi cu AI. Personalizați CV-ul, generați scrisori, verificați ATS şi urmăriți joburi."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Completare Automată Aplicații"
+  },
+  "actionTitle": {
+    "message": "Deschide fereastra"
+  }
+}

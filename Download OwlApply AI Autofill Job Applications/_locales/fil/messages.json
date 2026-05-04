@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI autofill ng mga job application. I-tailor ang resume, gumawa ng cover letter, suriin ang ATS at subaybayan ang trabaho."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Auto-fill ng Job Application"
+  },
+  "actionTitle": {
+    "message": "Buksan ang window"
+  }
+}

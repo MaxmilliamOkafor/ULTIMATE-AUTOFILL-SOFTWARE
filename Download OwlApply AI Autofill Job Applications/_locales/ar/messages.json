@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "تعبئة تقديمات العمل بالذكاء الاصطناعي. تخصيص السيرة، رسائل التغطية، نقاط ATS وتتبع الوظائف."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: ملء طلبات التوظيف تلقائياً بالذكاء الاصطناعي"
+  },
+  "actionTitle": {
+    "message": "فتح النافذة"
+  }
+}

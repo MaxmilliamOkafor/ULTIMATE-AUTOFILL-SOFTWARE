@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI automatyczne wypełnianie aplikacji o pracę. Dostosuj CV, generuj listy motywacyjne, sprawdzaj ATS i śledź oferty."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: Automatyczne Aplikowanie z AI"
+  },
+  "actionTitle": {
+    "message": "Otwórz okno"
+  }
+}

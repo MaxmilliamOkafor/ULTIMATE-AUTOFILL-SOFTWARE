@@ -1,0 +1,13 @@
+{
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "AI vyplnění žádostí o práci. Přizpůsobte životopis, generujte průvodní dopisy, kontrolujte ATS skóre a sledujte nabídky."
+  },
+  "extensionName": {
+    "description": "Extension name",
+    "message": "OwlApply: AI Automatické Vyplňování Žádostí"
+  },
+  "actionTitle": {
+    "message": "Otevřít okno"
+  }
+}
