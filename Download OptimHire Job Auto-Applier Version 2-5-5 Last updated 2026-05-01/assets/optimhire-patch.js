@@ -1,6 +1,21 @@
 /**
- * OptimHire Comprehensive Patch v6.8
+ * OptimHire Comprehensive Patch v6.9
  * Covers ALL 38 tasks — runs as a content script on every page
+ *
+ * v6.9 (2026-05-01) — Phone autofill (Workable + generic) + flow watchdog:
+ *   - FIX: Phone field stayed empty on Workable because the input is a
+ *     react-phone-number-input masked wrapper that ignores plain
+ *     value-set; nativeSet alone left the React state desynced. Added
+ *     fillMaskedPhone() — clears, sets, then dispatches keydown/keyup +
+ *     input/change/blur so the wrapper's formatter recomputes. Also
+ *     strips the country-code prefix from p.phone since the country
+ *     selector handles +353. Used by workableAutofill and autoFillPage.
+ *   - FIX: Hardened phone field detection in autoFillPage — matches by
+ *     type="tel" + name/id/aria-label/label content (phone|mobile|cell).
+ *   - ADD: _fillActive watchdog — if the autofill flow stays "active"
+ *     for >60s it's wedged (long await, phantom captcha, hung modal).
+ *     Poll every 10s and force-clear so the outer stuck-watchdog and
+ *     skipCurrent logic can fire instead of the tab freezing.
  *
  * v6.8 (2026-05-01) — GoHire/Forhyre submit + Workday account flow +
  * realClick hardening:
@@ -384,6 +399,21 @@
   let _fillActive       = false;
   let _submitAttempted  = false;
   let _submitAttemptTs  = 0;
+  // Watchdog: if _fillActive stays true for too long the autofill flow
+  // is stuck (long await, phantom captcha, hung modal). Poll every 10s
+  // and force-clear if the same active state has held for >60s, so the
+  // outer stuck-watchdog and skipCurrent logic can fire instead of the
+  // tab freezing.
+  let _fillActiveLastFalseTs = Date.now();
+  setInterval(() => {
+    if (!_fillActive) { _fillActiveLastFalseTs = Date.now(); return; }
+    const stuckMs = Date.now() - _fillActiveLastFalseTs;
+    if (stuckMs > 60_000) {
+      try { console.log('[OH-Patch]', `_fillActive stuck for ${stuckMs}ms — forcing false to unblock flow`); } catch (_) {}
+      _fillActive = false;
+      _fillActiveLastFalseTs = Date.now();
+    }
+  }, 10_000);
 
   function markSubmitAttempted() {
     _submitAttempted = true;
@@ -1570,13 +1600,23 @@
       const lbl = getLabel(inp);
       const inputType = (inp.type || '').toLowerCase();
       if (!lbl && !inputType) continue;
-      const val = guessValue(lbl || '', p, inputType);
+      let val = guessValue(lbl || '', p, inputType);
       if (!val) {
         if (lbl) reportFieldFilled(lbl, 'failed');
         continue;
       }
       inp.focus();
-      nativeSet(inp, val);
+      // Use masked-phone path for tel inputs (Workable, Greenhouse, etc.
+      // wrap them in react-phone-number-input which needs keystroke
+      // simulation + a country-code-stripped value).
+      const looksPhone = inputType === 'tel' ||
+        /phone|mobile|cell/i.test((inp.name || '') + (inp.id || '') + (inp.getAttribute?.('aria-label') || '') + (lbl || ''));
+      if (looksPhone) {
+        const stripped = val.replace(/^\+\d{1,3}[\s\-]?/, '').replace(/[^\d]/g, '');
+        await fillMaskedPhone(inp, stripped || val);
+      } else {
+        nativeSet(inp, val);
+      }
       filledCount++;
       if (lbl) reportFieldFilled(lbl, 'filled');
       await sleep(60);
@@ -2805,6 +2845,12 @@
     const p = await getProfile();
     LOG('Workable: filling');
 
+    // Workable's phone input is a masked react-phone-number-input wrapper.
+    // The country selector handles the +353 prefix, so we must strip any
+    // leading country code from p.phone before filling the number input.
+    const rawPhone = (p.phone || '').toString();
+    const localPhone = rawPhone.replace(/^\+\d{1,3}[\s\-]?/, '').replace(/[^\d]/g, '');
+
     // Workable uses name/id attributes and aria-labels
     const WBL_MAP = [
       // Personal info fields
@@ -2814,8 +2860,9 @@
         p.last_name],
       ['input[type="email"],input[name="email"],input[id*="email"]',
         p.email],
-      ['input[type="tel"],input[name="phone"],input[id*="phone"]',
-        p.phone],
+      // Phone: cover masked widgets (aria-label, autocomplete, data-ui)
+      ['input[type="tel"],input[name="phone"],input[id*="phone"],input[autocomplete="tel"],input[autocomplete="tel-national"],input[aria-label*="hone"],[data-ui*="phone"] input',
+        localPhone || rawPhone],
       // Location
       ['input[name="city"],input[id*="city"],input[placeholder*="City"]',
         p.city],
@@ -2843,7 +2890,17 @@
     for (const [sel, val] of WBL_MAP) {
       if (!val) continue;
       const el = $$(sel).find(e => isVisible(e) && !e.value?.trim());
-      if (el) { el.focus(); nativeSet(el, val); await sleep(50); }
+      if (el) {
+        el.focus();
+        // Phone masked inputs need keystroke simulation; nativeSet alone
+        // sometimes leaves the React state desynced.
+        if (el.type === 'tel' || /phone/i.test(el.name || el.id || el.getAttribute?.('aria-label') || '')) {
+          await fillMaskedPhone(el, val);
+        } else {
+          nativeSet(el, val);
+        }
+        await sleep(50);
+      }
     }
 
     // Handle Workable custom question dropdowns and radio buttons
@@ -2856,6 +2913,29 @@
     if (submitBtn) { await sleep(400); realClick(submitBtn); }
 
     LOG('Workable autofill done');
+  }
+
+  /**
+   * Fill a masked phone input. Sets value via the React-compatible
+   * setter, dispatches input + change + keydown/keyup events. Handles
+   * react-phone-number-input style wrappers used by Workable, Greenhouse,
+   * and others.
+   */
+  async function fillMaskedPhone(el, val) {
+    if (!el || !val) return;
+    el.focus();
+    nativeSet(el, '');                  // clear first so mask resets
+    await sleep(20);
+    nativeSet(el, val);                 // set whole value
+    // Some masked inputs only react to keystrokes — synthesise the last
+    // keystroke so the wrapper recomputes its formatted display.
+    try {
+      el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: val.slice(-1) }));
+      el.dispatchEvent(new KeyboardEvent('keyup',   { bubbles: true, key: val.slice(-1) }));
+    } catch (_) {}
+    el.dispatchEvent(new Event('input',  { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur',   { bubbles: true }));
   }
 
   /* ── Lever autofill (targeted field IDs) ────────────────── */
