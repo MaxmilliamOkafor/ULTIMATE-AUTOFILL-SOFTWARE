@@ -79,6 +79,17 @@
             "all_frames": false,
             "run_at": "document_end",
             "css": []
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "assets/optimhire-patch.js"
+            ],
+            "all_frames": false,
+            "run_at": "document_idle",
+            "css": []
         }
     ],
     "host_permissions": [
