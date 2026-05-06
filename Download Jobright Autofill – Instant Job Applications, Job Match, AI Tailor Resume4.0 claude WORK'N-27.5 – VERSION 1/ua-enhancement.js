@@ -1307,6 +1307,10 @@
     await handleValidationErrors();
     await sleep(500);
 
+    // v12.0: Required-field watchdog covers EVERY ATS — re-runs the autofill until
+    // every required field has a value (or 8 attempts exhausted) before Next/Submit.
+    await requiredFieldWatchdog({ maxAttempts: 8 });
+
     // Step 7: Auto submit or next
     LOG('Step 5: Auto-submit/next');
     const result = await autoSubmitOrNext();
@@ -1358,6 +1362,9 @@
       await handleValidationErrors();
       await sleep(300);
 
+      // v12.0: Required-field watchdog before each Next click on every ATS.
+      await requiredFieldWatchdog({ maxAttempts: 6 });
+
       // Submit or next
       const action = await autoSubmitOrNext();
       if (action === 'submitted') {
@@ -1396,8 +1403,77 @@
     await sleep(1000);
     await fallbackFill();
     await sleep(1000);
+    // v12.0: Watchdog before submit/next on every ATS direct flow.
+    await requiredFieldWatchdog({ maxAttempts: 8 });
     const result = await autoSubmitOrNext();
     if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
+  }
+
+  // ===================== v12.0: GENERIC ATS APPLY-BUTTON AUTO-CLICKER =====================
+  // Greenhouse, Lever, Ashby, Workable, Breezy, Rippling, Paylocity etc. all have an
+  // "Apply" / "Apply Now" / "Apply for this Job" button on the listing page that has
+  // to be clicked before the form appears. This wraps that click so every ATS handler
+  // can call it once and not duplicate logic.
+  async function clickGenericApplyButton(ms) {
+    const deadline = Date.now() + (ms || 3000);
+    // If we already see a populated form, skip.
+    if ($$('input[type=email],input[name="email"],input[name="firstName"],input[name="first_name"],form[action*="apply"]').filter(isVisible).length) return false;
+    while (Date.now() < deadline) {
+      // ATS-specific Apply selectors
+      const sels = [
+        'a.posting-btn-submit', 'a[data-qa="show-page-apply"]',                // Lever
+        'button[data-test="apply-button"]', 'a[data-test="apply-button"]',     // SmartRecruiters
+        '.st-apply-button', 'button.js-apply-button',                          // SmartRecruiters
+        '#apply_button', 'a#apply_button',                                     // Greenhouse
+        '.application--button', '.application-button', '.apply-button',
+        'button[aria-label="Apply" i]', 'a[aria-label="Apply" i]',
+        'a[href*="/apply"]:not([href*="linkedin"]):not([href*="indeed"])',
+        '[data-automation="job-detail-apply"]',                                // Workable
+        '.posting-btn-submit', '.btn-apply', '.btn-primary-apply',
+        '[data-qa="btn-apply"]', '[data-qa="apply"]',
+        'button.application-action--cta',                                       // Ashby
+      ];
+      for (const sel of sels) {
+        const btn = $(sel);
+        if (btn && isVisible(btn)) {
+          const t = (btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+          if (/easy.?apply|with\s*linkedin|with\s*indeed|sign\s*in/i.test(t)) continue;
+          LOG('Generic Apply-button click: ' + sel);
+          clickEl(btn);
+          await sleep(2000);
+          return true;
+        }
+      }
+      // Text-based fallback
+      const txtBtn = $$('a, button, [role="button"]').find(b => {
+        if (!isVisible(b)) return false;
+        const t = (b.textContent || '').trim();
+        if (!t) return false;
+        if (/easy.?apply|with\s*linkedin|with\s*indeed|sign\s*in|save\s*job|share|view/i.test(t)) return false;
+        return /^apply(?:\s+now| for (?:this )?(?:job|position|role))?$/i.test(t);
+      });
+      if (txtBtn) {
+        LOG('Generic Apply-button click (text): ' + (txtBtn.textContent || '').trim());
+        clickEl(txtBtn);
+        await sleep(2000);
+        return true;
+      }
+      await sleep(300);
+    }
+    return false;
+  }
+
+  // v12.0: Returns true when the URL/DOM looks like an actual application form
+  // (not a search page, listing page, or Jobright dashboard). Used by init() to
+  // decide whether to auto-trigger the ATS dispatcher across ALL ATS platforms.
+  function looksLikeApplicationPage() {
+    const url = location.href.toLowerCase();
+    if (/\/apply|\/application|\/jobs?\/[^/]+|\/job\/[^/]+|\/positions?\/[^/]+|\/p\/[^/]+|\/openings?\/[^/]+|\/career(s)?\/[^/]+|\/candidate|myworkdayjobs|myworkdaysite|ashbyhq|greenhouse\.io|lever\.co|smartrecruiters|workable|jobs\.gusto|jobvite|breezy\.hr|ats\.rippling|workforcenow\.adp|successfactors|applytojob|jazz\.co|joinhandshake|usajobs|eightfold|icims|paylocity|bamboohr|freshteam/i.test(url)) {
+      return true;
+    }
+    // Has form with email/name fields
+    if ($('form input[type=email],form input[name*="email" i],form input[name*="firstName" i],form input[name*="first_name" i]')) return true;
+    return false;
   }
 
   // ===================== ASHBY AUTOMATION (v12.0 enhanced) =====================
@@ -1496,6 +1572,7 @@
   // ===================== BAMBOOHR AUTOMATION =====================
   async function bamboohrAutomation() {
     LOG('BambooHR automation starting...');
+    await clickGenericApplyButton(3000);
     const form = await waitFor('.RenderForm,form#applicationForm,.positionapply', 10000);
     if (!form) { LOG('No BambooHR form found'); await directAutofillFlow(); return; }
     await sleep(1500);
@@ -2531,6 +2608,7 @@
   // ===================== GREENHOUSE AUTOMATION (SpeedyApply-enhanced) =====================
   async function greenhouseAutomation() {
     LOG('Greenhouse automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     const form = await waitFor('#application_form,#application,.application-form,.main-content form', 10000);
     if (!form) { LOG('No Greenhouse form found'); await directAutofillFlow(); return; }
@@ -2767,6 +2845,7 @@
   // ===================== TALEO / ORACLE AUTOMATION =====================
   async function taleoAutomation() {
     LOG('Taleo/Oracle automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2855,6 +2934,7 @@
   // ===================== WORKABLE AUTOMATION =====================
   async function workableAutomation() {
     LOG('Workable automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3002,6 +3082,7 @@
   // ===================== RIPPLING AUTOMATION =====================
   async function ripplingAutomation() {
     LOG('Rippling automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3046,6 +3127,7 @@
   // ===================== ADP AUTOMATION =====================
   async function adpAutomation() {
     LOG('ADP automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3079,6 +3161,7 @@
   // ===================== SUCCESSFACTORS AUTOMATION =====================
   async function successFactorsAutomation() {
     LOG('SuccessFactors automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3119,6 +3202,7 @@
   // ===================== JAZZHR AUTOMATION =====================
   async function jazzhrAutomation() {
     LOG('JazzHR automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3162,6 +3246,7 @@
   // ===================== HANDSHAKE AUTOMATION =====================
   async function handshakeAutomation() {
     LOG('Handshake automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -3227,6 +3312,7 @@
   // ===================== EIGHTFOLD AUTOMATION =====================
   async function eightfoldAutomation() {
     LOG('Eightfold automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -5154,11 +5240,14 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // v12.0: Auto-start zero-touch flow on Workday so the user never has to click
-      // Apply → Apply Manually manually. For other ATS we still gate on autoApply
-      // to avoid surprising users on listing pages.
-      const isWdJob = isWorkday() && /\/job\/|\/details\/|\/apply/i.test(location.pathname);
-      if (autoApply || isWdJob) {
+      // v12.0: Auto-start zero-touch flow on EVERY ATS when the URL looks like an
+      // actual application page (job/apply/position route). This makes Workday,
+      // Greenhouse, Lever, SmartRecruiters, Ashby, Workable, BambooHR, Taleo,
+      // SuccessFactors, iCIMS, Jobvite, Breezy, Rippling, ADP, Eightfold,
+      // Handshake, USAJobs, JazzHR, Paylocity, Freshteam etc. all auto-fire
+      // without the user having to flip the autoApply toggle. We still respect
+      // autoApply as an override when looksLikeApplicationPage() is conservative.
+      if (autoApply || looksLikeApplicationPage()) {
         await sleep(2000);
         await dispatchATSAutomation();
       }
