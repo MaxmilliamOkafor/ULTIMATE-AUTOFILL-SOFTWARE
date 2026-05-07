@@ -1,9 +1,16 @@
-// === ULTIMATE AUTOFILL ENHANCEMENT v11.0 (Jobright v1.5.4) ===
+// === ULTIMATE AUTOFILL ENHANCEMENT v12.0 (Jobright v1.5.4 Ultimate) ===
 // Ultimate Edition: AI-level knockout intelligence, 500+ pre-seeded ATS responses,
 // STAR-format behavioral answers, resume keyword optimizer, smart cover-letter generator,
 // 150+ ATS platforms (Paradox/Olivia, Phenom chatbot, Beamery, HireVue chat, ModernHire),
 // Shadow DOM + iframe traversal, synonym-aware field matching, interview-boost scoring.
 // Core: Accuracy-first deliberate pacing, verification passes, freeze-proof error handling.
+//
+// v12.0: Zero-touch Workday flow — auto-clicks Apply → Apply Manually,
+//        dismisses Use-My-Last-Application/LinkedIn modals, walks every Workday page
+//        type (My Info / Experience / Questions / Self-ID / Review), required-field
+//        watchdog blocks Next/Submit until 100% of required fields are filled,
+//        SpeedyApply 2.23.4 selectors ported (XPath fallbacks, dateSection inputs,
+//        sourcePrompt/source dropdowns, hispanicOrLatino, agreementCheckbox).
 (function () {
   'use strict';
   const LOG = (...a) => console.log('[UA]', ...a);
@@ -1121,9 +1128,20 @@
     // First: learn from the filled page before navigating away
     await learnFromPage();
 
+    // v12.0: Required-field watchdog — re-fill until 100% complete (or attempts exhausted)
+    // before the Next/Submit click. Prevents the "Form needs corrections" loop seen on
+    // Ashby/Workday/Greenhouse multi-page applications.
+    const watch = await requiredFieldWatchdog({ maxAttempts: 6 });
+    if (!watch.ok) {
+      LOG('Watchdog escalating before Next/Submit — running aggressive fill on missing');
+      await aggressiveFillMissing(watch.missing);
+      await sleep(400);
+      await handleValidationErrors();
+    }
+
     // Check if all required fields are filled
     const missing = getMissingRequired();
-    LOG(`Missing required: ${missing.length}`, missing);
+    LOG(`Missing required after watchdog: ${missing.length}`, missing);
 
     // Submit selectors (try if no required missing)
     const submitSels = [
@@ -1289,6 +1307,10 @@
     await handleValidationErrors();
     await sleep(500);
 
+    // v12.0: Required-field watchdog covers EVERY ATS — re-runs the autofill until
+    // every required field has a value (or 8 attempts exhausted) before Next/Submit.
+    await requiredFieldWatchdog({ maxAttempts: 8 });
+
     // Step 7: Auto submit or next
     LOG('Step 5: Auto-submit/next');
     const result = await autoSubmitOrNext();
@@ -1340,6 +1362,9 @@
       await handleValidationErrors();
       await sleep(300);
 
+      // v12.0: Required-field watchdog before each Next click on every ATS.
+      await requiredFieldWatchdog({ maxAttempts: 6 });
+
       // Submit or next
       const action = await autoSubmitOrNext();
       if (action === 'submitted') {
@@ -1378,23 +1403,176 @@
     await sleep(1000);
     await fallbackFill();
     await sleep(1000);
+    // v12.0: Watchdog before submit/next on every ATS direct flow.
+    await requiredFieldWatchdog({ maxAttempts: 8 });
     const result = await autoSubmitOrNext();
     if (result === 'next_page') { await sleep(3000); await multiPageLoop(); }
   }
 
-  // ===================== ASHBY AUTOMATION (from LazyApply) =====================
+  // ===================== v12.0: GENERIC ATS APPLY-BUTTON AUTO-CLICKER =====================
+  // Greenhouse, Lever, Ashby, Workable, Breezy, Rippling, Paylocity etc. all have an
+  // "Apply" / "Apply Now" / "Apply for this Job" button on the listing page that has
+  // to be clicked before the form appears. This wraps that click so every ATS handler
+  // can call it once and not duplicate logic.
+  async function clickGenericApplyButton(ms) {
+    const deadline = Date.now() + (ms || 3000);
+    // If we already see a populated form, skip.
+    if ($$('input[type=email],input[name="email"],input[name="firstName"],input[name="first_name"],form[action*="apply"]').filter(isVisible).length) return false;
+    while (Date.now() < deadline) {
+      // ATS-specific Apply selectors
+      const sels = [
+        'a.posting-btn-submit', 'a[data-qa="show-page-apply"]',                // Lever
+        'button[data-test="apply-button"]', 'a[data-test="apply-button"]',     // SmartRecruiters
+        '.st-apply-button', 'button.js-apply-button',                          // SmartRecruiters
+        '#apply_button', 'a#apply_button',                                     // Greenhouse
+        '.application--button', '.application-button', '.apply-button',
+        'button[aria-label="Apply" i]', 'a[aria-label="Apply" i]',
+        'a[href*="/apply"]:not([href*="linkedin"]):not([href*="indeed"])',
+        '[data-automation="job-detail-apply"]',                                // Workable
+        '.posting-btn-submit', '.btn-apply', '.btn-primary-apply',
+        '[data-qa="btn-apply"]', '[data-qa="apply"]',
+        'button.application-action--cta',                                       // Ashby
+      ];
+      for (const sel of sels) {
+        const btn = $(sel);
+        if (btn && isVisible(btn)) {
+          const t = (btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+          if (/easy.?apply|with\s*linkedin|with\s*indeed|sign\s*in/i.test(t)) continue;
+          LOG('Generic Apply-button click: ' + sel);
+          clickEl(btn);
+          await sleep(2000);
+          return true;
+        }
+      }
+      // Text-based fallback
+      const txtBtn = $$('a, button, [role="button"]').find(b => {
+        if (!isVisible(b)) return false;
+        const t = (b.textContent || '').trim();
+        if (!t) return false;
+        if (/easy.?apply|with\s*linkedin|with\s*indeed|sign\s*in|save\s*job|share|view/i.test(t)) return false;
+        return /^apply(?:\s+now| for (?:this )?(?:job|position|role))?$/i.test(t);
+      });
+      if (txtBtn) {
+        LOG('Generic Apply-button click (text): ' + (txtBtn.textContent || '').trim());
+        clickEl(txtBtn);
+        await sleep(2000);
+        return true;
+      }
+      await sleep(300);
+    }
+    return false;
+  }
+
+  // v12.0: Returns true when the URL/DOM looks like an actual application form
+  // (not a search page, listing page, or Jobright dashboard). Used by init() to
+  // decide whether to auto-trigger the ATS dispatcher across ALL ATS platforms.
+  function looksLikeApplicationPage() {
+    const url = location.href.toLowerCase();
+    if (/\/apply|\/application|\/jobs?\/[^/]+|\/job\/[^/]+|\/positions?\/[^/]+|\/p\/[^/]+|\/openings?\/[^/]+|\/career(s)?\/[^/]+|\/candidate|myworkdayjobs|myworkdaysite|ashbyhq|greenhouse\.io|lever\.co|smartrecruiters|workable|jobs\.gusto|jobvite|breezy\.hr|ats\.rippling|workforcenow\.adp|successfactors|applytojob|jazz\.co|joinhandshake|usajobs|eightfold|icims|paylocity|bamboohr|freshteam/i.test(url)) {
+      return true;
+    }
+    // Has form with email/name fields
+    if ($('form input[type=email],form input[name*="email" i],form input[name*="firstName" i],form input[name*="first_name" i]')) return true;
+    return false;
+  }
+
+  // ===================== ASHBY AUTOMATION (v12.0 enhanced) =====================
   async function ashbyAutomation() {
-    LOG('Ashby automation starting...');
+    LOG('Ashby automation starting (v12.0)...');
+    // Click "Apply" tab if we landed on Overview
+    const applyTab = $$('a, button, [role="tab"]').find(b =>
+      isVisible(b) && /^application$/i.test((b.textContent || '').trim())
+    );
+    if (applyTab && /overview/i.test(document.title || '')) {
+      LOG('Ashby: switching from Overview to Application tab');
+      clickEl(applyTab);
+      await sleep(1500);
+    }
     const form = await waitFor('form,.ashby-application-form,[data-testid="application-form"]', 10000);
     if (!form) { LOG('No Ashby form found'); await directAutofillFlow(); return; }
     await sleep(1500);
+
+    const p = await getProfile();
+    await loadAnswerBank();
+
+    // Phase 1: Common Ashby fields
+    await ashbyFillCore(p);
+
     await fixPhoneCountryCode();
     await tailorFirstFlow();
+
+    // Phase 2: Watchdog — handles "Your form needs corrections" by re-running
+    // until every required field has a value.
+    await requiredFieldWatchdog({ maxAttempts: 8 });
+  }
+
+  // Ashby uses Aria-labelled containers and specific input names. Fill core
+  // identity fields plus link/source/location which are commonly missed.
+  async function ashbyFillCore(p) {
+    // Name & Email
+    const nameInput = $('input[name="name"],input[name="_systemfield_name"],input[id*="name" i]:not([name*="company" i])');
+    if (nameInput && !nameInput.value) nativeSet(nameInput, `${p.first_name || p.firstName || ''} ${p.last_name || p.lastName || ''}`.trim());
+    const emailInput = $('input[type=email],input[name="email"],input[name="_systemfield_email"],input[id*="email" i]');
+    if (emailInput && !emailInput.value) nativeSet(emailInput, p.email || '');
+
+    // Location (Ashby renders a typeahead — type, then click first matching option)
+    const locInput = $('input[name="location"],input[name="_systemfield_location"],input[id*="location" i],input[aria-label*="location" i]');
+    if (locInput && !locInput.value) {
+      const locStr = p.city ? [p.city, p.state || p.region || '', p.country || DEFAULTS.country].filter(Boolean).join(', ') : (p.country || DEFAULTS.country);
+      locInput.focus();
+      nativeSet(locInput, locStr);
+      await sleep(900);
+      const opt = $$('[role="option"],li[role="option"],[class*="autocomplete"] li,[class*="suggestion"] li').find(isVisible);
+      if (opt) { realClick(opt); await sleep(300); }
+    }
+
+    // Resume already attached? Ashby surface the upload differently — handled by sidebar.
+    // Links: GitHub, LinkedIn, Twitter, Personal site
+    const linkMap = {
+      'github': p.github_url || p.github || '',
+      'linkedin': p.linkedin_profile_url || p.linkedin || '',
+      'twitter': p.twitter_url || p.twitter || '',
+      'website': p.website_url || p.website || '',
+      'portfolio': p.website_url || p.website || '',
+    };
+    $$('input').filter(isVisible).forEach(inp => {
+      if (inp.value) return;
+      const meta = ((getLabel(inp) || '') + ' ' + (inp.name || '') + ' ' + (inp.id || '') + ' ' + (inp.placeholder || '')).toLowerCase();
+      for (const [k, v] of Object.entries(linkMap)) {
+        if (v && meta.includes(k)) { nativeSet(inp, v); break; }
+      }
+    });
+
+    // "How did you hear about ..." — pick LinkedIn / Job board / Social media depending on availability.
+    const sourceRadios = $$('input[type=radio]').filter(r => {
+      const lbl = (getLabel(r) || $(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+      const groupTxt = (r.closest('fieldset, .question, [class*="question"], [class*="field"], div')?.textContent || '').toLowerCase();
+      return /how.*hear|where.*(hear|find|learn)|source|referred/i.test(groupTxt);
+    });
+    if (sourceRadios.length && !sourceRadios.some(r => r.checked)) {
+      const preferred = ['linkedin', 'job board', 'social media', 'jobright', 'i was reached out', 'news article', 'i\'m a user'];
+      for (const pref of preferred) {
+        const m = sourceRadios.find(r => {
+          const t = ($(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '').toLowerCase();
+          return t.includes(pref);
+        });
+        if (m) { realClick(m); LOG('Ashby: source radio set to ' + pref); break; }
+      }
+    }
+
+    // Required textareas (Why X, Most impactful, How did you know it worked) — seed from cover letter.
+    $$('textarea').filter(el => isVisible(el) && isFieldRequired(el) && !el.value?.trim()).forEach(t => {
+      const lbl = (getLabel(t) || '').toLowerCase();
+      let v = guessFieldValue(lbl, p, t);
+      if (!v) v = p.cover_letter || DEFAULTS.cover;
+      nativeSet(t, v);
+    });
   }
 
   // ===================== BAMBOOHR AUTOMATION =====================
   async function bamboohrAutomation() {
     LOG('BambooHR automation starting...');
+    await clickGenericApplyButton(3000);
     const form = await waitFor('.RenderForm,form#applicationForm,.positionapply', 10000);
     if (!form) { LOG('No BambooHR form found'); await directAutofillFlow(); return; }
     await sleep(1500);
@@ -1536,27 +1714,210 @@
     return degree;
   }
 
+  // ===================== v12.0: ZERO-TOUCH WORKDAY ENTRY (Apply → Apply Manually) =====================
+  // Aggressively clicks the job-listing Apply button, then the "Apply Manually" choice in
+  // the Start-Your-Application modal. Skips "Use My Last Application" and
+  // "Apply With LinkedIn" so the form starts fresh and we can fill every page.
+  async function workdayClickApply() {
+    // Already on apply flow — nothing to click.
+    if (/\/apply(\/|$)/i.test(location.pathname) ||
+        $('[data-automation-id="quickApplyPage"],[data-automation-id="applyFlowAutoFillPage"],[data-automation-id="contactInformationPage"],[data-automation-id="applyFlowMyInfoPage"],[data-automation-id="ApplyFlowPage"],[data-automation-id="applyFlowContainer"],[data-automation-id="applyFlowForm"]')) {
+      return true;
+    }
+    const applySelectors = [
+      '[data-automation-id="applyButton"]',
+      '[data-automation-id="jobAction-apply"]',
+      'a[data-automation-id="applyButton"]',
+      'button[data-automation-id="applyButton"]',
+      'a[role="button"][data-automation-id*="apply" i]',
+    ];
+    for (const sel of applySelectors) {
+      const btn = $(sel);
+      if (btn && isVisible(btn)) {
+        LOG('Workday: clicking Apply button (' + sel + ')');
+        clickEl(btn);
+        await sleep(1500);
+        return true;
+      }
+    }
+    // Fallback: text-match
+    const txtBtn = $$('a, button, [role="button"]').find(b =>
+      isVisible(b) && /^\s*(apply(?: now| for job)?)\s*$/i.test((b.textContent || '').trim()) &&
+      !/easy.?apply|with.?linkedin|with.?indeed/i.test(b.textContent || '')
+    );
+    if (txtBtn) {
+      LOG('Workday: clicking Apply (text match)');
+      clickEl(txtBtn);
+      await sleep(1500);
+      return true;
+    }
+    return false;
+  }
+
+  // Aggressively click "Apply Manually" — try data-automation-id, role, and text match.
+  // Race against a MutationObserver so we catch the modal as soon as it renders.
+  async function workdayClickApplyManually(maxMs) {
+    const deadline = Date.now() + (maxMs || 12000);
+    while (Date.now() < deadline) {
+      const candidates = [
+        '[data-automation-id="applyManually"]',
+        'a[data-automation-id="applyManually"]',
+        'button[data-automation-id="applyManually"]',
+      ];
+      for (const sel of candidates) {
+        const el = $(sel);
+        if (el && isVisible(el)) {
+          LOG('Workday: clicking Apply Manually');
+          await sleep(300);
+          clickEl(el);
+          await sleep(2000);
+          return true;
+        }
+      }
+      // Text-match in modal/dialog only — be specific to avoid clicking Easy/LinkedIn variants.
+      const modal = $('[role="dialog"],[data-automation-id*="modal" i],[data-automation-id*="popup" i],[class*="modal" i],[class*="dialog" i]') || document;
+      const btns = $$('button, a, [role="button"]', modal);
+      const am = btns.find(b => {
+        if (!isVisible(b)) return false;
+        const t = (b.textContent || '').trim().toLowerCase();
+        if (!t) return false;
+        if (/use\s*my\s*last\s*application|autofill\s*with|with\s*linkedin|use\s*linkedin|with\s*indeed|sign\s*in/i.test(t)) return false;
+        return /^apply\s*manually$|^manually(\s+apply)?$|^continue\s+manually$/i.test(t);
+      });
+      if (am) {
+        LOG('Workday: clicking Apply Manually (text match)');
+        await sleep(300);
+        clickEl(am);
+        await sleep(2000);
+        return true;
+      }
+      await sleep(300);
+    }
+    return false;
+  }
+
+  // ===================== v12.0: REQUIRED-FIELD WATCHDOG =====================
+  // Re-runs the autofill until every required field on the current page has a value,
+  // or maxAttempts is exhausted. Used before every Next/Submit click so we never
+  // submit a half-filled page and never need a manual nudge.
+  async function requiredFieldWatchdog(opts) {
+    const o = opts || {};
+    const maxAttempts = o.maxAttempts || 6;
+    const fillFn = o.fillFn || fallbackFill;
+    let lastMissing = -1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const missing = getMissingRequired();
+      if (missing.length === 0) {
+        if (attempt > 1) LOG(`Watchdog: all required fields filled after ${attempt - 1} retries`);
+        return { ok: true, missing: [], attempts: attempt };
+      }
+      LOG(`Watchdog attempt ${attempt}/${maxAttempts}: ${missing.length} missing — ${missing.slice(0, 5).join(' | ')}${missing.length > 5 ? '...' : ''}`);
+      // Stuck: same missing count three times in a row → escalate to aggressive fill.
+      if (missing.length === lastMissing && attempt >= 3) {
+        await aggressiveFillMissing(missing);
+      } else {
+        await fillFn();
+        await sleep(300);
+        await handleValidationErrors();
+      }
+      lastMissing = missing.length;
+      await sleep(400);
+    }
+    const finalMissing = getMissingRequired();
+    LOG(`Watchdog: gave up with ${finalMissing.length} required fields still missing`);
+    return { ok: finalMissing.length === 0, missing: finalMissing, attempts: maxAttempts };
+  }
+
+  // Fill required fields that the regular fallback missed by binding to ANY visible
+  // empty required input/select/radio/checkbox using best-guess values.
+  async function aggressiveFillMissing(missingLabels) {
+    const p = await getProfile();
+    await loadAnswerBank();
+    const required = $$('input:not([type=hidden]):not([type=file]),textarea,select')
+      .filter(el => isVisible(el) && isFieldRequired(el) && !hasFieldValue(el));
+    for (const el of required) {
+      const lbl = getLabel(el) || el.name || el.placeholder || '';
+      // 1. Try profile-based guess
+      let val = guessFieldValue(lbl, p, el);
+      // 2. Then learned answer
+      if (!val) val = getLearnedAnswer(lbl, el);
+      // 3. Then a sensible default per field type
+      if (!val) {
+        if (el.type === 'email') val = p.email || '';
+        else if (el.type === 'tel' || /phone|mobile/i.test(el.name || el.id || '')) val = p.phone || '';
+        else if (el.type === 'url' || /url|link|website|profile/i.test(lbl)) val = p.linkedin_profile_url || p.linkedin || p.website_url || '';
+        else if (el.tagName === 'TEXTAREA') val = DEFAULTS.cover;
+        else if (el.tagName === 'SELECT') {
+          const opts = $$('option', el).filter(o => o.value && o.index > 0);
+          if (opts.length) {
+            const safe = opts.find(o => /no|none|prefer not|decline|n\/a|other/i.test(o.text)) || opts[0];
+            el.value = safe.value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            continue;
+          }
+        }
+        else val = 'N/A';
+      }
+      if (val && el.tagName !== 'SELECT') {
+        el.focus();
+        nativeSet(el, val);
+        await sleep(120);
+      }
+    }
+    // Required radio groups: pick first non-decline option (or "yes"/"no" via determineYesNo).
+    const radioGroups = {};
+    $$('input[type=radio]').filter(isVisible).forEach(r => {
+      if (isFieldRequired(r) || r.required || r.getAttribute('aria-required') === 'true') {
+        (radioGroups[r.name || r.id] ||= []).push(r);
+      }
+    });
+    for (const radios of Object.values(radioGroups)) {
+      if (radios.some(r => r.checked)) continue;
+      const parent = radios[0].closest('fieldset, .question, [class*="question"], .form-group, [class*="field"]');
+      if (!answerKnockoutRadioGroup(radios, parent, p)) {
+        // Last-resort: click first non-decline radio so the form validates.
+        const first = radios.find(r => {
+          const lbl = $(`label[for="${CSS.escape(r.id)}"]`)?.textContent || r.value || '';
+          return !/decline|prefer not|do not wish/i.test(lbl);
+        }) || radios[0];
+        if (first) realClick(first);
+      }
+      await sleep(120);
+    }
+    // Required checkboxes: tick.
+    $$('input[type=checkbox]').filter(el => isVisible(el) && !el.checked && (isFieldRequired(el) || el.required)).forEach(cb => realClick(cb));
+    // Workday button-style required dropdowns
+    const wdBtns = $$('[data-automation-id^="formField-"] button:not([disabled])').filter(b => {
+      if (!isVisible(b)) return false;
+      const t = (b.textContent || '').toLowerCase().trim();
+      return !t || t === 'select' || t === 'choose' || t === 'select one' || t === '---';
+    });
+    for (const btn of wdBtns) {
+      const lbl = getLabel(btn);
+      const v = guessFieldValue(lbl, p, btn) || 'Yes';
+      await selectFromWorkdayDropdown(btn, v);
+      await sleep(150);
+    }
+  }
+
+  // Gate Next/Submit on the watchdog. Returns true when it's safe to advance.
+  async function guardedAdvance(actionType) {
+    const r = await requiredFieldWatchdog({ maxAttempts: 6 });
+    if (!r.ok && actionType === 'submit') {
+      LOG('Watchdog refused submit — ' + r.missing.length + ' required fields still missing');
+      return false;
+    }
+    return true;
+  }
+
   // ===================== WORKDAY AUTOMATION (SpeedyApply-enhanced) =====================
   async function workdayAutomation() {
-    LOG('Workday automation starting (SpeedyApply-enhanced)...');
+    LOG('Workday automation starting (v12.0 zero-touch)...');
     const p = await getProfile();
 
-    // Phase 1: Navigate to application form
-    let clicked = false;
-    // Strategy 1: data-automation-id Apply button
-    const applyBtnWd = $('[data-automation-id="applyButton"],[data-automation-id="jobAction-apply"]');
-    if (applyBtnWd && isVisible(applyBtnWd)) { clickEl(applyBtnWd); clicked = true; await sleep(2000); }
-    // Strategy 2: Text-based Apply button
-    if (!clicked) {
-      const allBtns = $$('a, button');
-      for (const b of allBtns) { if (/^\s*(Apply|Apply Now|Apply for Job)\s*$/i.test(b.textContent) && isVisible(b)) { clickEl(b); clicked = true; await sleep(2000); break; } }
-    }
-    // Click Apply Manually (skip Easy Apply / external links)
-    const am = await waitFor("//*[@data-automation-id='applyManually']", 8000, true);
-    if (am) { await sleep(500); clickEl(am); await sleep(2000); }
-    // Handle "Use My Last Application" — skip it for fresh fill
-    const useLastApp = await findByText('button,a', /use my last application|autofill with/i, 3000);
-    if (useLastApp) { LOG('Skipping "Use My Last Application"'); }
+    // Phase 1: Navigate to application form (Apply → Apply Manually)
+    await workdayClickApply();
+    await workdayClickApplyManually(12000);
 
     // Handle sign-in/create account pages
     const signInBtn = $('[data-automation-id="signInSubmitButton"],[data-automation-id="createAccountSubmitButton"]');
@@ -2221,6 +2582,15 @@
       await sleep(500);
       await handleValidationErrors();
 
+      // v12.0: Required-field watchdog — never advance with missing required fields.
+      const watch = await requiredFieldWatchdog({ maxAttempts: 6 });
+      if (!watch.ok) {
+        LOG(`Workday: ${watch.missing.length} required missing on ${currentPageType} — escalating`);
+        await aggressiveFillMissing(watch.missing);
+        await sleep(400);
+        await handleValidationErrors();
+      }
+
       // Click Next
       const nextBtn = $('button[data-automation-id="bottom-navigation-next-button"], button[data-automation-id="pageFooterNextButton"], button[data-automation-id="btnNext"]');
       if (nextBtn && isVisible(nextBtn)) {
@@ -2238,6 +2608,7 @@
   // ===================== GREENHOUSE AUTOMATION (SpeedyApply-enhanced) =====================
   async function greenhouseAutomation() {
     LOG('Greenhouse automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     const form = await waitFor('#application_form,#application,.application-form,.main-content form', 10000);
     if (!form) { LOG('No Greenhouse form found'); await directAutofillFlow(); return; }
@@ -2474,6 +2845,7 @@
   // ===================== TALEO / ORACLE AUTOMATION =====================
   async function taleoAutomation() {
     LOG('Taleo/Oracle automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2562,6 +2934,7 @@
   // ===================== WORKABLE AUTOMATION =====================
   async function workableAutomation() {
     LOG('Workable automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2709,6 +3082,7 @@
   // ===================== RIPPLING AUTOMATION =====================
   async function ripplingAutomation() {
     LOG('Rippling automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2753,6 +3127,7 @@
   // ===================== ADP AUTOMATION =====================
   async function adpAutomation() {
     LOG('ADP automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2786,6 +3161,7 @@
   // ===================== SUCCESSFACTORS AUTOMATION =====================
   async function successFactorsAutomation() {
     LOG('SuccessFactors automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2826,6 +3202,7 @@
   // ===================== JAZZHR AUTOMATION =====================
   async function jazzhrAutomation() {
     LOG('JazzHR automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2869,6 +3246,7 @@
   // ===================== HANDSHAKE AUTOMATION =====================
   async function handshakeAutomation() {
     LOG('Handshake automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -2934,6 +3312,7 @@
   // ===================== EIGHTFOLD AUTOMATION =====================
   async function eightfoldAutomation() {
     LOG('Eightfold automation starting...');
+    await clickGenericApplyButton(3000);
     const p = await getProfile();
     await loadAnswerBank();
 
@@ -4861,8 +5240,14 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
-      // Auto-start ATS-specific flow when detected and auto-apply is on
-      if (autoApply) {
+      // v12.0: Auto-start zero-touch flow on EVERY ATS when the URL looks like an
+      // actual application page (job/apply/position route). This makes Workday,
+      // Greenhouse, Lever, SmartRecruiters, Ashby, Workable, BambooHR, Taleo,
+      // SuccessFactors, iCIMS, Jobvite, Breezy, Rippling, ADP, Eightfold,
+      // Handshake, USAJobs, JazzHR, Paylocity, Freshteam etc. all auto-fire
+      // without the user having to flip the autoApply toggle. We still respect
+      // autoApply as an override when looksLikeApplicationPage() is conservative.
+      if (autoApply || looksLikeApplicationPage()) {
         await sleep(2000);
         await dispatchATSAutomation();
       }
