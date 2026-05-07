@@ -4413,6 +4413,46 @@
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
     // Simplify+ coin/token bypass display
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
+
+    // v12.3: kill the two banners shown in the user's screenshot:
+    //   1) "X Credits Left | Get Unlimited" footer (lives inside the sidebar shadow DOM)
+    //   2) "Upgrade to Turbo: Get Hired Faster! 42% Off" toast/banner
+    // Walk shadow roots (Jobright sidebar uses Plasmo CSUI shadow roots).
+    killUpgradeBanners(document);
+    $$('*').forEach(el => { if (el.shadowRoot) killUpgradeBanners(el.shadowRoot); });
+  }
+
+  // v12.3: scan a root (document or shadow root) for the two banners and hide
+  // them along with their nearest meaningful container (so we don't leave a
+  // hollow shell behind).
+  function killUpgradeBanners(root) {
+    if (!root || !root.querySelectorAll) return;
+    let nodes;
+    try { nodes = root.querySelectorAll('div, section, footer, header, a, span, p, button'); }
+    catch (_) { return; }
+    for (const el of nodes) {
+      // Only consider leaf-ish text containers (avoid hiding the whole sidebar).
+      const t = (el.innerText || el.textContent || '').trim();
+      if (!t || t.length > 80) continue;
+      if (/\b\d+\s*credits?\s*left\b/i.test(t) ||
+          /\bget\s+unlimited\b/i.test(t) ||
+          /\bupgrade\s+to\s+turbo\b/i.test(t) ||
+          /\bget\s+hired\s+faster\b/i.test(t) ||
+          /\b\d+\s*%\s*off\b/i.test(t)) {
+        // Hide the smallest meaningful ancestor (the banner row) — bubble up at
+        // most 4 levels so we kill the bar, not the whole panel.
+        let target = el;
+        for (let i = 0; i < 4; i++) {
+          const parent = target.parentElement;
+          if (!parent) break;
+          // Keep bubbling while the parent is a small wrapper around just this banner.
+          const ptxt = (parent.innerText || parent.textContent || '').trim();
+          if (ptxt.length > 200) break;
+          target = parent;
+        }
+        try { target.style.setProperty('display', 'none', 'important'); } catch (_) { }
+      }
+    }
   }
 
   // ===================== CSS =====================
@@ -4422,6 +4462,10 @@
     s.textContent = `
 .autofill-credit-row,.autofill-credit-text,.autofill-credit-text-right,.payment-entry,.plugin-setting-credits-tip{display:none!important}
 .ant-modal-root:has(.popup-modal-actions){display:none!important}
+/* v12.3: Hide "X Credits Left | Get Unlimited" and "Upgrade to Turbo" banners */
+[class*="credit"][class*="left"],[class*="credits-left"],[class*="credit-tip"],[class*="upgrade-turbo"],[class*="upgrade-banner"],[class*="turbo-banner"],[class*="get-unlimited"],[class*="upsell"]{display:none!important}
+[class*="UpgradeTurbo"],[class*="UpgradeBanner"],[class*="TurboBanner"],[class*="GetUnlimited"],[class*="CreditsLeft"],[class*="CreditTip"],[class*="UpsellBanner"]{display:none!important}
+a[href*="/turbo"],a[href*="/upgrade"],a[href*="/pricing"]{display:none!important}
 /* Hide review/feedback prompts after submission */
 .ant-modal-root:has(.good-reviews-popup-text),.ant-modal-root:has(.good-reviews-popup-title),.ant-modal-root:has(.leave-review-button),.ant-modal-root:has(.leave-review-text),.ant-modal-root:has(.CriticizeReviewsModal),.ant-modal-root:has(.GoodReviewsModel){display:none!important}
 [class*="review-popup"],[class*="review-modal"],[class*="feedback-modal"],[class*="good-reviews"],[class*="leave-review"]{display:none!important}
