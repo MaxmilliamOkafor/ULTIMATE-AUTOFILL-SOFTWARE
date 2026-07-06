@@ -1396,9 +1396,12 @@
 
   // ===================== DIRECT AUTOFILL FLOW (no sidebar) =====================
   async function directAutofillFlow() {
+    dismissCookieBanners();
     await triggerAutofill();
     await sleep(5000);
     await fixPhoneCountryCode();
+    // v12.2: Generic resume upload for any ATS file input that's still empty.
+    await uploadResumeGeneric();
     await fallbackFill();
     await sleep(1000);
     await fallbackFill();
@@ -1804,7 +1807,11 @@
     const o = opts || {};
     const maxAttempts = o.maxAttempts || 6;
     const fillFn = o.fillFn || fallbackFill;
+    // v12.2: Dismiss cookie/consent banners before we start so the autofill clicks
+    // (radios, dropdown buttons) don't get intercepted by a GDPR overlay.
+    dismissCookieBanners();
     let lastMissing = -1;
+    let stuckCount = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const missing = getMissingRequired();
       if (missing.length === 0) {
@@ -1812,14 +1819,22 @@
         return { ok: true, missing: [], attempts: attempt };
       }
       LOG(`Watchdog attempt ${attempt}/${maxAttempts}: ${missing.length} missing — ${missing.slice(0, 5).join(' | ')}${missing.length > 5 ? '...' : ''}`);
-      // Stuck: same missing count three times in a row → escalate to aggressive fill.
-      if (missing.length === lastMissing && attempt >= 3) {
-        await aggressiveFillMissing(missing);
+      // Stuck-page detection: same missing count for 2+ attempts → escalate.
+      if (missing.length === lastMissing) {
+        stuckCount++;
+        if (stuckCount >= 2) {
+          LOG('Watchdog: stuck — running aggressive escalation + cookie re-dismiss');
+          dismissCookieBanners();
+          await aggressiveFillMissing(missing);
+        } else {
+          await fillFn();
+        }
       } else {
+        stuckCount = 0;
         await fillFn();
-        await sleep(300);
-        await handleValidationErrors();
       }
+      await sleep(300);
+      await handleValidationErrors();
       lastMissing = missing.length;
       await sleep(400);
     }
@@ -1830,23 +1845,39 @@
 
   // Fill required fields that the regular fallback missed by binding to ANY visible
   // empty required input/select/radio/checkbox using best-guess values.
+  // v12.2: Type-aware defaults — never write "N/A" into a URL/email/phone/number
+  // field because the form will reject it on submit.
   async function aggressiveFillMissing(missingLabels) {
     const p = await getProfile();
     await loadAnswerBank();
-    const required = $$('input:not([type=hidden]):not([type=file]),textarea,select')
+    // Include shadow-root inputs so React/Plasmo-injected forms don't leak required fields.
+    const required = deepQueryAll('input:not([type=hidden]):not([type=file]),textarea,select')
       .filter(el => isVisible(el) && isFieldRequired(el) && !hasFieldValue(el));
     for (const el of required) {
       const lbl = getLabel(el) || el.name || el.placeholder || '';
+      const meta = ((lbl || '') + ' ' + (el.name || '') + ' ' + (el.id || '')).toLowerCase();
       // 1. Try profile-based guess
       let val = guessFieldValue(lbl, p, el);
       // 2. Then learned answer
       if (!val) val = getLearnedAnswer(lbl, el);
-      // 3. Then a sensible default per field type
+      // 3. Then a TYPE-AWARE sensible default — never write junk that fails validation.
       if (!val) {
-        if (el.type === 'email') val = p.email || '';
-        else if (el.type === 'tel' || /phone|mobile/i.test(el.name || el.id || '')) val = p.phone || '';
-        else if (el.type === 'url' || /url|link|website|profile/i.test(lbl)) val = p.linkedin_profile_url || p.linkedin || p.website_url || '';
-        else if (el.tagName === 'TEXTAREA') val = DEFAULTS.cover;
+        if (el.type === 'email' || /\bemail\b/.test(meta)) val = p.email || '';
+        else if (el.type === 'tel' || /phone|mobile|cell/.test(meta)) val = p.phone || '';
+        else if (el.type === 'url' || /\burl\b|\blink\b|website|portfolio/.test(meta)) val = p.website_url || p.website || p.linkedin_profile_url || p.linkedin || '';
+        else if (/linkedin/.test(meta)) val = p.linkedin_profile_url || p.linkedin || '';
+        else if (/github/.test(meta)) val = p.github_url || p.github || '';
+        else if (el.type === 'number' || /salary|years|experience|gpa|number/.test(meta)) {
+          if (/salary|compensation|pay/.test(meta)) val = String(p.expected_salary || DEFAULTS.salary);
+          else if (/years|experience/.test(meta)) val = DEFAULTS.years;
+          else if (/gpa/.test(meta)) val = p.gpa || '3.5';
+          else val = '0';
+        }
+        else if (el.type === 'date' || /\bdate\b/.test(meta)) {
+          const today = new Date(); today.setDate(today.getDate() + 14);
+          val = today.toISOString().split('T')[0];
+        }
+        else if (el.tagName === 'TEXTAREA') val = p.cover_letter || DEFAULTS.cover;
         else if (el.tagName === 'SELECT') {
           const opts = $$('option', el).filter(o => o.value && o.index > 0);
           if (opts.length) {
@@ -1856,8 +1887,11 @@
             continue;
           }
         }
+        // Generic text fallback — only safe when the field accepts free text.
         else val = 'N/A';
       }
+      // Sanity check: never write "N/A" into URL/email/phone/number/date inputs.
+      if (val === 'N/A' && /^(email|tel|url|number|date)$/i.test(el.type || '')) val = '';
       if (val && el.tagName !== 'SELECT') {
         el.focus();
         nativeSet(el, val);
@@ -3471,6 +3505,10 @@
 
   // ===================== RESUME/FILE UPLOAD AUTOMATION =====================
   async function tryResumeUpload() {
+    // v12.2: Try the generic DataTransfer-based uploader first (works on every ATS).
+    const generic = await uploadResumeGeneric();
+    if (generic) return true;
+
     // Look for file input fields (resume, cover letter)
     const fileInputs = $$('input[type="file"]').filter(el => {
       const lbl = getLabel(el);
@@ -3496,6 +3534,103 @@
       LOG('Drop zones found — Jobright sidebar handles resume upload');
     }
     return false;
+  }
+
+  // ===================== v12.2: GENERIC RESUME UPLOADER =====================
+  // Uses the SpeedyApply DataTransfer pattern (proven on Workday) but applies it to
+  // ANY ATS file input. Reads ua_resume_data from chrome.storage and injects the file
+  // bytes directly so React/Vue/Angular file pickers all see it as a real upload.
+  async function uploadResumeGeneric() {
+    const fileInputs = deepQueryAll('input[type="file"]').filter(el => {
+      // Skip non-resume uploads (avatar, photo, certificate, etc.)
+      const meta = ((getLabel(el) || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.accept || '')).toLowerCase();
+      if (/photo|avatar|profile.?pic|headshot|signature/.test(meta)) return false;
+      // Either explicit resume hint OR PDF accept type with no other hint
+      return /resume|cv|cover|document|upload|attach|file/.test(meta) || /pdf|application\/pdf|\.pdf|\.doc/.test(el.accept || '');
+    });
+    if (!fileInputs.length) return false;
+
+    const resumeData = await st.get('ua_resume_data');
+    if (!resumeData?.base64 || !resumeData?.fileName) return false;
+
+    let uploaded = 0;
+    for (const input of fileInputs) {
+      // Skip if already has a file
+      if (input.files && input.files.length > 0) continue;
+      // Skip if a sibling shows the file is already uploaded
+      const container = input.closest('div, fieldset, section, [class*="upload"], [class*="resume"]') || input.parentElement;
+      if (container?.querySelector('.file-name,[data-automation-id="file-name"],.upload-filename,[class*="uploaded"]')?.textContent?.trim()) continue;
+      try {
+        const byteString = atob(resumeData.base64.split(',').pop() || resumeData.base64);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const file = new File([ab], resumeData.fileName, { type: resumeData.mimeType || 'application/pdf' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        LOG(`Resume uploaded via DataTransfer: ${resumeData.fileName}`);
+        uploaded++;
+        await sleep(1200);
+      } catch (e) {
+        LOG('Generic resume upload failed: ' + e.message);
+      }
+    }
+    return uploaded > 0;
+  }
+
+  // ===================== v12.2: COOKIE / CONSENT BANNER DISMISSAL =====================
+  // Many job sites (Workday, BambooHR, Greenhouse-hosted careers, Workable, etc.) put
+  // a GDPR cookie banner on top of the page that blocks every click until dismissed.
+  // Run this once on init and again whenever a click target seems unreachable.
+  function dismissCookieBanners() {
+    // OneTrust (most common)
+    const ot = $('#onetrust-accept-btn-handler,#onetrust-pc-btn-handler,button[id*="accept-recommended" i]');
+    if (ot && isVisible(ot)) { LOG('Dismissing OneTrust cookie banner'); ot.click(); }
+    // Cookiebot
+    const cb = $('#CybotCookiebotDialogBodyButtonAccept,#CybotCookiebotDialogBodyLevelButtonAccept');
+    if (cb && isVisible(cb)) { LOG('Dismissing Cookiebot banner'); cb.click(); }
+    // TrustArc
+    const ta = $('.truste-button1,.truste-consent-button,#truste-consent-button');
+    if (ta && isVisible(ta)) { LOG('Dismissing TrustArc banner'); ta.click(); }
+    // Generic patterns
+    const generic = $$('button, a').find(b => {
+      if (!isVisible(b)) return false;
+      const t = (b.textContent || b.getAttribute('aria-label') || '').trim().toLowerCase();
+      return /^(accept(\s+all)?(\s+cookies)?|allow\s+all|got\s+it|i\s+(agree|accept)|ok|agree(\s+and\s+continue)?)$/i.test(t);
+    });
+    if (generic) { LOG('Dismissing generic cookie banner: ' + (generic.textContent || '').trim()); generic.click(); }
+    // Workable / Workday-style "Accept" inside [role=dialog]
+    $$('[role="dialog"], [class*="cookie" i], [class*="consent" i], [id*="cookie" i], [id*="consent" i]').forEach(banner => {
+      if (!isVisible(banner)) return;
+      const acceptBtn = banner.querySelector('button[class*="accept" i],button[id*="accept" i]') ||
+        $$('button', banner).find(b => /accept|agree|allow|ok|got it/i.test(b.textContent || ''));
+      if (acceptBtn) acceptBtn.click();
+    });
+  }
+
+  // ===================== v12.2: SHADOW-DOM-AWARE QUERY =====================
+  // Many modern ATS (Plasmo-injected widgets, custom-element-based forms) put inputs
+  // inside open shadow roots. document.querySelectorAll won't find them. This walks
+  // every shadow root reachable from document.
+  function deepQueryAll(selector, root) {
+    const out = [];
+    const start = root || document;
+    const walk = (node) => {
+      if (!node) return;
+      if (node.querySelectorAll) {
+        try { out.push(...node.querySelectorAll(selector)); } catch (_) { }
+      }
+      if (node.shadowRoot) walk(node.shadowRoot);
+      const children = node.querySelectorAll ? node.querySelectorAll('*') : [];
+      for (const c of children) {
+        if (c.shadowRoot && c.shadowRoot !== node) walk(c.shadowRoot);
+      }
+    };
+    walk(start);
+    return [...new Set(out)];
   }
 
   // ===================== FORM VALIDATION ERROR HANDLER =====================
@@ -4278,6 +4413,46 @@
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*credits?\s*available/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+\s*(credits?\s*available)/i, 'Unlimited $1'); });
     // Simplify+ coin/token bypass display
     $$('*').forEach(el => { if (el.children.length === 0 && /\d+\s*(coins?|tokens?)\s*(left|remaining|available)/i.test(el.textContent || '')) el.textContent = el.textContent.replace(/\d+(\s*(coins?|tokens?))/i, '∞$1'); });
+
+    // v12.3: kill the two banners shown in the user's screenshot:
+    //   1) "X Credits Left | Get Unlimited" footer (lives inside the sidebar shadow DOM)
+    //   2) "Upgrade to Turbo: Get Hired Faster! 42% Off" toast/banner
+    // Walk shadow roots (Jobright sidebar uses Plasmo CSUI shadow roots).
+    killUpgradeBanners(document);
+    $$('*').forEach(el => { if (el.shadowRoot) killUpgradeBanners(el.shadowRoot); });
+  }
+
+  // v12.3: scan a root (document or shadow root) for the two banners and hide
+  // them along with their nearest meaningful container (so we don't leave a
+  // hollow shell behind).
+  function killUpgradeBanners(root) {
+    if (!root || !root.querySelectorAll) return;
+    let nodes;
+    try { nodes = root.querySelectorAll('div, section, footer, header, a, span, p, button'); }
+    catch (_) { return; }
+    for (const el of nodes) {
+      // Only consider leaf-ish text containers (avoid hiding the whole sidebar).
+      const t = (el.innerText || el.textContent || '').trim();
+      if (!t || t.length > 80) continue;
+      if (/\b\d+\s*credits?\s*left\b/i.test(t) ||
+          /\bget\s+unlimited\b/i.test(t) ||
+          /\bupgrade\s+to\s+turbo\b/i.test(t) ||
+          /\bget\s+hired\s+faster\b/i.test(t) ||
+          /\b\d+\s*%\s*off\b/i.test(t)) {
+        // Hide the smallest meaningful ancestor (the banner row) — bubble up at
+        // most 4 levels so we kill the bar, not the whole panel.
+        let target = el;
+        for (let i = 0; i < 4; i++) {
+          const parent = target.parentElement;
+          if (!parent) break;
+          // Keep bubbling while the parent is a small wrapper around just this banner.
+          const ptxt = (parent.innerText || parent.textContent || '').trim();
+          if (ptxt.length > 200) break;
+          target = parent;
+        }
+        try { target.style.setProperty('display', 'none', 'important'); } catch (_) { }
+      }
+    }
   }
 
   // ===================== CSS =====================
@@ -4287,6 +4462,10 @@
     s.textContent = `
 .autofill-credit-row,.autofill-credit-text,.autofill-credit-text-right,.payment-entry,.plugin-setting-credits-tip{display:none!important}
 .ant-modal-root:has(.popup-modal-actions){display:none!important}
+/* v12.3: Hide "X Credits Left | Get Unlimited" and "Upgrade to Turbo" banners */
+[class*="credit"][class*="left"],[class*="credits-left"],[class*="credit-tip"],[class*="upgrade-turbo"],[class*="upgrade-banner"],[class*="turbo-banner"],[class*="get-unlimited"],[class*="upsell"]{display:none!important}
+[class*="UpgradeTurbo"],[class*="UpgradeBanner"],[class*="TurboBanner"],[class*="GetUnlimited"],[class*="CreditsLeft"],[class*="CreditTip"],[class*="UpsellBanner"]{display:none!important}
+a[href*="/turbo"],a[href*="/upgrade"],a[href*="/pricing"]{display:none!important}
 /* Hide review/feedback prompts after submission */
 .ant-modal-root:has(.good-reviews-popup-text),.ant-modal-root:has(.good-reviews-popup-title),.ant-modal-root:has(.leave-review-button),.ant-modal-root:has(.leave-review-text),.ant-modal-root:has(.CriticizeReviewsModal),.ant-modal-root:has(.GoodReviewsModel){display:none!important}
 [class*="review-popup"],[class*="review-modal"],[class*="feedback-modal"],[class*="good-reviews"],[class*="leave-review"]{display:none!important}
@@ -5240,6 +5419,10 @@
     const ats = detectATS();
     if (ats) {
       LOG(`ATS detected: ${ats}`);
+      // v12.2: Cookie/consent banners block clicks on every Workday, BambooHR,
+      // and Workable page. Dismiss them before the dispatcher runs so the
+      // Apply / Apply-Manually / Next clicks never get intercepted.
+      [500, 1500, 3000, 6000].forEach(ms => setTimeout(dismissCookieBanners, ms));
       // v12.0: Auto-start zero-touch flow on EVERY ATS when the URL looks like an
       // actual application page (job/apply/position route). This makes Workday,
       // Greenhouse, Lever, SmartRecruiters, Ashby, Workable, BambooHR, Taleo,
