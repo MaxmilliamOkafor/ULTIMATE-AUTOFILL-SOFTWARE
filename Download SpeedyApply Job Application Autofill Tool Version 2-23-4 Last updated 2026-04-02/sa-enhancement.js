@@ -1,4 +1,18 @@
-// === SPEEDYAPPLY ULTIMATE ENHANCEMENT v2.0 (built on 2.23.4) ===
+// === SPEEDYAPPLY ULTIMATE ENHANCEMENT v2.1 (built on 2.23.4) ===
+//
+// v2.1 MISFIRE FIX (this release):
+//   * The extension now does NOTHING on ordinary browsing. It only acts when ALL
+//     of these are true: (a) the site is a recognised ATS domain, (b) SpeedyApply's
+//     master "Autofill" toggle is ON, (c) the page is NOT a sign-in / auth / search /
+//     dashboard page, and (d) a real application FORM is present (Workday job/apply
+//     paths excepted, since their form loads behind the Apply button).
+//   * The global window.fetch / XMLHttpRequest override is GONE from normal pages.
+//     The premium bypass now runs ONLY on speedyapply.com and the extension's own
+//     pages, and only rewrites Supabase/SpeedyApply billing URLs — it never touches
+//     requests on unrelated third-party sites, and never rewrites arbitrary 402/403/429.
+//   * Cookie dismissal, autoClick forcing, storage seeding, and the Custom Answers
+//     panel are all gated behind the same application-page confirmation, so they
+//     never appear during random browsing.
 //
 // Adds a zero-touch layer on top of SpeedyApply 2.23.4's bundled content.js:
 //   1. Forces SpeedyApply's `autoClickNextPage` so Apply Manually + Next fire automatically.
@@ -100,40 +114,52 @@
     } catch (e) { LOG('unlockPremium error: ' + e.message); }
   }
 
-  // Intercept Supabase / billing API calls and return active-premium responses.
+  // v2.1 SAFETY: only touch the network / storage on hosts SpeedyApply actually
+  // talks to. This prevents the extension from interfering with ordinary browsing
+  // (the previous version overrode window.fetch on EVERY site and rewrote any
+  // 402/403/429 to 200, which broke unrelated pages).
+  const SA_PREMIUM_HOST = /(^|\.)supabase\.(co|in|red)$|(^|\.)speedyapply\.com$/i;
+  function isPremiumRelevantUrl(u) {
+    try { return SA_PREMIUM_HOST.test(new URL(u, location.href).hostname); }
+    catch (_) { return false; }
+  }
+  // Only the SpeedyApply web app + extension-origin pages need storage seeding /
+  // network rewrites from the content script. Everything else is left untouched.
+  const SA_HOST_RELEVANT = /(^|\.)speedyapply\.com$/i.test(location.hostname) ||
+    /^(chrome-extension|moz-extension):$/i.test(location.protocol);
+
+  // Intercept ONLY Supabase / SpeedyApply billing API calls. All other requests —
+  // on any site — pass straight through untouched.
   function installPremiumNetworkBypass() {
     const _fetch = window.fetch;
     window.fetch = async function () {
       const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
       try {
-        // Supabase REST: /rest/v1/subscriptions?... returning array
-        if (/\/rest\/v1\/subscriptions/i.test(u)) {
-          return new Response(JSON.stringify([PREMIUM_SUB]), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        // Supabase REST: /rest/v1/profiles when SpeedyApply checks premium on a profile row
-        if (/\/rest\/v1\/profiles/i.test(u) && /(select|premium|subscription|tier)/i.test(u)) {
-          // Return wrapped premium fields without breaking the existing profile shape.
-          const r = await _fetch.apply(window, arguments).catch(() => null);
-          if (r && r.ok) {
-            try {
-              const body = await r.clone().json();
-              const enrich = row => ({ ...(row || {}), is_premium: true, premium: true, tier: 'premium', plan: 'premium', subscription_status: 'active' });
-              const out = Array.isArray(body) ? body.map(enrich) : enrich(body);
-              return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
-            } catch (_) { return r; }
+        if (isPremiumRelevantUrl(u)) {
+          // Supabase REST: /rest/v1/subscriptions -> active premium row.
+          if (/\/rest\/v1\/subscriptions/i.test(u)) {
+            return new Response(JSON.stringify([PREMIUM_SUB]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          // Supabase REST: /rest/v1/profiles premium check -> enrich, keep shape.
+          if (/\/rest\/v1\/profiles/i.test(u) && /(select|premium|subscription|tier)/i.test(u)) {
+            const r = await _fetch.apply(window, arguments).catch(() => null);
+            if (r && r.ok) {
+              try {
+                const body = await r.clone().json();
+                const enrich = row => ({ ...(row || {}), is_premium: true, premium: true, tier: 'premium', plan: 'premium', subscription_status: 'active' });
+                const out = Array.isArray(body) ? body.map(enrich) : enrich(body);
+                return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
+              } catch (_) { return r; }
+            }
+          }
+          // SpeedyApply/Supabase premium/billing endpoints -> active.
+          if (/\/(premium|billing|checkout|paywall|subscribe|trial|entitlement)\b/i.test(u)) {
+            return new Response(JSON.stringify({ success: true, active: true, premium: true, isPremium: true, tier: 'premium', plan: 'premium', status: 'active', subscription: PREMIUM_SUB, expiresAt: FAR_FUTURE, features: { multipleProfiles: true, smartScoring: true, generatedResponses: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
           }
         }
-        // Generic premium / billing / checkout / paywall endpoints
-        if (/\/(premium|billing|checkout|paywall|subscribe|trial|plan|entitlement)/i.test(u)) {
-          return new Response(JSON.stringify({ success: true, active: true, premium: true, isPremium: true, tier: 'premium', plan: 'premium', status: 'active', subscription: PREMIUM_SUB, expiresAt: FAR_FUTURE, features: { multipleProfiles: true, smartScoring: true, generatedResponses: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        // Pass-through but rewrite 402/403/429 to 200 success for any other API call
-        // that might gate premium behind a billing error.
-        const r = await _fetch.apply(window, arguments);
-        if (r.status === 402 || r.status === 403 || r.status === 429) {
-          return new Response(JSON.stringify({ success: true, active: true, premium: true, isPremium: true, tier: 'premium', status: 'active', expiresAt: FAR_FUTURE }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        return r;
+        // Everything else — including all third-party sites — passes through
+        // completely untouched. No status rewriting, no interference.
+        return _fetch.apply(window, arguments);
       } catch (e) { return _fetch.apply(window, arguments); }
     };
 
@@ -142,26 +168,29 @@
     const _xhrSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function () {
       const url = this._sa_url || '';
-      if (/\/rest\/v1\/subscriptions/i.test(url) || /\/(premium|billing|checkout|paywall|subscribe|trial|entitlement)/i.test(url)) {
+      if (isPremiumRelevantUrl(url) && (/\/rest\/v1\/subscriptions/i.test(url) || /\/(premium|billing|checkout|paywall|subscribe|trial|entitlement)\b/i.test(url))) {
         const s = this;
         const body = JSON.stringify(/\/rest\/v1\/subscriptions/i.test(url) ? [PREMIUM_SUB] : { success: true, active: true, premium: true, isPremium: true, tier: 'premium', status: 'active', subscription: PREMIUM_SUB, expiresAt: FAR_FUTURE });
-        Object.defineProperty(s, 'responseText', { get: () => body });
-        Object.defineProperty(s, 'response', { get: () => body });
-        Object.defineProperty(s, 'status', { get: () => 200 });
-        Object.defineProperty(s, 'readyState', { get: () => 4 });
+        Object.defineProperty(s, 'responseText', { configurable: true, get: () => body });
+        Object.defineProperty(s, 'response', { configurable: true, get: () => body });
+        Object.defineProperty(s, 'status', { configurable: true, get: () => 200 });
+        Object.defineProperty(s, 'readyState', { configurable: true, get: () => 4 });
         setTimeout(() => { try { s.onreadystatechange?.(); s.onload?.(); } catch (_) { } }, 30);
         return;
       }
       return _xhrSend.apply(this, arguments);
     };
-
-    LOG('Premium network bypass installed (fetch + XHR)');
   }
 
-  // Run the network bypass IMMEDIATELY (before SpeedyApply's first API call) and
-  // seed storage flags asynchronously.
-  installPremiumNetworkBypass();
-  unlockPremium();
+  // Seed premium storage flags + install the (host-scoped) network bypass ONLY on
+  // the SpeedyApply web app / extension pages. On every other site we do nothing
+  // here — the content script must not seed storage or touch fetch during normal
+  // browsing. (The extension's own options/popup/sidepanel pages are handled
+  // separately by sa-premium-unlock.js.)
+  if (SA_HOST_RELEVANT) {
+    installPremiumNetworkBypass();
+    unlockPremium();
+  }
 
   // ===================== DOM HELPERS =====================
   const $ = (s, r) => (r || document).querySelector(s);
@@ -563,6 +592,55 @@
     return null;
   }
 
+  // ===================== v2.1: STRICT PAGE-TYPE GATING (stop misfires) =====================
+  // The extension must NEVER run its fill/click flow on sign-in, auth, search,
+  // dashboard, or listing pages — only on an actual application FORM. This is the
+  // core fix for "SpeedyApply misfiring on random unrelated browsing".
+  function isAuthOrNonApplicationPage() {
+    const u = location.href.toLowerCase();
+    const p = location.pathname.toLowerCase();
+    // Sign-in / auth / verification / account pages — never touch these.
+    if (/sign[_-]?in|sign[_-]?up|log[_-]?in|log[_-]?out|\/login|\/register|\/signup|\/auth\b|\/sso\b|\/oauth|password|\/reset|\/verify|\/confirm|forgot|two[_-]?factor|\/mfa\b|\/otp\b|security[_-]?code|users\/sign|magic[_-]?link/i.test(u)) return true;
+    // Search / browse / dashboard / account / settings pages (no specific application).
+    if (/\/search(\/|$|\?)|\/browse|\/explore|\/results|\/saved|\/dashboard|\/account(\/|$)|\/settings(\/|$)|\/profile(\/|$)|\/messages|\/notifications/i.test(p)) return true;
+    return false;
+  }
+
+  // True only when a real application FORM is present on the page.
+  function hasApplicationForm() {
+    // Workday apply-flow containers.
+    if ($('[data-automation-id="applyFlowContainer"],[data-automation-id="quickApplyPage"],[data-automation-id="applyFlowMyInfoPage"],[data-automation-id="contactInformationPage"],[data-automation-id="applyFlowAutoFillPage"],[data-automation-id="applyFlowForm"]')) return true;
+    // A name + email input pair (classic application form).
+    const nameField = deepQueryAll('input').some(i => isVisible(i) && /first[_ ]?name|full[_ ]?name|legal[_ ]?name/i.test((i.name || '') + ' ' + (i.id || '') + ' ' + (getLabel(i) || '')));
+    const emailField = deepQueryAll('input[type=email],input[name*="email" i],input[id*="email" i]').some(isVisible);
+    if (nameField && emailField) return true;
+    // A resume/CV upload field.
+    const resumeUpload = deepQueryAll('input[type=file]').some(f => {
+      const meta = (getLabel(f) || '') + ' ' + (f.name || '') + ' ' + (f.id || '') + ' ' + (f.accept || '');
+      return /resume|cv|cover|attach|upload/i.test(meta) || /pdf/i.test(f.accept || '');
+    });
+    if (resumeUpload) return true;
+    // An explicit "Apply for this job / Application" heading alongside a form control.
+    const heading = $$('h1,h2,h3,legend,[role="heading"]').some(h => /apply for (this )?(job|position|role)|^\s*application\s*$|submit your application/i.test((h.textContent || '').trim()));
+    if (heading && $('form input:not([type=hidden]),form textarea,form select')) return true;
+    return false;
+  }
+
+  function isApplicationFormPage() {
+    if (isAuthOrNonApplicationPage()) return false;
+    return hasApplicationForm();
+  }
+
+  // Respect SpeedyApply's own master "Autofill Enabled/Disabled" toggle. When the
+  // user flips it off in the popup, we do nothing at all. Defaults ON when unset.
+  async function isAutofillEnabled() {
+    try {
+      const v = await st.get('autofillEnabled');
+      if (v === false || v === 'false' || v === 0) return false;
+      return true;
+    } catch (_) { return true; }
+  }
+
   // ===================== APPLY-BUTTON CLICKERS =====================
   async function workdayClickApply() {
     if (/\/apply(\/|$)/i.test(location.pathname)) return true;
@@ -913,7 +991,11 @@
 
   async function runGenericATSFlow() {
     LOG('Generic ATS flow starting');
-    await genericApplyClick(3000);
+    // Only click "Apply" if the form isn't already on the page. Since init() only
+    // runs this flow once a real form is confirmed present, this is normally a
+    // no-op — it exists purely for the rare ATS where clicking Apply reveals the
+    // remaining fields in-place. Never navigates away from a form that's showing.
+    if (!hasApplicationForm()) await genericApplyClick(3000);
     await sleep(1500);
     dismissCookieBanners();
     await uploadResumeGeneric();
@@ -1030,26 +1112,47 @@
     function escapeHtml(s) { return (s + '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   }
 
-  // ===================== INIT =====================
+  // ===================== INIT (v2.1: strict, no misfires) =====================
   async function init() {
     if (window.self !== window.top) return;
-    await loadCustomAnswers();
-    dismissCookieBanners();
-    await ensureAutoClickEnabled();
 
+    // Gate 1: only ever act on a recognised ATS domain. On every other site the
+    // content script does nothing at all — no fill, no clicks, no panel, no
+    // cookie handling, no storage writes.
     const ats = detectATS();
-    if (ats) {
-      LOG(`ATS detected: ${ats}`);
-      [500, 1500, 3000, 6000].forEach(ms => setTimeout(dismissCookieBanners, ms));
-      // Inject the panel on ATS pages so the user can edit their answers anywhere.
-      setTimeout(injectCustomAnswersPanel, 1500);
-      await sleep(2000);
-      if (ats === 'Workday') await runWorkdayFlow();
-      else await runGenericATSFlow();
-    } else {
-      // Still inject the panel on non-ATS pages so the user can manage answers anywhere.
-      setTimeout(injectCustomAnswersPanel, 2000);
+    if (!ats) return;
+
+    // Gate 2: respect SpeedyApply's master Autofill toggle. If the user disabled
+    // autofill in the popup, do absolutely nothing.
+    if (!(await isAutofillEnabled())) { LOG('Autofill disabled by user — standing down'); return; }
+
+    // Gate 3: never act on sign-in / auth / search / dashboard pages.
+    if (isAuthOrNonApplicationPage()) { LOG('ATS domain but non-application page — standing down'); return; }
+
+    // Gate 4: require an actual application context.
+    //  - Workday: the job/apply page is the entry point (the form loads behind
+    //    the Apply button), so a job/apply/details path is enough.
+    //  - Every other ATS: a real application FORM must be present. We wait briefly
+    //    for SPAs to render, then re-check once. If no form appears, stand down.
+    const isWdJob = ats === 'Workday' && /\/job\/|\/details\/|\/apply(\/|$)/i.test(location.pathname);
+    let ready = isWdJob || hasApplicationForm();
+    if (!ready) {
+      const appeared = await waitFor(() => (isAuthOrNonApplicationPage() ? null : (hasApplicationForm() ? document.body : null)), 6000);
+      ready = !!appeared;
     }
+    if (!ready) { LOG(`ATS ${ats} detected but no application form — standing down`); return; }
+
+    LOG(`ATS application page confirmed: ${ats}`);
+    await loadCustomAnswers();
+    await ensureAutoClickEnabled();
+    dismissCookieBanners();
+    [500, 1500, 3000].forEach(ms => setTimeout(dismissCookieBanners, ms));
+    // Panel only appears on confirmed application pages (not random browsing).
+    setTimeout(injectCustomAnswersPanel, 1200);
+
+    await sleep(1500);
+    if (ats === 'Workday') await runWorkdayFlow();
+    else await runGenericATSFlow();
   }
 
   if (document.readyState === 'loading') {
